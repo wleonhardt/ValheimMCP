@@ -140,7 +140,7 @@ to generate `BepInEx/config/valheimmcp.yml`, then edit it if needed.
 ## Build
 
 ```sh
-dotnet build src/ValheimMCP/ValheimMCP.csproj -c Release
+dotnet build ValheimMCP.csproj -c Release
 ```
 
 Output lands directly in `BepInEx/plugins/ValheimMCP/`. The build paths in the
@@ -207,11 +207,11 @@ There are **no terrain-editing tools** by design.
 You need the game's managed assemblies and BepInEx core libraries, which are **not** in this repository (they are Iron Gate's and BepInEx's files). Copy them to `ext/lib/` (`core/0Harmony.dll`, `core/BepInEx.dll`, `Managed/assembly_valheim.dll`, `assembly_utils.dll`, `UnityEngine*.dll`) or pass `-p:LibDir=/path/to/lib`.
 
 ```bash
-dotnet build -c Release ValheimMCP.csproj           # core plugin
-dotnet build -c Release ext/HubnerExt.csproj        # client extension
-dotnet build -c Release ext/HubnerExtServer.csproj  # server extension
+dotnet build -c Release ValheimMCP.csproj -p:OutputPath="$PWD/out/"   # core plugin -> ./out/ValheimMCP.dll (the default OutputPath is a r2modman profile)
+dotnet build -c Release ext/HubnerExt.csproj                          # client extension -> ./out/HubnerExt.dll (reads ./out/ValheimMCP.dll and ext/lib)
+dotnet build -c Release ext/HubnerExtServer.csproj                    # server extension
 ```
-Copy `ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubner-ext/`, and `config/valheimmcp.client.yml` or `config/valheimmcp.server.yml` to `BepInEx/config/valheimmcp.yml`.
+Override any reference location with `-p:McpDll=/path/ValheimMCP.dll` or `-p:LibDir=/path/lib`. Copy `out/ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubner-ext/`, and `config/valheimmcp.client.yml` or `config/valheimmcp.server.yml` to `BepInEx/config/valheimmcp.yml`.
 
 ## Python client (`python/`)
 `mcp.py` is a tiny MCP-over-HTTP client; `hubner.py` wraps the tools (`render`, `walk`, `plan_apply`, `go_fast`, `server_writes`, ...). Environment: `HUBNER_URL` (default `http://127.0.0.1:8731/mcp`), `HUBNER_SERVER_SSH`, `HUBNER_GATE_FLAG`, `HUBNER_LAUNCH`.

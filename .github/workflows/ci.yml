@@ -1,0 +1,43 @@
+# Lint-only CI. The plugin cannot be compiled on a runner: it needs Iron Gate's and BepInEx's assemblies, which are not redistributable and are not in this repository.
+# This job checks what can be checked without them: the Python client compiles, the project/config files parse, and no machine-specific paths, private addresses or secrets are committed.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python client compiles
+        run: python3 -m compileall -q python
+
+      - name: Project and config files parse
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils >/dev/null
+          xmllint --noout ValheimMCP.csproj ext/*.csproj
+          python3 - <<'PY'
+          import glob, json
+          for f in glob.glob("Thunderstore/manifest.json"): json.load(open(f))
+          PY
+
+      - name: No absolute paths, private addresses or secrets in tracked files
+        run: |
+          set -u
+          pat='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+/|[A-Z]:[\\/]Users|10\.11\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+          if git grep -nIE "$pat" -- . ':!dist' ':!.github/workflows/ci.yml'; then
+            echo "machine-specific path, private address or secret found above" >&2; exit 1
+          fi
+
+      - name: No game or loader binaries committed (outside dist/)
+        run: |
+          if git ls-files | grep -iE '\.(dll|exe|pdb)$' | grep -v '^dist/'; then
+            echo "binaries must not be committed (use dist/ for release zips)" >&2; exit 1
+          fi
