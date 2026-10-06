@@ -190,7 +190,7 @@ This fork keeps upstream's console bridge and camera and adds a pluggable **tool
 Small on purpose so upstream merges stay easy: `ToolRegistry.cs` and `ExtensionHost.cs` are new; `McpServer.cs`, `ModConfig.cs` and `Plugin.cs` change by about 40 lines (tools are looked up in the registry, per-tool write gating and deny lists, extension loading).
 
 ## The extension (`ext/`)
-About 84 tools, in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no physics or camera, so it carries data tools only.
+About 84 tools, in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no camera, and no physics until a virtual peer exists (see below).
 
 | Area | Tools (examples) |
 |---|---|
