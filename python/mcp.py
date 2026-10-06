@@ -4,7 +4,9 @@ import os
 URL = os.environ.get('HUBNER_URL', 'http://127.0.0.1:8731/mcp')   # 8731 = Ducky sandbox client; http://127.0.0.1:8741/mcp = dedicated-server twin (tunnel-server.sh)
 def rpc(method, params=None, id=1):
     body = json.dumps({'jsonrpc': '2.0', 'id': id, 'method': method, 'params': params or {}}).encode()
-    req = urllib.request.Request(URL, body, {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'})
+    hdr = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
+    if os.environ.get('HUBNER_TOKEN'): hdr['Authorization'] = 'Bearer ' + os.environ['HUBNER_TOKEN']       # server.token in valheimmcp.yml (optional)
+    req = urllib.request.Request(URL, body, hdr)
     with urllib.request.urlopen(req, timeout=60) as r: return json.loads(r.read())
 def call(name, args=None):
     return rpc('tools/call', {'name': name, 'arguments': args or {}})['result']

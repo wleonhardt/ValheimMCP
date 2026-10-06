@@ -15,6 +15,7 @@ namespace ValheimMCP
         public const string FileName = "valheimmcp.yml";
 
         public static string Host = "127.0.0.1";
+        public static string Token = "";                      // optional bearer token (server.token); empty = no token check
         public static int Port = 8731;
         public static int CommandTimeoutMs = 15000;
 
@@ -51,6 +52,7 @@ namespace ValheimMCP
 
                 var y = MiniYaml.Parse(File.ReadAllText(path));
                 Host = y.Get("server.host", Host);
+                Token = y.Get("server.token", Token) ?? "";
                 Port = y.GetInt("server.port", Port);
                 CommandTimeoutMs = y.GetInt("server.commandTimeoutMs", CommandTimeoutMs);
                 RenderDefaultSize = y.GetInt("render.defaultSize", RenderDefaultSize);

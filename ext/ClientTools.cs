@@ -18,54 +18,59 @@ namespace HubnerExt
         public static void Register(ToolRegistry r)
         {
             // ---- perception (read-only)
-                        r.Add("terrain_info",
+                        Reg.Add(r, "terrain_info",
                 "True terrain at (x,z) as the running game sees it (includes any terrain edits): ground height, solid height (top of terrain OR structures), what that solid is, surface normal, biome, water, and whether the zone is loaded. Unloaded zones return loaded=false (teleport near first).",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", Read.TerrainInfo);
-            r.Add("terrain_grid",
+            Reg.Add(r, "terrain_grid",
                 "Sample true ground height on a grid. Returns rows of heights (null where the zone is not loaded). Max 6000 samples.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"step\":{\"type\":\"number\",\"description\":\"metres between samples (default 4)\"},\"solid\":{\"type\":\"boolean\",\"description\":\"sample top of structures too (default false = terrain only)\"}},\"required\":[\"x0\",\"z0\",\"x1\",\"z1\"]}", Read.TerrainGrid);
-            r.Add("raycast",
+            Reg.Add(r, "raycast",
                 "Cast a ray (origin x,y,z; direction dx,dy,dz) against solid world geometry. Returns hit point, normal, collider/prefab name, ZDO id.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"dz\":{\"type\":\"number\"},\"maxDist\":{\"type\":\"number\"}},\"required\":[\"x\",\"y\",\"z\",\"dx\",\"dy\",\"dz\"]}", Read.Raycast);
-            r.Add("object_info",
+            Reg.Add(r, "object_info",
                 "Everything about one object by id (format 'ID:USERID' as RCON prints): prefab, transform, creator, health, support, sign text, bounds, components.",
                 "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}", Read.ObjectInfo);
-            r.Add("prefab_info",
+            Reg.Add(r, "prefab_info",
                 "Authoritative geometry of a prefab: pivot offset, size (local bounds), colliders, snap points, front direction, piece category/comfort/ground rules, structural material, key components. Replaces guessing from a catalogue.",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}", Read.PrefabInfo);
-                                    r.Add("zone_state",
+                                    Reg.Add(r, "zone_state",
                 "Is the area around (x,z) loaded and populated? Poll after teleport. Returns zoneLoaded, ground height ok, instances within radius.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", Read.ZoneState);
-            r.Add("teleport",
+            Reg.Add(r, "teleport",
                 "Teleport the local player (the sandbox character) and switch on god mode so teleports and falls cannot hurt it. snap: solid (default, highest solid incl. roofs) | ground (terrain only) | none (keep altitude). y optional: defaults to solid ground + 1 when the zone is loaded, otherwise keeps the current altitude (groundSnapped=false: call again after zone_state reports loaded).",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"snap\":{\"type\":\"string\"},\"distant\":{\"type\":\"boolean\"}},\"required\":[\"x\",\"z\"]}", Read.Teleport);
-            r.Add("render_ex",
+            Reg.Add(r, "render_ex",
                 "Off-screen render with cutaway controls: fov, near clip, orthographic top-down, hideAboveY (hides every object whose bounds are entirely above that height, to see into rooms through roofs), hidePrefabs (comma substrings to hide). Same yaw/pitch/dist convention as render_view (yaw = camera azimuth, 0 = camera north of target).",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"yaw\":{\"type\":\"number\"},\"pitch\":{\"type\":\"number\"},\"dist\":{\"type\":\"number\"},\"size\":{\"type\":\"number\"},\"fov\":{\"type\":\"number\"},\"near\":{\"type\":\"number\"},\"ortho\":{\"type\":\"boolean\"},\"orthoSize\":{\"type\":\"number\"},\"hideAboveY\":{\"type\":\"number\"},\"hidePrefabs\":{\"type\":\"string\"},\"far\":{\"type\":\"number\"},\"hideCentreAboveY\":{\"type\":\"number\"},\"avoid\":{\"type\":\"boolean\"},\"hideTrees\":{\"type\":\"boolean\"},\"hidePlan\":{\"type\":\"string\"},\"cutRadius\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", Render.Ex);
-            r.Add("walk_check",
+            Reg.Add(r, "walk_check",
                 "Simulate a player walking a polyline of waypoints [[x,y,z],...] with a capsule (radius, height, stepHeight, maxSlopeDeg). Closed doors are treated as passable (players open them). Reports the first blocking collider, headroom failures and unsupported drops. Use it to prove stairs, doors and corridors are walkable.",
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"radius\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"},\"stepHeight\":{\"type\":\"number\"},\"maxSlopeDeg\":{\"type\":\"number\"}},\"required\":[\"points\"]}", Walk.Check);
-            r.Add("stability_scan",
+            Reg.Add(r, "stability_scan",
                 "Structural support values (the game's own, from each piece) in a box: min/avg, list of pieces below a threshold (will collapse when NoBuildingFall is off).",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"threshold\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}},\"required\":[\"x0\",\"z0\",\"x1\",\"z1\"]}", Read.Stability);
-            r.Add("inspect_type", "Debug: list fields/methods of a game type by name (substring filter on members).",
+            Reg.Add(r, "inspect_type", "Debug: list fields/methods of a game type by name (substring filter on members).",
                 "{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\"},\"filter\":{\"type\":\"string\"}},\"required\":[\"type\"]}", Read.InspectType);
             
             // ---- control (gated by tools.write)
-            r.Add("spawn",
+            Reg.Add(r, "spawn",
                 "Spawn pieces/objects. items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz],scale,text,tag,creator,snap:'ground'}] (max 1000 per call). y is the prefab pivot height unless snap='ground'. 'text' sets sign text; 'tag' sets a portal's tag (required for portal prefabs); 'creator' (long) marks the piece player-built. Only loaded zones; set force=true to override. Returns ids; every spawn is journaled for undo.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"force\":{\"type\":\"boolean\"}},\"required\":[\"items\"]}", Write.Spawn, true);
-            r.Add("modify",
+            Reg.Add(r, "modify",
                 "Modify objects by id: x,y,z, yaw|rot, scale, text, tag, health. Journaled.",
                 "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}}},\"required\":[\"edits\"]}", Write.Modify, true);
-            r.Add("delete",
+            Reg.Add(r, "delete",
                 "Delete objects by ids, or by box+prefab filter (requires confirm=true and a count <= max, default 500). dryRun=true only counts. Journaled for undo.",
                 "{\"type\":\"object\",\"properties\":{\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"prefab\":{\"type\":\"string\"},\"built\":{\"type\":\"boolean\"},\"max\":{\"type\":\"number\"},\"confirm\":{\"type\":\"boolean\"},\"dryRun\":{\"type\":\"boolean\"}}}", Write.Delete, true);
-            r.Add("undo", "Undo the last n journaled write operations (spawn->delete, delete->respawn, modify->restore).",
+            Reg.Add(r, "undo", "Undo the last n journaled write operations (spawn->delete, delete->respawn, modify->restore).",
                 "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"number\"}}}", Write.Undo, true);
+#if !SERVER
             Place.Register(r);
             Control.Register(r);
+#endif
             Geo.Register(r);
+#if !SERVER
+            Insight.Register(r);
+#endif
         }
     }
 

@@ -27,9 +27,11 @@ namespace HubnerExt
             SharedTools.Register(r);
             Plans.Register(r);
             Audit.Register(r);
+            InsightShared.Register(r);
+            VirtualPeers.Register(r);
             Journal.Load();
+            ClientTools.Register(r);                                    // on the server only the whitelisted physics/read tools register (see Reg.cs)
 #if !SERVER
-            ClientTools.Register(r);
             Env.Register(r);
 #endif
         }

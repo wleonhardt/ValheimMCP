@@ -68,6 +68,7 @@ def teleport_and_wait(x, z, y=None, timeout=60, radius=30, min_instances=1):
     import time
     args = {'x': x, 'z': z}
     if y is not None: args['y'] = y
+    else: args['snap'] = 'ground'                 # without y or snap the tool keeps the old height; below the new ground the game silently ignores the teleport (walk_ward hung 120 s on it, 2026-10-06)
     for attempt in range(40):                    # the character respawns now and then (death, scene fade): wait for it instead of failing
         try: first = _teleport(**args); break
         except RuntimeError as e:
@@ -374,3 +375,20 @@ def ensure_client(timeout=300):
         if up(): return True
         time.sleep(5)
     raise RuntimeError(f'sandbox client not in the world after {timeout}s')
+
+
+class vpeer:
+    """with vpeer(x, z, minutes=20): ...   make the dedicated server instantiate the world around (x, z) (virtual peer) so the server twin's physics tools
+    (raycast, surface_probe, stability_scan, headroom, walk_check, terrain_info) work with no client connected. Uses the server twin URL (HUBNER_SERVER_URL, default
+    http://127.0.0.1:8741/mcp) and the write gate; always removes the peer again."""
+    def __init__(self, x, z, minutes=20, name='py', wait=12): self.x, self.z, self.minutes, self.name, self.wait = x, z, minutes, name, wait
+    def __enter__(self):
+        import mcp, os, time
+        self._old = mcp.URL; mcp.URL = os.environ.get('HUBNER_SERVER_URL', 'http://127.0.0.1:8741/mcp')
+        with server_writes(): tool('vpeer_add', name=self.name, x=self.x, z=self.z, minutes=self.minutes)
+        time.sleep(self.wait); return self
+    def __exit__(self, *exc):
+        import mcp
+        try: tool('vpeer_remove', name=self.name)
+        finally: mcp.URL = self._old
+        return False

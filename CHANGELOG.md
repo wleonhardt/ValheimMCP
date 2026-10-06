@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+- Hardening: Origin/Host validation, 8 MB body cap, optional bearer token (`server.token`).
+- Server twin: virtual peers (`vpeer_*`) give the dedicated server real colliders and physics; whitelisted physics tools run there.
+- Chat: server-side capture (`Say` and `ChatMessage`), `chat_send`, `chat_bubble`.
+- New tools: `prefab_find`, `visible_objects`, `interact`, `probe_fan`, `base_survey`, `player_status`.
+
 - Core: tool registry (`ToolRegistry.cs`) and hot-reloadable extension host (`ExtensionHost.cs`); per-tool write gating.
 - `ext/`: the Hubner extension (world reading, idempotent plan building, walking and rendering verification, environment control, chat capture) for client and dedicated server.
 - `python/`: MCP client and helpers; `config/`: example client and server configs.

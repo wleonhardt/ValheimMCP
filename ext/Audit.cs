@@ -42,20 +42,26 @@ namespace HubnerExt
         // ------------------------------------------------------------------ hooks (jobs run on ZNetScene.Update, which exists on client and server)
         public static void Install()
         {
-            try
+            if (_h != null) return;
+            _h = new Harmony("hubner.ext.audit." + Guid.NewGuid().ToString("N"));
+            HookError = "";
+            Func<string, MethodBase, string, bool, bool> patch = (label, m, hook, prefix) =>
             {
-                if (_h != null) return;
-                _h = new Harmony("hubner.ext.audit." + Guid.NewGuid().ToString("N"));
-                var m = typeof(ZNetScene).GetMethod("Update", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (m != null) _h.Patch(m, postfix: new HarmonyMethod(typeof(Audit).GetMethod("SceneTick", BindingFlags.Static | BindingFlags.NonPublic)));
-                var cm = typeof(Chat).GetMethod("OnNewChatMessage", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (cm != null) _h.Patch(cm, postfix: new HarmonyMethod(typeof(Audit).GetMethod("ChatMsg", BindingFlags.Static | BindingFlags.NonPublic)));
-                var hr = typeof(ZRoutedRpc).GetMethod("HandleRoutedRPC", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (hr != null) _h.Patch(hr, prefix: new HarmonyMethod(typeof(Audit).GetMethod("RoutedChat", BindingFlags.Static | BindingFlags.NonPublic)));       // server: every routed RPC passes here, ChatMessage is one of them
-                var sv = typeof(ZNet).GetMethod("SaveWorld", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (sv != null) _h.Patch(sv, prefix: new HarmonyMethod(typeof(Audit).GetMethod("BeforeSave", BindingFlags.Static | BindingFlags.NonPublic)));      // every save, autosaves included
-            }
-            catch (Exception ex) { HookError = ex.Message; }
+                try
+                {
+                    if (m == null) { HookError += label + ": method not found; "; return false; }
+                    var hm = new HarmonyMethod(typeof(Audit).GetMethod(hook, BindingFlags.Static | BindingFlags.NonPublic));
+                    if (prefix) _h.Patch(m, prefix: hm); else _h.Patch(m, postfix: hm);
+                    return true;
+                }
+                catch (Exception ex) { HookError += label + ": " + ex.Message + "; "; return false; }
+            };
+            const BindingFlags F = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            patch("ZNetScene.Update", typeof(ZNetScene).GetMethod("Update", F), "SceneTick", false);
+            patch("Chat.OnNewChatMessage", typeof(Chat).GetMethod("OnNewChatMessage", F), "ChatMsg", false);                                  // client: every message the player would see
+            patch("ZRoutedRpc.HandleRoutedRPC", typeof(ZRoutedRpc).GetMethod("HandleRoutedRPC", F), "RoutedChat", true);                     // messages addressed to this node
+            patch("ZRoutedRpc.RPC_RoutedRPC", typeof(ZRoutedRpc).GetMethod("RPC_RoutedRPC", F), "RelayedChat2", true);                       // server: every message a client sends, before it is relayed
+            patch("ZNet.SaveWorld", typeof(ZNet).GetMethod("SaveWorld", F), "BeforeSave", true);                                              // every save, autosaves included
         }
         public static void Uninstall() { try { if (_h != null) _h.UnpatchSelf(); } catch { } _h = null; }
         internal static string HookError = "";
@@ -73,7 +79,7 @@ namespace HubnerExt
                     if (o is string st) { text = st; continue; }
                     if (o is Talker.Type tt) { type = tt.ToString(); continue; }
                     var t = o.GetType();
-                    if (t.Name == "UserInfo") { try { var m = t.GetMethod("GetName"); name = (m != null ? m.Invoke(o, null) as string : null) ?? ""; } catch { } }
+                    if (t.Name == "UserInfo") name = UiName(o);
                 }
                 if (text == null) return;
                 lock (ChatRows)
@@ -96,6 +102,26 @@ namespace HubnerExt
             catch { }
             return "";
         }
+        static void RelayedChat(object __0)                                                   // __0 = ZRpc, the package is the second argument
+        {
+            try
+            {
+                if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+            }
+            catch { return; }
+        }
+        static void RelayedChat2(object __0, object __1)
+        {
+            try
+            {
+                var pkg = __1 as ZPackage; if (pkg == null) return;
+                var tp = typeof(ZRoutedRpc).GetNestedType("RoutedRPCData", BindingFlags.Public | BindingFlags.NonPublic); if (tp == null) return;
+                var d = Activator.CreateInstance(tp); var copy = new ZPackage(pkg.GetArray()); copy.SetPos(0);
+                var de = tp.GetMethod("Deserialize"); if (de == null) return; de.Invoke(d, new object[] { copy });
+                RoutedChat(d);
+            }
+            catch { }
+        }
         static void RoutedChat(object __0)
         {
             try
@@ -104,10 +130,12 @@ namespace HubnerExt
                 var t = __0.GetType();
                 var hashF = t.GetField("m_methodHash"); var parF = t.GetField("m_parameters");
                 if (hashF == null || parF == null) return;
-                if ((int)hashF.GetValue(__0) != "ChatMessage".GetStableHashCode()) return;
+                int hash = (int)hashF.GetValue(__0); bool say = hash == "Say".GetStableHashCode(), msg = hash == "ChatMessage".GetStableHashCode();
+                if (!say && !msg) return;                                                       // Normal and Whisper travel as the Talker RPC "Say" on the speaker's object, Shout and Ping as the routed "ChatMessage"
                 var src = (ZPackage)parF.GetValue(__0);
                 var pkg = new ZPackage(src.GetArray()); pkg.SetPos(0);
-                pkg.ReadVector3(); int type = pkg.ReadInt();
+                if (msg) pkg.ReadVector3();
+                int type = pkg.ReadInt();
                 var ui = new UserInfo(); ui.Deserialize(ref pkg);
                 string text = pkg.ReadString();
                 lock (ChatRows)

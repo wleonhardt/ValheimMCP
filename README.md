@@ -190,7 +190,7 @@ This fork keeps upstream's console bridge and camera and adds a pluggable **tool
 Small on purpose so upstream merges stay easy: `ToolRegistry.cs` and `ExtensionHost.cs` are new; `McpServer.cs`, `ModConfig.cs` and `Plugin.cs` change by about 40 lines (tools are looked up in the registry, per-tool write gating and deny lists, extension loading).
 
 ## The extension (`ext/`)
-About 72 tools, in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no physics or camera, so it carries data tools only.
+About 84 tools, in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no physics or camera, so it carries data tools only.
 
 | Area | Tools (examples) |
 |---|---|
@@ -216,7 +216,17 @@ Copy `ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubne
 ## Python client (`python/`)
 `mcp.py` is a tiny MCP-over-HTTP client; `hubner.py` wraps the tools (`render`, `walk`, `plan_apply`, `go_fast`, `server_writes`, ...). Environment: `HUBNER_URL` (default `http://127.0.0.1:8731/mcp`), `HUBNER_SERVER_SSH`, `HUBNER_GATE_FLAG`, `HUBNER_LAUNCH`.
 
+## Virtual peers: server-side physics with no player connected
+A stock dedicated server never instantiates the world (no reference position), so it has no colliders, heightmaps or `WearNTear`. `vpeer_add {name,x,z,minutes}` makes the server run the game's own `CreateLocalZones` / `FindSectorObjects` / `CreateObjects` / `RemoveObjects` around positions you choose (idea from ddormer/valheim-serverside, rewritten; off by default, at most 4 peers, auto-expiring, behind the write gate). While one exists the server twin also answers `raycast`, `surface_probe`, `headroom`, `stability_scan`, `walk_check`, `terrain_info`, `sign_check` and `bed_check`. Python: `with hubner.vpeer(x, z): ...`.
+
+## Chat
+`chat_tail` captures chat on the client (`Chat.OnNewChatMessage`) and on the server (the Talker RPC `Say` for Normal/Whisper and the routed `ChatMessage` for Shout/Ping, read before the server relays them). `chat_send` speaks as the sandbox character (180 characters, 15 m for Normal); `chat_bubble` shows a speech bubble for a named speaker.
+
+## Other tools added from a community review
+`prefab_find` (name and component search, build costs), `visible_objects` (frustum + occlusion + type taxonomy), `interact` (press E), `probe_fan` (12-heading steering probe), `base_survey` (clusters, stations, beds), `player_status`.
+
 ## Safety notes
+- The HTTP endpoint refuses any request with an `Origin` header (cross-site requests from a browser), any `Host` that is not a loopback name, and bodies over 8 MB. Optionally set `server.token` in `valheimmcp.yml` and send `Authorization: Bearer <token>` (Python: `HUBNER_TOKEN`).
 - The MCP endpoint binds to loopback and is unauthenticated: reach it through an SSH tunnel, never expose it.
 - Server writes need the gate flag file (`ALLOW_SERVER_WRITES`) next to the extension; `hubner.server_writes()` opens it and always removes it again.
 - Take a world backup before large write batches.
