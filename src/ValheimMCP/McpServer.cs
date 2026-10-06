@@ -194,6 +194,11 @@ namespace ValheimMCP
                 "\"contains\":{\"type\":\"string\",\"description\":\"Only return lines containing this text (case-insensitive substring).\"}," +
                 "\"regex\":{\"type\":\"boolean\",\"description\":\"Treat 'contains' as a .NET regular expression instead of a substring (default false).\"}" +
                 "}}");
+            foreach (var t in Tools.All())
+            {
+                sb.Append(',');
+                AppendTool(sb, t.Name, t.Description + (t.Write ? " [write: needs tools.write=true]" : ""), t.SchemaJson);
+            }
             sb.Append("]}");
             return sb.ToString();
         }
@@ -275,7 +280,18 @@ namespace ValheimMCP
                 case "get_log":
                     return Result(id, DoGetLog(args));
                 default:
-                    return ErrorResponse(id, -32602, "Unknown tool: " + name);
+                {
+                    var tool = Tools.Get(name);
+                    if (tool == null) return ErrorResponse(id, -32602, "Unknown tool: " + name);
+                    if (ModConfig.IsToolDenied(name)) return Result(id, ToolText("tool denied by config (tools.deny): " + name, true));
+                    if (tool.Write && !ModConfig.ToolsWrite) return Result(id, ToolText("write tools are disabled (tools.write=false in valheimmcp.yml)", true));
+                    var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, out var outp, out var terr);
+                    if (!ok) return Result(id, ToolText("tool timed out after " + ModConfig.ToolTimeoutMs + "ms (game not ticking or zone loading?)", true));
+                    if (terr != null) return Result(id, ToolText("tool threw: " + terr, true));
+                    if (outp == null) return Result(id, ToolText("(no output)", false));
+                    if (outp.Png != null) return Result(id, ToolImage(Convert.ToBase64String(outp.Png), "image/png", outp.Text));
+                    return Result(id, ToolText(outp.Text ?? "", outp.IsError));
+                }
             }
         }
 
@@ -467,9 +483,10 @@ namespace ValheimMCP
                    (isError ? "true" : "false") + "}";
         }
 
-        private static string ToolImage(string base64, string mimeType)
+        private static string ToolImage(string base64, string mimeType, string caption = null)
         {
-            return "{\"content\":[{\"type\":\"image\",\"data\":" + Json.Str(base64) +
+            var cap = string.IsNullOrEmpty(caption) ? "" : "{\"type\":\"text\",\"text\":" + Json.Str(caption) + "},";
+            return "{\"content\":[" + cap + "{\"type\":\"image\",\"data\":" + Json.Str(base64) +
                    ",\"mimeType\":" + Json.Str(mimeType) + "}],\"isError\":false}";
         }
 

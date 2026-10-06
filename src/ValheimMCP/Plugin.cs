@@ -38,6 +38,7 @@ namespace ValheimMCP
             // Tap the BepInEx log stream so the wait_for_log MCP tool can block until a
             // matching line appears (e.g. another mod's hot-reload finishing).
             LogWatch.Install();
+            ExtensionHost.Start();
 
             var prefix = $"http://{ModConfig.Host}:{ModConfig.Port}/";
             try
@@ -60,6 +61,7 @@ namespace ValheimMCP
 
         private void OnDestroy()
         {
+            ExtensionHost.Stop();
             _server?.Stop();
             LogWatch.Uninstall();
             _harmony?.UnpatchSelf();

@@ -1,0 +1,40 @@
+# ValheimMCP config for the sandbox client on Ducky (loopback only; reach it through an SSH tunnel).
+server:
+  host: 127.0.0.1
+  port: 8731
+  commandTimeoutMs: 15000
+render:
+  defaultSize: 1024
+  minSize: 256
+  maxSize: 1280
+commands:
+  # deny always wins; a non-empty allow list restricts everything else. Widen after `list_commands`.
+  allow:
+    - pos
+    - goto
+    - fly
+    - ghost
+    - debugmode
+    - devcommands
+    - tp
+    - terrain
+    - object
+    - spawn_object
+    - data
+    - tod
+    - players
+    - help
+    - lodbias
+  deny:
+    - exec
+    - quit
+    - logout
+    - kick*
+    - ban*
+    - save
+
+# Hubner extension tools (hubner-mcp/ext): write enables spawn/modify/delete/undo; no terrain-edit tools exist.
+tools:
+  write: true
+  timeoutMs: 30000
+  deny: []

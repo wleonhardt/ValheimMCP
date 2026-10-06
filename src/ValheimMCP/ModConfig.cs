@@ -30,6 +30,11 @@ namespace ValheimMCP
         public static int LogDefaultLines = 200;
         public static int LogMaxLines = 1000;
 
+        public static bool ToolsWrite = false;
+        public static int ToolTimeoutMs = 30000;
+        private static List<string> _toolDeny = new();
+        public static bool IsToolDenied(string name) { return _toolDeny.Contains(name); }
+
         private static List<string> _allow = new();
         private static List<string> _deny = new();
 
@@ -57,6 +62,9 @@ namespace ValheimMCP
                 LogBufferCapacity = y.GetInt("log.bufferCapacity", LogBufferCapacity);
                 LogDefaultLines = y.GetInt("log.defaultLines", LogDefaultLines);
                 LogMaxLines = y.GetInt("log.maxLines", LogMaxLines);
+                ToolsWrite = y.Get("tools.write", "false") == "true";
+                ToolTimeoutMs = y.GetInt("tools.timeoutMs", ToolTimeoutMs);
+                _toolDeny = y.GetList("tools.deny");
                 _allow = y.GetList("commands.allow");
                 _deny = y.GetList("commands.deny");
 
@@ -168,6 +176,13 @@ log:
 # a trailing '*' is a prefix wildcard, e.g. ""spawn*"" matches every spawn command.
 commands:
   allow: []
+  deny: []
+
+# Extension tools (BepInEx/hubner-ext/*.dll, hot-reloaded). 'write' enables tools that change the world.
+# 'deny' blocks individual tools by name.
+tools:
+  write: false
+  timeoutMs: 30000
   deny: []
 ";
     }

@@ -3,3 +3,14 @@ obj/
 *.user
 .idea/
 .vs/
+
+# Hubner fork: game-reference libs are never committed
+ext/lib/
+ext/obj/
+ext/obj-server/
+ext/bin/
+src/ValheimMCP/bin/
+*.dll
+!Thunderstore/*.dll
+__pycache__/
+*.pyc

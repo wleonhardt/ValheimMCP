@@ -1,0 +1,15 @@
+# ValheimMCP config for the dedicated server (CT241). Loopback only; reach it through an SSH tunnel (tunnel-server.sh).
+# The server twin has read-only ZDO tools (objects, terraform_map, verify_plan, snapshot, ...); no console commands, no writes.
+server:
+  host: 127.0.0.1
+  port: 8731
+  commandTimeoutMs: 15000
+commands:
+  allow:
+    - __none__
+  deny:
+    - "*"
+tools:
+  write: false
+  timeoutMs: 60000
+  deny: []

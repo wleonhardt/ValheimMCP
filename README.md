@@ -178,3 +178,48 @@ for you on a `v*` tag if you `git add -f` the built zip onto the tagged commit.
 ## License
 
 [MIT](LICENSE) © 2026 myrcutio
+
+
+---
+
+# Hubner fork: tool registry, extension host and the Hubner extension
+
+This fork keeps upstream's console bridge and camera and adds a pluggable **tool registry** and a hot-reloadable **extension host** (`BepInEx/hubner-ext/*.dll`, reloaded within about 2 seconds, no game restart), plus a large extension (`ext/`) that turns the server into an agent harness for building and inspecting a world.
+
+## What changed in the core (`src/ValheimMCP/`)
+Small on purpose so upstream merges stay easy: `ToolRegistry.cs` and `ExtensionHost.cs` are new; `McpServer.cs`, `ModConfig.cs` and `Plugin.cs` change by about 40 lines (tools are looked up in the registry, per-tool write gating and deny lists, extension loading).
+
+## The extension (`ext/`)
+About 72 tools, in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no physics or camera, so it carries data tools only.
+
+| Area | Tools (examples) |
+|---|---|
+| Reading the world | `terrain_info`, `terrain_profile`, `surface_probe`, `raycast`, `objects`, `creatures`, `zone_state`, `prefab_info` (colliders, snap points, piece rules), `prefab_search` |
+| Idempotent building | `plan_apply` (exact, journaled, `ctag`/`ints`/`label`), `plan_remove` (by tag, prefab or plan), `plan_stats`, `verify_plan`, `validate_placement`, `clear_overlaps`, `zdo_*` |
+| Verification | `walk_check`, `walk_to` (real capsule movement, optional no-jump), `nav_path`, `headroom`, `stability_scan`, `bed_check`, `sign_check`, `doors` / `doors_set`, `room_view`, `render_ex` (cutaways, ortho, hide trees) |
+| Environment | `time_set`, `weather_set`, `env_state` |
+| Session control | `teleport` (with arrival check), `menu_join` / auto-join, `player_state`, `players` |
+| Operations | `world_save`, `snapshot` / `snapshot_diff`, `journal`, `job_start` / `job_status`, `log_tail`, `chat_tail` (in-game chat, client and server) |
+
+There are **no terrain-editing tools** by design.
+
+## Build
+You need the game's managed assemblies and BepInEx core libraries, which are **not** in this repository (they are Iron Gate's and BepInEx's files). Copy them to `ext/lib/` (`core/0Harmony.dll`, `core/BepInEx.dll`, `Managed/assembly_valheim.dll`, `assembly_utils.dll`, `UnityEngine*.dll`) or pass `-p:LibDir=/path/to/lib`.
+
+```bash
+dotnet build -c Release ValheimMCP.csproj           # core plugin
+dotnet build -c Release ext/HubnerExt.csproj        # client extension
+dotnet build -c Release ext/HubnerExtServer.csproj  # server extension
+```
+Copy `ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubner-ext/`, and `config/valheimmcp.client.yml` or `config/valheimmcp.server.yml` to `BepInEx/config/valheimmcp.yml`.
+
+## Python client (`python/`)
+`mcp.py` is a tiny MCP-over-HTTP client; `hubner.py` wraps the tools (`render`, `walk`, `plan_apply`, `go_fast`, `server_writes`, ...). Environment: `HUBNER_URL` (default `http://127.0.0.1:8731/mcp`), `HUBNER_SERVER_SSH`, `HUBNER_GATE_FLAG`, `HUBNER_LAUNCH`.
+
+## Safety notes
+- The MCP endpoint binds to loopback and is unauthenticated: reach it through an SSH tunnel, never expose it.
+- Server writes need the gate flag file (`ALLOW_SERVER_WRITES`) next to the extension; `hubner.server_writes()` opens it and always removes it again.
+- Take a world backup before large write batches.
+
+## Licence
+MIT, same as upstream (see `LICENSE`). Upstream: https://github.com/myrcutio/ValheimMCP

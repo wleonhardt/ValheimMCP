@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net472</TargetFramework>
+        <LangVersion>9.0</LangVersion>
+        <AssemblyName>HubnerExt</AssemblyName>
+        <RootNamespace>HubnerExt</RootNamespace>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <NoWarn>$(NoWarn);CS0649;CS0169;CS8632</NoWarn>
+        <LibDir Condition="'$(LibDir)'==''">$(MSBuildProjectDirectory)/lib</LibDir>
+        <OutputPath>$(MSBuildProjectDirectory)/../out/</OutputPath>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <DefaultItemExcludes>$(DefaultItemExcludes);obj-server/**;../out/**</DefaultItemExcludes>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3"><PrivateAssets>all</PrivateAssets></PackageReference>
+        <Reference Include="ValheimMCP"><HintPath>$(MSBuildProjectDirectory)/../src/ValheimMCP/bin/ValheimMCP.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="0Harmony"><HintPath>$(LibDir)/core/0Harmony.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="BepInEx"><HintPath>$(LibDir)/core/BepInEx.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="assembly_valheim"><HintPath>$(LibDir)/Managed/assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="assembly_utils"><HintPath>$(LibDir)/Managed/assembly_utils.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine"><HintPath>$(LibDir)/Managed/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.CoreModule"><HintPath>$(LibDir)/Managed/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(LibDir)/Managed/UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(LibDir)/Managed/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
+    </ItemGroup>
+</Project>
