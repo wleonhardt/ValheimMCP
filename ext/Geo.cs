@@ -38,7 +38,7 @@ namespace HubnerExt
         static List<float[]> Pts(Dictionary<string, object> a)
         {
             var res = new List<float[]>(); var l = McpJson.GetList(a, "points"); if (l == null) return res;
-            foreach (var o in l) { var p = o as List<object>; if (p == null || p.Count < 2) continue; var arr = new float[p.Count]; for (int i = 0; i < p.Count; i++) arr[i] = (float)McpJson.At(p, i); if (float.IsNaN(arr[0]) || float.IsNaN(arr[1])) continue; res.Add(arr); }
+            foreach (var o in l) { var p = o as List<object>; if (p == null || p.Count < 2) continue; var arr = new float[p.Count]; for (int i = 0; i < p.Count; i++) arr[i] = (float)U.At(p, i); if (float.IsNaN(arr[0]) || float.IsNaN(arr[1])) continue; res.Add(arr); }
             return res;
         }
 

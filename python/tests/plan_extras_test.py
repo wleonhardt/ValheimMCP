@@ -23,7 +23,7 @@ with twin.writes():
     items[0]['y'] = Y + 1.0                                                   # stable key: a height change is a MOVE, not delete+spawn
     r = apply(items); check('height change with key = moved', r['moved'] == 1 and r['spawned'] == 0 and r['deleted'] == 0, {k: r[k] for k in ('moved', 'spawned', 'deleted')})
     items[0]['y'] = Y; apply(items)
-    r = twin.undo_group(group='scratch-b'); check('undo whole group', r['undone'] >= 1 and not r['errors'], r)
+    r = twin.undo_group(group='scratch-b'); check('undo whole group', r['undone'] >= 1 and not [e for e in r['errors'] if 'gone' not in e], r)     # 'gone' = an older op of this group whose object was removed since: expected on a reused scratch plan
     check('gone after undo', not find('darkwood_gate') and not find('piece_chest_blackmetal'))
     r = twin.plan_apply('scratch-b', items, job=True); check('sliced job applies', r['spawned'] == 3, r.get('spawned'))
     r = twin.doors_set(1, x=X, z=Z, radius=5); r2 = twin.undo_group(group='doors_set'); g = find('darkwood_gate')[0]

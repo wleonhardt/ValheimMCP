@@ -572,7 +572,7 @@ namespace HubnerExt
         private static Quaternion RotOf(Dictionary<string, object> d)
         {
             var l = McpJson.GetList(d, "rot");
-            if (l != null && l.Count >= 3) return Quaternion.Euler((float)McpJson.At(l, 0), (float)McpJson.At(l, 1), (float)McpJson.At(l, 2));
+            if (l != null && l.Count >= 3) return Quaternion.Euler((float)U.At(l, 0), (float)U.At(l, 1), (float)U.At(l, 2));
             return Quaternion.Euler(0f, (float)McpJson.Get(d, "yaw", 0), 0f);
         }
 

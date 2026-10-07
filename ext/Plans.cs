@@ -19,7 +19,7 @@ namespace HubnerExt
     {
         public const string PlanKey = "hub_plan", ItemKey = "hub_key", CtagKey = "hub_ctag";
         public const string ForceConfirm = "player-built";                    // force deletes/edits of player-built objects need forceConfirm:'player-built' on every role
-        static int FlagMinutes { get { return Math.Max(1, McpJson.SettingInt("hubner.writeFlagMinutes", 30)); } }
+        static int FlagMinutes { get { return Math.Max(1, Cfg.Int("hubner.writeFlagMinutes", 30)); } }
 #if SERVER
         const bool W = false;       // the core's tools.write switch is a restart-time setting; on the server these tools use their own runtime gate instead
         static string FlagPath { get { return Path.Combine(BepInEx.Paths.BepInExRootPath, "hubner-ext", "ALLOW_SERVER_WRITES"); } }
@@ -121,7 +121,7 @@ namespace HubnerExt
         static float[] Box(Dictionary<string, object> a, List<object> items)
         {
             var b = McpJson.GetList(a, "box");
-            if (b != null && b.Count >= 4) return new[] { (float)McpJson.At(b, 0), (float)McpJson.At(b, 1), (float)McpJson.At(b, 2), (float)McpJson.At(b, 3) };
+            if (b != null && b.Count >= 4) return new[] { (float)U.At(b, 0), (float)U.At(b, 1), (float)U.At(b, 2), (float)U.At(b, 3) };
             float x0 = 1e9f, z0 = 1e9f, x1 = -1e9f, z1 = -1e9f;
             if (items != null)
                 foreach (var o in items)
@@ -265,7 +265,7 @@ namespace HubnerExt
                         if (seat && zs != null && zs.GetGroundHeight(new Vector3(pos.x, 5000f, pos.z), out var gh)) pos.y = gh;
                         var lab = McpJson.GetStr(it, "label"); if (lab != null) labelItems.Add(new KeyValuePair<Vector3, string>(pos, lab));
                         var rot = Quaternion.Euler(0f, (float)yaw, 0f);
-                        var rl = McpJson.GetList(it, "rot"); if (rl != null && rl.Count >= 3) rot = Quaternion.Euler((float)McpJson.At(rl, 0), (float)McpJson.At(rl, 1), (float)McpJson.At(rl, 2));
+                        var rl = McpJson.GetList(it, "rot"); if (rl != null && rl.Count >= 3) rot = Quaternion.Euler((float)U.At(rl, 0), (float)U.At(rl, 1), (float)U.At(rl, 2));
 
                         ZDO z = null;
                         if (tagged.TryGetValue(key, out var tl)) z = tl.FirstOrDefault(c => !claimed.Contains(c));      // surplus copies of a key fall into the extra sweep below
@@ -471,7 +471,7 @@ namespace HubnerExt
         {
             if (!Zdos.Ready) return ToolOutput.Err("world not ready");
             var bl = McpJson.GetList(a, "box");
-            float[] b = bl != null && bl.Count >= 4 ? new[] { (float)McpJson.At(bl, 0), (float)McpJson.At(bl, 1), (float)McpJson.At(bl, 2), (float)McpJson.At(bl, 3) } : World;
+            float[] b = bl != null && bl.Count >= 4 ? new[] { (float)U.At(bl, 0), (float)U.At(bl, 1), (float)U.At(bl, 2), (float)U.At(bl, 3) } : World;
             int depth = (int)McpJson.Get(a, "ctagDepth", 2);
             var plans = new Dictionary<string, float[]>(); var counts = new Dictionary<string, int>(); var groups = new Dictionary<string, float[]>(); var gcount = new Dictionary<string, int>(); var gplan = new Dictionary<string, string>();
             var all = Zdos.InBox(b[0], b[1], b[2], b[3]).ToList(); var foreign = new List<ZDO>();
@@ -509,7 +509,7 @@ namespace HubnerExt
             if (string.IsNullOrEmpty(plan) && !all) return ToolOutput.Err("plan required (or plan:'*' / all:true for every plan)");
             if (all && string.IsNullOrEmpty(ctag) && string.IsNullOrEmpty(pfx)) return ToolOutput.Err("all-plans removal needs a ctag or prefab filter");
             var bl = McpJson.GetList(a, "box");
-            float[] b = bl != null && bl.Count >= 4 ? new[] { (float)McpJson.At(bl, 0), (float)McpJson.At(bl, 1), (float)McpJson.At(bl, 2), (float)McpJson.At(bl, 3) } : World;
+            float[] b = bl != null && bl.Count >= 4 ? new[] { (float)U.At(bl, 0), (float)U.At(bl, 1), (float)U.At(bl, 2), (float)U.At(bl, 3) } : World;
             int n = 0; var byPlan = new Dictionary<string, int>();
             Journal.Begin();
             try
@@ -560,7 +560,7 @@ namespace HubnerExt
                         var np = pos; if (U.Has(e, "x")) np.x = (float)McpJson.Get(e, "x", pos.x); if (U.Has(e, "y")) np.y = (float)McpJson.Get(e, "y", pos.y); if (U.Has(e, "z")) np.z = (float)McpJson.Get(e, "z", pos.z);
                         var nr = rot;
                         var rl = McpJson.GetList(e, "rot");
-                        if (rl != null && rl.Count >= 3) nr = Quaternion.Euler((float)McpJson.At(rl, 0), (float)McpJson.At(rl, 1), (float)McpJson.At(rl, 2));
+                        if (rl != null && rl.Count >= 3) nr = Quaternion.Euler((float)U.At(rl, 0), (float)U.At(rl, 1), (float)U.At(rl, 2));
                         else if (U.Has(e, "yaw")) nr = Quaternion.Euler(0f, (float)McpJson.Get(e, "yaw", 0), 0f);
                         if (np != pos || nr != rot) { z.SetPosition(np); z.SetRotation(nr); ApplyToInstance(z, np, nr); movedSet.Add(z); }
                         var text = McpJson.GetStr(e, "text"); if (text != null) z.Set("text", text);

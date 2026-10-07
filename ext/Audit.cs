@@ -275,7 +275,7 @@ namespace HubnerExt
         {
             if (ZNet.instance == null) return U.Json("{\"count\":0,\"players\":[]}");
             var rows = new List<string>(); int sandbox = 0;
-            var names = McpJson.SettingList("hubner.sandboxNames"); if (names == null || names.Count == 0) names = new List<string> { "Odev", "MaRkO", "ClaudeEyes" };
+            var names = Cfg.List("hubner.sandboxNames"); if (names == null || names.Count == 0) names = new List<string> { "Odev", "MaRkO", "ClaudeEyes" };
             foreach (var p in ZNet.instance.GetPeers())
             {
                 string name = p.m_playerName ?? ""; bool sb = names.Contains(name); if (sb) sandbox++;
@@ -357,7 +357,7 @@ namespace HubnerExt
                 }
             }
             // sliced job: advance until the frame budget is spent or it yields its result
-            var budget = Math.Max(1, McpJson.SettingInt("hubner.jobBudgetMs", 8)); var t0 = Time.realtimeSinceStartup; j.Frames++;
+            var budget = Math.Max(1, Cfg.Int("hubner.jobBudgetMs", 8)); var t0 = Time.realtimeSinceStartup; j.Frames++;
             try
             {
                 while (true)

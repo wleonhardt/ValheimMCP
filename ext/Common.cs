@@ -10,9 +10,31 @@ using ValheimMCP;
 
 namespace HubnerExt
 {
+    /// <summary>Config access that survives an extension newer than the loaded core (the extension hot-reloads, the core only on restart): a missing
+    /// McpJson.Setting* on an old core yields the default instead of a MissingMethodException in every write tool.</summary>
+    internal static class Cfg
+    {
+        // resolved by reflection: a direct call would make Mono throw MissingMethodException while JIT-compiling the CALLER on an old core, outside any try/catch
+        static readonly MethodInfo MInt = typeof(McpJson).GetMethod("SettingInt", new[] { typeof(string), typeof(int) }), MStr = typeof(McpJson).GetMethod("Setting", new[] { typeof(string), typeof(string) }), MList = typeof(McpJson).GetMethod("SettingList", new[] { typeof(string) });
+        public static bool CoreHasSettings { get { return MInt != null; } }
+        public static int Int(string key, int dflt) { try { return MInt != null ? (int)MInt.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
+        public static string Str(string key, string dflt) { try { return MStr != null ? (string)MStr.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
+        public static List<string> List(string key) { try { return MList != null ? (List<string>)MList.Invoke(null, new object[] { key }) : null; } catch { return null; } }
+    }
+
     // ------------------------------------------------------------------ helpers
     internal static class U
     {
+        /// <summary>Element i of a JSON number list, NaN when it is not a number (local copy: the core's McpJson.At needs core 0.4).</summary>
+        public static double At(List<object> l, int i)
+        {
+            if (l == null || i >= l.Count) return double.NaN;
+            var v = l[i];
+            if (v is double d) return d;
+            if (v is string s && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var p)) return p;
+            return double.NaN;
+        }
+
         /// <summary>Prefabs that edit terrain or the terrain data itself. Never spawned, modified or deleted by these tools (owner rule: no land editing).</summary>
         private static readonly string[] Forbidden = { "digg", "raise", "terrain", "cultivat", "mud_road", "paved_road", "path_v2", "replant", "levelground", "level_ground", "flatten", "TerrainOp" };
         public static bool IsForbidden(string prefab)
@@ -58,8 +80,8 @@ namespace HubnerExt
         public static Vector3 Vec(List<object> l)
         {
             if (l == null) return new Vector3(float.NaN, float.NaN, float.NaN);
-            if (l.Count == 2) return new Vector3((float)McpJson.At(l, 0), float.NaN, (float)McpJson.At(l, 1));
-            return new Vector3((float)McpJson.At(l, 0), (float)McpJson.At(l, 1), (float)McpJson.At(l, 2));
+            if (l.Count == 2) return new Vector3((float)U.At(l, 0), float.NaN, (float)U.At(l, 1));
+            return new Vector3((float)U.At(l, 0), (float)U.At(l, 1), (float)U.At(l, 2));
         }
 
         public static string Id(ZDO z) { return z.m_uid.ID.ToString(CultureInfo.InvariantCulture) + ":" + z.m_uid.UserID.ToString(CultureInfo.InvariantCulture); }
