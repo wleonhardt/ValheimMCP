@@ -89,7 +89,9 @@ namespace ValheimMCP
         private readonly string _owner;
         internal ToolRegistry(string owner) { _owner = owner; }
 
-        public void Add(string name, string description, string schemaJson, Func<Dictionary<string, object>, ToolOutput> handler, bool write = false, string category = null)
+        // Keep this exact overload: extensions compiled against earlier cores bind to it (changing a default-parameter signature breaks them at load).
+        public void Add(string name, string description, string schemaJson, Func<Dictionary<string, object>, ToolOutput> handler, bool write = false) { Add(name, description, schemaJson, handler, write, null); }
+        public void Add(string name, string description, string schemaJson, Func<Dictionary<string, object>, ToolOutput> handler, bool write, string category)
         {
             Tools.Put(new ToolDef { Owner = _owner, Name = name, Description = description, SchemaJson = schemaJson, Handler = handler, Write = write, Category = category ?? (write ? "build" : "misc") });
         }
