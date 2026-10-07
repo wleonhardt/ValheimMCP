@@ -137,13 +137,15 @@ namespace ValheimMCP
         {
             var sb = new StringBuilder();
             sb.Append("{\"tools\":[");
+            var prof = Tools.ProfileCategories(ModConfig.ToolsProfile);
+            if (prof == null || prof.Contains("control")) {
             AppendTool(sb, "run_command",
                 "Run a Valheim console command (e.g. 'pos' to print the player's position, or any " +
                 "registered command — call list_commands to discover them) " +
                 "and return the lines it printed to the in-game console.",
                 "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"," +
                 "\"description\":\"The full console command line to execute.\"}},\"required\":[\"text\"]}");
-            sb.Append(',');
+            sb.Append(','); }
             AppendTool(sb, "list_commands",
                 "List all registered Valheim console commands with their descriptions.",
                 "{\"type\":\"object\",\"properties\":{}}");
@@ -194,10 +196,13 @@ namespace ValheimMCP
                 "\"contains\":{\"type\":\"string\",\"description\":\"Only return lines containing this text (case-insensitive substring).\"}," +
                 "\"regex\":{\"type\":\"boolean\",\"description\":\"Treat 'contains' as a .NET regular expression instead of a substring (default false).\"}" +
                 "}}");
+            var allowed = Tools.ProfileCategories(ModConfig.ToolsProfile);
             foreach (var t in Tools.All())
             {
+                if (allowed != null && !allowed.Contains(t.Category ?? "misc")) continue;
                 sb.Append(',');
-                AppendTool(sb, t.Name, t.Description + (t.Write ? " [write: needs tools.write=true]" : ""), t.SchemaJson);
+                var d = ModConfig.ToolsTerse ? Tools.Terse(t.Description) : t.Description;
+                AppendTool(sb, t.Name, d + (t.Write ? " [write: needs tools.write=true]" : ""), t.SchemaJson);
             }
             sb.Append("]}");
             return sb.ToString();

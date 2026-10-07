@@ -252,6 +252,19 @@ namespace HubnerExt
 
         public static void Load() { EnsureLoaded(); }
 
+        public static long FileBytes() { try { return File.Exists(File_) ? new FileInfo(File_).Length : 0; } catch { return 0; } }
+
+        /// <summary>Drop entries older than keepDays (their undo is given up) and rewrite the file. Returns how many were dropped.</summary>
+        public static int Prune(double keepDays, bool dry)
+        {
+            EnsureLoaded();
+            var cutoff = DateTime.UtcNow.AddDays(-keepDays).ToString("o");
+            int n = 0;
+            for (int i = Entries.Count - 1; i >= 0; i--) if (string.CompareOrdinal(Entries[i].Time ?? "", cutoff) < 0) { n++; if (!dry) Entries.RemoveAt(i); }
+            if (!dry) Compact();
+            return n;
+        }
+
         /// <summary>Start batching appends (one file write at End). Nested calls are fine.</summary>
         static int _depth;
         public static void Begin() { EnsureLoaded(); if (_depth++ == 0) _batch = new StringBuilder(); }

@@ -3,7 +3,7 @@
         <TargetFramework>net472</TargetFramework>
         <LangVersion>9.0</LangVersion>
         <AssemblyName>HubnerExt</AssemblyName>
-        <Version>0.7.0</Version>
+        <Version>0.7.1</Version>
         <RootNamespace>HubnerExt</RootNamespace>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <NoWarn>$(NoWarn);CS0649;CS0169;CS8632</NoWarn>

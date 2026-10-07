@@ -8,7 +8,7 @@
         <AssemblyName>ValheimMCP</AssemblyName>
         <RootNamespace>ValheimMCP</RootNamespace>
         <!-- SINGLE SOURCE OF TRUTH for the core's identity/version: flows into PluginInfo and the assembly version. -->
-        <Version>0.4.0</Version>
+        <Version>0.4.1</Version>
         <BepInExPluginGuid>com.valheimmcp.server</BepInExPluginGuid>
         <BepInExPluginName>Valheim MCP Server (Hubner)</BepInExPluginName>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

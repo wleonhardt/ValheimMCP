@@ -95,3 +95,11 @@ public class PlanKeyTests
     [Fact] public void SeatIgnoresHeight() => Assert.Equal("W|1.0|2.0|s", PlanKeys.Of(null, "W", 1, 99, 2, 0, true));
     [Fact] public void YawDistinguishes() { Assert.NotEqual(PlanKeys.Of(null, "W", 1, 2, 3, 0, false), PlanKeys.Of(null, "W", 1, 2, 3, 90, false)); Assert.Equal(PlanKeys.Of(null, "W", 1, 2, 3, 0, false), PlanKeys.Of(null, "W", 1, 2, 3, 360, false)); }
 }
+
+public class ToolProfileTests
+{
+    [Fact] public void AllIsNull() { Assert.Null(ToolProfiles.Categories("all")); Assert.Null(ToolProfiles.Categories(null)); Assert.Null(ToolProfiles.Categories("nonsense")); }
+    [Fact] public void ObserveHasNoWrites() { var c = ToolProfiles.Categories("Observe"); Assert.Contains("read", c); Assert.DoesNotContain("build", c); Assert.DoesNotContain("control", c); }
+    [Fact] public void BuildAndControlAreDisjointOnWrites() { Assert.Contains("build", ToolProfiles.Categories("build")); Assert.DoesNotContain("control", ToolProfiles.Categories("build")); Assert.Contains("control", ToolProfiles.Categories("control")); }
+    [Fact] public void TerseCutsAtFirstSentence() { Assert.Equal("Walk the character with the game's real movement.", ToolProfiles.Terse("Walk the character with the game's real movement. points:[[x,z]] waypoints. More.")); Assert.Equal("short", ToolProfiles.Terse("short")); }
+}

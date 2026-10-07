@@ -84,6 +84,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"number\"}}}", Groups);
             r.Add("undo_group", "Undo a whole journal group (newest ops first): spawns are deleted, deletes are re-created, modifies restored (position, rotation, text, tag, plan tags and any ints/floats/strings the op changed). group:'<name>' or count:n for the last n ops. Works on any role and across reloads.",
                 "{\"type\":\"object\",\"properties\":{\"group\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"},\"confirm\":{\"type\":\"string\"}}}", a => Guard(a, UndoGroup), W);
+            r.Add("journal_compact", "Shrink the write journal: drop entries older than keepDays (default 30; their undo is given up) and rewrite hubner-ext/journal.jsonl without undone markers. dry=true reports only. Returns entries and file bytes before/after. The journal is loaded into memory at start, so a server that has done months of syncs should run this now and then.",
+                "{\"type\":\"object\",\"properties\":{\"keepDays\":{\"type\":\"number\"},\"dry\":{\"type\":\"boolean\"},\"confirm\":{\"type\":\"string\"}}}", a => Guard(a, JournalCompact), W);
             r.Add("save_state", "Read-only: world save timings (saveStart, saveDone, thread running) so a caller can wait for world_save to finish.",
                 "{\"type\":\"object\",\"properties\":{}}", SaveState, false);
             r.Add("world_save", "Ask the server (or this client's local world) to save now and report timings: the first half of an online-safe backup (copy the files after it returns).",
@@ -803,6 +805,14 @@ namespace HubnerExt
             }
             finally { Journal.End(); }
             return U.Json("{\"undone\":" + undone + ",\"errors\":[" + string.Join(",", errs.Select(U.S).ToArray()) + "]}");
+        }
+
+        static ToolOutput JournalCompact(Dictionary<string, object> a)
+        {
+            double days = Math.Max(0, McpJson.Get(a, "keepDays", 30)); bool dry = McpJson.GetBool(a, "dry", false);
+            int before = Journal.Entries.Count; long bytesBefore = Journal.FileBytes();
+            int dropped = Journal.Prune(days, dry);
+            return U.Json("{\"dry\":" + (dry ? "true" : "false") + ",\"keepDays\":" + U.N(days) + ",\"entriesBefore\":" + before + ",\"dropped\":" + dropped + ",\"entriesAfter\":" + (dry ? before : Journal.Entries.Count) + ",\"bytesBefore\":" + bytesBefore + ",\"bytesAfter\":" + (dry ? bytesBefore : Journal.FileBytes()) + "}");
         }
 
         static ToolOutput SaveState(Dictionary<string, object> a)

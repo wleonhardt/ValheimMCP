@@ -13,6 +13,9 @@ tools:
   write: false
   timeoutMs: 60000
   deny: []
+  # profile: all | observe | build | control (what tools/list advertises; every tool stays callable), terse: first sentence only
+  profile: all
+  terse: false
 
 # Hubner extension settings (BepInEx/hubner-ext/HubnerExt.dll)
 hubner:

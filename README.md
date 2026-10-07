@@ -232,6 +232,12 @@ Environment: `HUBNER_URL`, `HUBNER_SERVER_URL`, `HUBNER_SERVER_SSH` (user@host),
 - Everything is journaled (`hubner-ext/journal.jsonl`, batched per call, compacted on load). `undo_group` restores position, rotation, text, tags and any `ints`/`floats`/`strings` the operation changed (door states, fuel).
 - Fireplace prefabs spawn with full fuel (`floats.fuel` to override).
 
+## Tool profiles (`tools.profile`, `tools.terse`)
+`tools/list` advertises 90-odd tools with long descriptions; every MCP session pays for that. `tools.profile` in `valheimmcp.yml` trims the list: `observe` (reads and ops), `build` (plus plans, zdo, undo, jobs, journal), `control` (plus teleport, walk, menu, environment, chat), `all` (default). Every tool stays callable by name whatever the profile (the Python client does not read the list). `tools.terse: true` keeps only the first sentence of each description. Both are read at start.
+
+## Journal upkeep
+`journal_compact {keepDays}` drops entries older than `keepDays` (default 30; their undo is given up) and rewrites `hubner-ext/journal.jsonl` without undone markers. The journal is loaded into memory at start: a server that has done months of syncs should run it now and then (`dry:true` first).
+
 ## Safety: what the write tools refuse
 - Terrain and internal prefabs, players. Creatures, tamed animals, ships, carts and dropped items are decided by the prefab's components (never adopted, never cleared as overlap, deleted only forced).
 - Player-built objects (`creator != 0`) need `force:true` **and** `forceConfirm:'player-built'`; every forced object is logged.

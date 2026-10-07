@@ -13,6 +13,7 @@
     <Compile Include="../../src/ValheimMCP/Json.cs" Link="src/Json.cs" />
     <Compile Include="../../src/ValheimMCP/MiniYaml.cs" Link="src/MiniYaml.cs" />
     <Compile Include="../../src/ValheimMCP/RequestPolicy.cs" Link="src/RequestPolicy.cs" />
+    <Compile Include="../../src/ValheimMCP/ToolProfiles.cs" Link="src/ToolProfiles.cs" />
     <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
   </ItemGroup>
   <ItemGroup>

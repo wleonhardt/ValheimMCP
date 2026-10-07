@@ -70,6 +70,8 @@ namespace ValheimMCP
         public string Description;
         public string SchemaJson;
         public bool Write;
+        /// <summary>read | ops | build | control | misc: what tools.profile filters tools/list by (every tool stays callable).</summary>
+        public string Category = "misc";
         public Func<Dictionary<string, object>, ToolOutput> Handler;
     }
 
@@ -87,10 +89,13 @@ namespace ValheimMCP
         private readonly string _owner;
         internal ToolRegistry(string owner) { _owner = owner; }
 
-        public void Add(string name, string description, string schemaJson, Func<Dictionary<string, object>, ToolOutput> handler, bool write = false)
+        public void Add(string name, string description, string schemaJson, Func<Dictionary<string, object>, ToolOutput> handler, bool write = false, string category = null)
         {
-            Tools.Put(new ToolDef { Owner = _owner, Name = name, Description = description, SchemaJson = schemaJson, Handler = handler, Write = write });
+            Tools.Put(new ToolDef { Owner = _owner, Name = name, Description = description, SchemaJson = schemaJson, Handler = handler, Write = write, Category = category ?? (write ? "build" : "misc") });
         }
+
+        /// <summary>Set the category of already registered tools in one go (an extension keeps one table instead of tagging every Add).</summary>
+        public void SetCategories(Dictionary<string, string> byName) { foreach (var kv in byName) Tools.SetCategory(kv.Key, kv.Value); }
 
         public static bool WritesEnabled { get { return ModConfig.ToolsWrite; } }
     }
@@ -112,5 +117,9 @@ namespace ValheimMCP
         }
         public static ToolDef Get(string name) { lock (Lock) return Map.TryGetValue(name, out var t) ? t : null; }
         public static List<ToolDef> All() { lock (Lock) return new List<ToolDef>(Map.Values); }
+        public static void SetCategory(string name, string category) { lock (Lock) if (Map.TryGetValue(name, out var t)) t.Category = category; }
+
+        public static HashSet<string> ProfileCategories(string profile) { return ToolProfiles.Categories(profile); }
+        public static string Terse(string d) { return ToolProfiles.Terse(d); }
     }
 }

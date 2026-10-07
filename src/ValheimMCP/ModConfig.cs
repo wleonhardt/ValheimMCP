@@ -32,6 +32,8 @@ namespace ValheimMCP
         public static int LogMaxLines = 1000;
 
         public static bool ToolsWrite = false;
+        public static string ToolsProfile = "all";       // tools/list filter: all | observe | build | control (every tool stays callable by name)
+        public static bool ToolsTerse = false;          // tools/list: first sentence of each description only
         public static int ToolTimeoutMs = 30000;
         private static List<string> _toolDeny = new();
         public static bool IsToolDenied(string name) { return _toolDeny.Contains(name); }
@@ -73,6 +75,8 @@ namespace ValheimMCP
                 ToolsWrite = y.Get("tools.write", "false") == "true";
                 ToolTimeoutMs = y.GetInt("tools.timeoutMs", ToolTimeoutMs);
                 _toolDeny = y.GetList("tools.deny");
+                ToolsProfile = y.Get("tools.profile", ToolsProfile);
+                ToolsTerse = y.Get("tools.terse", "false") == "true";
                 _allow = y.GetList("commands.allow");
                 _deny = y.GetList("commands.deny");
 
@@ -192,6 +196,8 @@ tools:
   write: false
   timeoutMs: 30000
   deny: []
+  profile: all             # what tools/list advertises: all | observe (reads, ops) | build (+ plans, zdo, undo, jobs) | control (+ teleport, walk, menu, env, chat)
+  terse: false             # true = first sentence of each description only (smaller tool list for the model; the README has the details)
 
 # Hubner extension settings (read by BepInEx/hubner-ext/HubnerExt.dll).
 #   sandboxNames: character names that count as the sandbox (players tool, restart checks)

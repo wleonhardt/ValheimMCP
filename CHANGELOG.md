@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### 0.4.1 core / 0.7.1 extension
+- `tools.profile` (all | observe | build | control) and `tools.terse` filter `tools/list`; tools carry a category (extension table in `Reg.cs`, handed to the core reflectively so older cores keep working).
+- `journal_compact {keepDays, dry}`: prune old journal entries and rewrite the file.
+
 ### 0.4.0 core / 0.7.0 extension (review fixes)
 - Live-server safety: `plan_apply` is an iterator sliced by the job runner (`hubner.jobBudgetMs` per frame); a tool call that times out is cancelled instead of running late; `vpeer_add` is gated, releases ownership once per frame and refuses spots near real players; server chat capture peeks the RPC hash instead of deserializing every routed RPC (and no longer double-captures).
 - Protection by component: creatures, tamed animals, ships, carts and dropped items are never adopted, cleared or box-deleted; forced deletes/edits need `forceConfirm:'player-built'` and are logged.

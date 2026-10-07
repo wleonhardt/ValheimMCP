@@ -35,6 +35,7 @@ namespace HubnerExt
 #if !SERVER
             Env.Register(r);
 #endif
+            Reg.Categorize(r);
         }
     }
 
