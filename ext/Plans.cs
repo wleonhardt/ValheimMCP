@@ -66,6 +66,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"ctagDepth\":{\"type\":\"number\"}}}", PlanStats);
             r.Add("plan_remove", "Delete objects tagged with a plan id inside the box (default: everywhere known). Filters: ctag (prefix of the generator label sent as item ctag, e.g. 'decor:Kitchen'), prefab (prefix); plan:'*' or all:true spans every plan (needs ctag or prefab). dry=true counts only. Journaled.",
                 "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"ctag\":{\"type\":\"string\"},\"prefab\":{\"type\":\"string\"},\"all\":{\"type\":\"boolean\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"dry\":{\"type\":\"boolean\"},\"confirm\":{\"type\":\"string\"}}}", a => Guard(a, Remove), W);
+            r.Add("container_set", "Put items into containers by id, through the game's Inventory class: edits:[{id, items:[{name, count, quality}], replace}] (max 200 edits). Item names are item prefab names (Wood, Raspberry, TrophyBoar ...); unknown names and full chests are reported. Takes ownership; server write.",
+                "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"confirm\":{\"type\":\"string\"}},\"required\":[\"edits\"]}", a => Guard(a, ContainerSet), W);
             r.Add("zdo_set", "Server-side/ZDO-level edit by id, no instantiation needed: {id, x,y,z, yaw|rot:[rx,ry,rz], text, tag, strings:{k:v}, ints:{k:v} (e.g. door state 0=closed), floats:{k:v} (fuel)}. edits:[...] (max 500). Takes ownership first. Refuses terrain/internal prefabs, Player, creatures and player-built objects (creator!=0) unless force=true AND forceConfirm:'player-built'. Journaled under group; undo restores the changed fields.",
                 "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"edits\"]}", a => Guard(a, ZSet), W);
             r.Add("zdo_delete", "Delete objects by id at ZDO level (any role, no instantiation). ids:[...] (max 2000). Refuses Player, terrain/internal prefabs, creatures/tamed/ships/carts/items and player-built objects (creator!=0) unless force=true AND forceConfirm:'player-built' (every forced object is logged). Journaled under group.",
@@ -533,6 +535,43 @@ namespace HubnerExt
         }
 
         // ------------------------------------------------------------------ zdo_set / zdo_delete / zdo_dump
+
+        static ToolOutput ContainerSet(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready) return ToolOutput.Err("world not ready");
+            var edits = McpJson.GetList(a, "edits"); if (edits == null || edits.Count == 0) return ToolOutput.Err("edits required");
+            if (edits.Count > 200) return ToolOutput.Err("max 200 edits per call");
+            if (ObjectDB.instance == null) return ToolOutput.Err("ObjectDB not ready");
+            int done = 0, added = 0; var errs = new List<string>();
+            foreach (var eo in edits)
+            {
+                var e = eo as Dictionary<string, object>; if (e == null) continue;
+                var id = McpJson.GetStr(e, "id"); var z = U.FindZdo(id); if (z == null) { errs.Add(id + ": not found"); continue; }
+                var prefab = Zdos.NameOf(z.GetPrefab()); var go = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(z.GetPrefab()) : null;
+                var cont = go != null ? go.GetComponent<Container>() : null;
+                int w = 8, h = 4; if (cont != null) { w = cont.m_width; h = cont.m_height; }
+                var inv = new Inventory("x", null, w, h);
+                var cur = z.GetString("items", "");
+                if (!McpJson.GetBool(e, "replace", false) && !string.IsNullOrEmpty(cur)) { try { inv.Load(new ZPackage(cur)); } catch (Exception ex) { errs.Add(id + ": unreadable inventory " + ex.Message); continue; } }
+                var items = McpJson.GetList(e, "items"); if (items == null) { errs.Add(id + ": items required"); continue; }
+                foreach (var io in items)
+                {
+                    var it = io as Dictionary<string, object>; if (it == null) continue;
+                    var name = McpJson.GetStr(it, "name"); int count = (int)McpJson.Get(it, "count", 1); int quality = (int)McpJson.Get(it, "quality", 1);
+                    var ip = ObjectDB.instance.GetItemPrefab(name); if (ip == null || ip.GetComponent<ItemDrop>() == null) { errs.Add(name + ": unknown item"); continue; }
+                    var drop = ip.GetComponent<ItemDrop>(); int per = Math.Max(1, drop.m_itemData.m_shared.m_maxStackSize); int left = count;
+                    while (left > 0)
+                    {
+                        int n = Math.Min(per, left);
+                        if (inv.AddItem(name, n, quality, 0, 0L, "", false) == null) { errs.Add(prefab + " " + id + ": no room for " + name); break; }
+                        left -= n; added += n;
+                    }
+                }
+                var pkg = new ZPackage(); inv.Save(pkg); Own(z); z.Set("items", pkg.GetBase64()); z.Set("InUse", 0); done++;
+            }
+            return U.Json("{\"containers\":" + done + ",\"itemsAdded\":" + added + ",\"errors\":[" + string.Join(",", errs.Take(40).Select(x => U.S(x)).ToArray()) + "],\"errorCount\":" + errs.Count + "}");
+        }
+
         static ToolOutput ZSet(Dictionary<string, object> a)
         {
             if (!Zdos.Ready) return ToolOutput.Err("world not ready");
