@@ -96,31 +96,17 @@ namespace ValheimMCP
             }
         }
 
-        private const int MaxBodyBytes = 8 * 1024 * 1024;
+        private const long MaxBodyBytes = RequestPolicy.MaxBodyBytes;
 
         /// <summary>
         ///     Hardening (Hubner fork): the endpoint is unauthenticated loopback, so a browser on the same machine could
-        ///     otherwise POST to it (CSRF) or reach it through DNS rebinding. We reject any request carrying an Origin header
-        ///     (browsers add it to cross-site requests, API clients do not), any Host that is not a loopback name (the port is
-        ///     ignored because the endpoint is reached through SSH tunnels on other ports), and, when server.token is set, any
-        ///     request without the matching bearer token. Returns the rejection reason, or null.
+        ///     otherwise POST to it (CSRF) or reach it through DNS rebinding. The rules live in <see cref="RequestPolicy" />
+        ///     (pure, unit-tested): any Origin header, a non-loopback Host (port ignored: SSH tunnels use other ports),
+        ///     a missing bearer token when server.token is set, or a body over 8 MB is refused.
         /// </summary>
         private static string Reject(HttpListenerRequest req)
         {
-            var origin = req.Headers["Origin"];
-            if (!string.IsNullOrEmpty(origin)) return "cross-origin request refused (Origin header present)";
-            var host = req.Headers["Host"] ?? "";
-            var h = host.StartsWith("[") ? host.Substring(0, host.IndexOf(']') + 1) : host.Split(':')[0];
-            if (!(h == "127.0.0.1" || h == "localhost" || h == "[::1]" || string.Equals(h, ModConfig.Host, StringComparison.OrdinalIgnoreCase)))
-                return "Host header refused (not a loopback name): " + h;
-            if (!string.IsNullOrEmpty(ModConfig.Token))
-            {
-                var auth = req.Headers["Authorization"] ?? "";
-                var tok = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth.Substring(7).Trim() : (req.Headers["X-Hubner-Token"] ?? "");
-                if (!string.Equals(tok, ModConfig.Token, StringComparison.Ordinal)) return "missing or wrong token";
-            }
-            if (req.ContentLength64 > MaxBodyBytes) return "request body too large (limit 8 MB)";
-            return null;
+            return RequestPolicy.Reject(req.Headers["Origin"], req.Headers["Host"], req.Headers["Authorization"], req.Headers["X-Hubner-Token"], req.ContentLength64, ModConfig.Host, ModConfig.Token);
         }
 
         private void Handle(HttpListenerContext ctx)
@@ -129,7 +115,7 @@ namespace ValheimMCP
             if (rejected != null)
             {
                 Plugin.Log?.LogWarning($"[ValheimMCP] refused request {ctx.Request.HttpMethod} {ctx.Request.Url?.AbsolutePath}: {rejected}");
-                Write(ctx, rejected.StartsWith("missing") ? 401 : 403, Json.Error(rejected));
+                Write(ctx, RequestPolicy.StatusFor(rejected), Json.Error(rejected));
                 return;
             }
             var path = ctx.Request.Url.AbsolutePath.TrimEnd('/');

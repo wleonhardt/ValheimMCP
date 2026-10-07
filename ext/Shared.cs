@@ -13,7 +13,8 @@ namespace HubnerExt
     public sealed class Ext : IMcpExtension
     {
         public string Name { get { return "hubner-ext"; } }
-        public const string Version = "0.6.0";
+        /// <summary>From the assembly version (ext/HubnerExt.csproj &lt;Version&gt;): one place to bump.</summary>
+        public static readonly string Version = typeof(Ext).Assembly.GetName().Version.ToString(3);
         public void Unload()
         {
             Audit.Uninstall();
@@ -46,16 +47,15 @@ namespace HubnerExt
     internal static class Zdos
     {
         private static FieldInfo _bySector;
-        private static Dictionary<int, string> _names;
+        private static Dictionary<int, string> _names; private static bool _namesComplete;
         private static readonly int TerrainCompHash = "_TerrainCompiler".GetStableHashCode();
 
         public static string NameOf(int hash)
         {
-            if (_names == null || _names.Count == 0)
+            if (!_namesComplete)                                                          // a call before ZNetScene exists must not freeze a one-entry table forever
             {
                 _names = new Dictionary<int, string>();
-                if (ZNetScene.instance != null)
-                    foreach (var n in ZNetScene.instance.GetPrefabNames()) _names[n.GetStableHashCode()] = n;
+                if (ZNetScene.instance != null) { foreach (var n in ZNetScene.instance.GetPrefabNames()) _names[n.GetStableHashCode()] = n; _namesComplete = _names.Count > 0; }
                 _names[TerrainCompHash] = "_TerrainCompiler";
             }
             return _names.TryGetValue(hash, out var s) ? s : "#" + hash;

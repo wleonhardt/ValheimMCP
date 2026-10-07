@@ -27,13 +27,13 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{}}", PlayersTool);
             r.Add("status", "One-call overview: role, version, uptime, object and player counts, write gate state, journal size, save state, queued jobs, hook state.",
                 "{\"type\":\"object\",\"properties\":{}}", Status);
-            r.Add("chat_tail", "In-game chat captured since the extension loaded (client only): since (sequence number, default 0), limit (default 100). Each row: seq, time (UTC), type (Normal/Shout/Whisper/Ping/...), name, text. Poll with since=<last seq> to read only new messages.",
+            r.Add("chat_tail", "In-game chat captured since the extension loaded (client: what the player sees; server: every chat RPC the clients send): since (sequence number, default 0), limit (default 100). Each row: seq, time (UTC), type (Normal/Shout/Whisper/Ping/...), name, text. Poll with since=<last seq> to read only new messages.",
                 "{\"type\":\"object\",\"properties\":{\"since\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", ChatTail);
             r.Add("log_tail", "Last lines of the BepInEx log (exceptions, warnings) without ssh: lines (default 60, max 400), filter substring (case-insensitive), level (error|warning|all).",
                 "{\"type\":\"object\",\"properties\":{\"lines\":{\"type\":\"number\"},\"filter\":{\"type\":\"string\"},\"level\":{\"type\":\"string\"}}}", LogTail);
-            r.Add("job_start", "Queue one of the long write tools (plan_apply, plan_remove, zdo_delete, zdo_set, zdo_audit) to run on the next game frames instead of inside the HTTP call, so callers do not hit their own timeout. tool + args as for the tool itself. Returns a job id; poll job_status.",
+            r.Add("job_start", "Queue a long write tool (plan_apply, plan_remove, zdo_delete, zdo_set, clear_overlaps, zdo_audit) to run on the game's frames instead of inside the HTTP call: plan_apply runs in slices of at most hubner.jobBudgetMs per frame (default 8), so a big plan never freezes players; the others run in one frame but off the HTTP timeout. tool + args as for the tool itself (the write gate and confirm apply as usual). Returns a job id; poll job_status.",
                 "{\"type\":\"object\",\"properties\":{\"tool\":{\"type\":\"string\"},\"args\":{\"type\":\"object\"}},\"required\":[\"tool\"]}", JobStart, Plans.WriteFlag);
-            r.Add("job_status", "Status/result of a queued job (queued | running | done | error) or the list of recent jobs when no id is given.",
+            r.Add("job_status", "Status/result of a queued job (queued | running | done | error, with progress frames for sliced jobs) or the list of recent jobs when no id is given.",
                 "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"}}}", JobStatus);
             JobTools["zdo_audit"] = x => McpJson.GetBool(x, "fix", false) ? Plans.GuardPublic(x, AuditTool) : AuditTool(x);
             Install();
@@ -58,9 +58,11 @@ namespace HubnerExt
             };
             const BindingFlags F = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             patch("ZNetScene.Update", typeof(ZNetScene).GetMethod("Update", F), "SceneTick", false);
+#if SERVER
+            patch("ZRoutedRpc.RPC_RoutedRPC", typeof(ZRoutedRpc).GetMethod("RPC_RoutedRPC", F), "RelayedChat2", true);                       // server: every routed RPC a client sends arrives here first (chat included), so one hook sees everything once
+#else
             patch("Chat.OnNewChatMessage", typeof(Chat).GetMethod("OnNewChatMessage", F), "ChatMsg", false);                                  // client: every message the player would see
-            patch("ZRoutedRpc.HandleRoutedRPC", typeof(ZRoutedRpc).GetMethod("HandleRoutedRPC", F), "RoutedChat", true);                     // messages addressed to this node
-            patch("ZRoutedRpc.RPC_RoutedRPC", typeof(ZRoutedRpc).GetMethod("RPC_RoutedRPC", F), "RelayedChat2", true);                       // server: every message a client sends, before it is relayed
+#endif
             patch("ZNet.SaveWorld", typeof(ZNet).GetMethod("SaveWorld", F), "BeforeSave", true);                                              // every save, autosaves included
         }
         public static void Uninstall() { try { if (_h != null) _h.UnpatchSelf(); } catch { } _h = null; }
@@ -82,13 +84,9 @@ namespace HubnerExt
                     if (t.Name == "UserInfo") name = UiName(o);
                 }
                 if (text == null) return;
-                lock (ChatRows)
-                {
-                    ChatRows.Add("{\"seq\":" + (++_chatSeq) + ",\"time\":" + U.S(DateTime.UtcNow.ToString("HH:mm:ss")) + ",\"type\":" + U.S(type) + ",\"name\":" + U.S(name) + ",\"text\":" + U.S(text) + "}");
-                    if (ChatRows.Count > 500) ChatRows.RemoveAt(0);
-                }
+                AddChat(type, name, text);
             }
-            catch { }
+            catch (Exception ex) { U.Once("ChatMsg", ex); }
         }
         static string UiName(object ui)
         {
@@ -102,49 +100,39 @@ namespace HubnerExt
             catch { }
             return "";
         }
-        static void RelayedChat(object __0)                                                   // __0 = ZRpc, the package is the second argument
-        {
-            try
-            {
-                if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
-            }
-            catch { return; }
-        }
+        static readonly int SayHash = "Say".GetStableHashCode(), ChatHash = "ChatMessage".GetStableHashCode();
+        /// <summary>Server: every routed RPC passes through RPC_RoutedRPC(ZRpc, ZPackage). The wire layout of RoutedRPCData is
+        /// msgID(long) sender(long) target(long) targetZDO(ZDOID) methodHash(int) parameters(ZPackage); we peek the hash and only
+        /// decode the two chat methods, so the hook costs a few reads per RPC instead of a reflective deserialize of everything.</summary>
         static void RelayedChat2(object __0, object __1)
         {
             try
             {
                 var pkg = __1 as ZPackage; if (pkg == null) return;
-                var tp = typeof(ZRoutedRpc).GetNestedType("RoutedRPCData", BindingFlags.Public | BindingFlags.NonPublic); if (tp == null) return;
-                var d = Activator.CreateInstance(tp); var copy = new ZPackage(pkg.GetArray()); copy.SetPos(0);
-                var de = tp.GetMethod("Deserialize"); if (de == null) return; de.Invoke(d, new object[] { copy });
-                RoutedChat(d);
-            }
-            catch { }
-        }
-        static void RoutedChat(object __0)
-        {
-            try
-            {
-                if (__0 == null) return;
-                var t = __0.GetType();
-                var hashF = t.GetField("m_methodHash"); var parF = t.GetField("m_parameters");
-                if (hashF == null || parF == null) return;
-                int hash = (int)hashF.GetValue(__0); bool say = hash == "Say".GetStableHashCode(), msg = hash == "ChatMessage".GetStableHashCode();
-                if (!say && !msg) return;                                                       // Normal and Whisper travel as the Talker RPC "Say" on the speaker's object, Shout and Ping as the routed "ChatMessage"
-                var src = (ZPackage)parF.GetValue(__0);
-                var pkg = new ZPackage(src.GetArray()); pkg.SetPos(0);
-                if (msg) pkg.ReadVector3();
-                int type = pkg.ReadInt();
-                var ui = new UserInfo(); ui.Deserialize(ref pkg);
-                string text = pkg.ReadString();
-                lock (ChatRows)
+                var pos = pkg.GetPos(); pkg.SetPos(0);
+                try
                 {
-                    ChatRows.Add("{\"seq\":" + (++_chatSeq) + ",\"time\":" + U.S(DateTime.UtcNow.ToString("HH:mm:ss")) + ",\"type\":" + U.S(((Talker.Type)type).ToString()) + ",\"name\":" + U.S(UiName(ui)) + ",\"text\":" + U.S(text) + "}");
-                    if (ChatRows.Count > 500) ChatRows.RemoveAt(0);
+                    pkg.ReadLong(); pkg.ReadLong(); pkg.ReadLong(); pkg.ReadZDOID();
+                    int hash = pkg.ReadInt(); bool say = hash == SayHash, msg = hash == ChatHash;
+                    if (!say && !msg) return;                                                       // Normal and Whisper travel as the Talker RPC "Say" on the speaker's object, Shout and Ping as the routed "ChatMessage"
+                    var inner = pkg.ReadPackage();
+                    if (msg) inner.ReadVector3();
+                    int type = inner.ReadInt();
+                    var ui = new UserInfo(); ui.Deserialize(ref inner);
+                    string text = inner.ReadString();
+                    AddChat(((Talker.Type)type).ToString(), UiName(ui), text);
                 }
+                finally { pkg.SetPos(pos); }
             }
-            catch { }
+            catch (Exception ex) { U.Once("RelayedChat2", ex); }
+        }
+        static void AddChat(string type, string name, string text)
+        {
+            lock (ChatRows)
+            {
+                ChatRows.Add("{\"seq\":" + (++_chatSeq) + ",\"time\":" + U.S(DateTime.UtcNow.ToString("HH:mm:ss")) + ",\"type\":" + U.S(type) + ",\"name\":" + U.S(name) + ",\"text\":" + U.S(text) + "}");
+                if (ChatRows.Count > 500) ChatRows.RemoveAt(0);
+            }
         }
         static ToolOutput ChatTail(Dictionary<string, object> a)
         {
@@ -155,7 +143,7 @@ namespace HubnerExt
             return U.Json("{\"last\":" + _chatSeq + ",\"count\":" + rows.Count + ",\"messages\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
-        static void SceneTick() { try { RunJobs(); } catch { } }
+        static void SceneTick() { try { RunJobs(); } catch (Exception ex) { U.Once("SceneTick", ex); } }
 
         // ------------------------------------------------------------------ sector helpers
         static List<ZDO>[] Lists()
@@ -287,9 +275,10 @@ namespace HubnerExt
         {
             if (ZNet.instance == null) return U.Json("{\"count\":0,\"players\":[]}");
             var rows = new List<string>(); int sandbox = 0;
+            var names = McpJson.SettingList("hubner.sandboxNames"); if (names == null || names.Count == 0) names = new List<string> { "Odev", "MaRkO", "ClaudeEyes" };
             foreach (var p in ZNet.instance.GetPeers())
             {
-                string name = p.m_playerName ?? ""; bool sb = name == "Odev" || name == "MaRkO" || name == "ClaudeEyes"; if (sb) sandbox++;
+                string name = p.m_playerName ?? ""; bool sb = names.Contains(name); if (sb) sandbox++;
                 string host = ""; try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch { }
                 rows.Add("{\"name\":" + U.S(name) + ",\"host\":" + U.S(host) + ",\"uid\":" + p.m_uid + ",\"pos\":" + U.V(p.m_refPos) + ",\"sandbox\":" + (sb ? "true" : "false") + "}");
             }
@@ -335,26 +324,50 @@ namespace HubnerExt
         }
 
         // ------------------------------------------------------------------ jobs
-        sealed class Job { public int Id; public string Tool; public Dictionary<string, object> Args; public string State = "queued"; public string Result; public DateTime Queued = DateTime.UtcNow; }
+        // Two kinds: JobTools run in one frame (off the HTTP timeout); JobIters are iterators advanced for at most hubner.jobBudgetMs per frame.
+        sealed class Job { public int Id; public string Tool; public Dictionary<string, object> Args; public string State = "queued"; public string Result; public DateTime Queued = DateTime.UtcNow; public IEnumerator<ToolOutput> Iter; public int Frames; public bool IsJson; }
         static readonly List<Job> _jobs = new List<Job>(); static int _jobSeq;
         internal static Dictionary<string, Func<Dictionary<string, object>, ToolOutput>> JobTools = new Dictionary<string, Func<Dictionary<string, object>, ToolOutput>>();
+        internal static Dictionary<string, Func<Dictionary<string, object>, IEnumerator<ToolOutput>>> JobIters = new Dictionary<string, Func<Dictionary<string, object>, IEnumerator<ToolOutput>>>();
 
         static ToolOutput JobStart(Dictionary<string, object> a)
         {
             var tool = McpJson.GetStr(a, "tool");
-            if (tool == null || !JobTools.ContainsKey(tool)) return ToolOutput.Err("tool not allowed for jobs: " + tool + " (allowed: " + string.Join(", ", JobTools.Keys.ToArray()) + ")");
+            if (tool == null || !(JobTools.ContainsKey(tool) || JobIters.ContainsKey(tool))) return ToolOutput.Err("tool not allowed for jobs: " + tool + " (allowed: " + string.Join(", ", JobTools.Keys.Concat(JobIters.Keys).ToArray()) + ")");
             var args = McpJson.GetObj(a, "args") ?? new Dictionary<string, object>();
             var j = new Job { Id = ++_jobSeq, Tool = tool, Args = args }; _jobs.Add(j);
             if (_jobs.Count > 50) _jobs.RemoveAt(0);
-            return U.Json("{\"job\":" + j.Id + ",\"state\":\"queued\"}");
+            return U.Json("{\"job\":" + j.Id + ",\"state\":\"queued\",\"sliced\":" + (JobIters.ContainsKey(tool) ? "true" : "false") + "}");
         }
+
+        static void Finish(Job j, ToolOutput o) { j.Result = o != null ? o.Text : ""; j.IsJson = o != null && !o.IsError && o.Text != null && o.Text.StartsWith("{"); j.State = o == null || o.IsError ? "error" : "done"; }
 
         static void RunJobs()
         {
-            var j = _jobs.FirstOrDefault(x => x.State == "queued"); if (j == null) return;
-            j.State = "running";
-            try { var o = JobTools[j.Tool](j.Args); j.Result = o.Text; j.State = o.IsError ? "error" : "done"; }
-            catch (Exception ex) { j.Result = ex.Message; j.State = "error"; }
+            var j = _jobs.FirstOrDefault(x => x.State == "running") ?? _jobs.FirstOrDefault(x => x.State == "queued"); if (j == null) return;
+            if (j.State == "queued")
+            {
+                j.State = "running";
+                if (JobIters.TryGetValue(j.Tool, out var mk)) { try { j.Iter = mk(j.Args); } catch (Exception ex) { j.Result = ex.Message; j.State = "error"; return; } }
+                else
+                {
+                    try { Finish(j, JobTools[j.Tool](j.Args)); }
+                    catch (Exception ex) { j.Result = ex.Message; j.State = "error"; }
+                    return;
+                }
+            }
+            // sliced job: advance until the frame budget is spent or it yields its result
+            var budget = Math.Max(1, McpJson.SettingInt("hubner.jobBudgetMs", 8)); var t0 = Time.realtimeSinceStartup; j.Frames++;
+            try
+            {
+                while (true)
+                {
+                    if (!j.Iter.MoveNext()) { Finish(j, null); return; }
+                    if (j.Iter.Current != null) { Finish(j, j.Iter.Current); return; }
+                    if ((Time.realtimeSinceStartup - t0) * 1000f >= budget) return;
+                }
+            }
+            catch (Exception ex) { j.Result = ex.GetType().Name + ": " + ex.Message; j.State = "error"; Plugin.Log?.LogWarning("[hubner-ext] job " + j.Id + " " + j.Tool + " threw: " + ex); }
         }
 
         static ToolOutput JobStatus(Dictionary<string, object> a)
@@ -362,9 +375,9 @@ namespace HubnerExt
             if (U.Has(a, "id"))
             {
                 var j = _jobs.FirstOrDefault(x => x.Id == (int)McpJson.Get(a, "id", -1)); if (j == null) return ToolOutput.Err("no such job");
-                return U.Json("{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"result\":" + (j.Result != null && j.Result.StartsWith("{") ? j.Result : U.S(j.Result ?? "")) + "}");
+                return U.Json("{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"frames\":" + j.Frames + ",\"result\":" + (j.IsJson ? j.Result : U.S(j.Result ?? "")) + "}");
             }
-            return U.Json("{\"jobs\":[" + string.Join(",", _jobs.Select(j => "{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + "}").ToArray()) + "]}");
+            return U.Json("{\"jobs\":[" + string.Join(",", _jobs.Select(j => "{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"frames\":" + j.Frames + "}").ToArray()) + "]}");
         }
     }
 }

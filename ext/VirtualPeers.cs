@@ -1,12 +1,12 @@
 // Virtual peers: make the dedicated server instantiate the world around positions WE choose, with no player connected (adopted from ddormer/valheim-serverside, rewritten).
 // A stock dedicated server has no reference position, so ZNetScene never creates GameObjects: no colliders, no WearNTear, no heightmaps. While at least one virtual peer exists,
-// ZNetScene.CreateDestroyObjects is replaced by a loop over virtual peers + real peers: CreateLocalZones(pos), ReleaseNearbyZDOS(pos), FindSectorObjects(zone, simulationDistance),
-// then the game's own CreateObjects / RemoveObjects with the union.  Off by default, capped, auto-expiring.
+// ZNetScene.CreateDestroyObjects is replaced by: for each virtual peer CreateLocalZones(pos) + FindSectorObjects(zone, simulationDistance); ONE ReleaseNearbyZDOS pass for the
+// server's own objects far from every peer; then the game's own CreateObjects / RemoveObjects with the union. Vanilla instantiates nothing on a dedicated server, so real players
+// are not affected by this hook; but creatures and growth inside the instantiated zones become server-simulated while a peer exists. Off by default, gated, capped, auto-expiring.
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using HarmonyLib;
 using UnityEngine;
 using ValheimMCP;
@@ -19,12 +19,12 @@ namespace HubnerExt
         static readonly List<VP> Peers = new List<VP>();
         static Harmony _h; static string _err = ""; static int _frames; static string _lastError = "";
         static MethodInfo _create, _remove, _find, _release, _local, _getZone; static FieldInfo _near, _distant, _simDist;
-        const int MaxPeers = 4;
+        const int MaxPeers = 4; const float NearPlayer = 200f;
 
         public static void Register(ToolRegistry r)
         {
-            r.Add("vpeer_add", "Server only: add a virtual peer (name, x, z, minutes default 30, max 240, at most 4). While one exists the server instantiates the world around it (colliders, heightmaps, WearNTear) so server-side physics tools work with no player connected. Costs CPU/RAM; it expires on its own.",
-                "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"minutes\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", Add, Plans.WriteFlag);
+            r.Add("vpeer_add", "Server only: add a virtual peer (name, x, z, minutes default 20, max 240, at most 4). While one exists the server instantiates the world around it (colliders, heightmaps, WearNTear) so server-side physics tools work with no player connected. Costs CPU/RAM and makes creatures near it server-simulated; refused within 200 m of a real player unless force=true; expires on its own. Write-gated like every server write (confirm:'server-write').",
+                "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"minutes\":{\"type\":\"number\"},\"force\":{\"type\":\"boolean\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"x\",\"z\"]}", a => Plans.GuardPublic(a, Add), Plans.WriteFlag);
             r.Add("vpeer_remove", "Remove a virtual peer by name (or all with name '*'). The instantiated objects are removed by the game's own RemoveObjects on the next tick.",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}", Remove);
             r.Add("vpeer_list", "Virtual peers with positions and minutes left, the number of instantiated objects, hook state and the last error.", "{\"type\":\"object\",\"properties\":{}}", List);
@@ -59,15 +59,17 @@ namespace HubnerExt
                 if (Peers.Count == 0 || ZNet.instance == null || !ZNet.instance.IsDedicated() || ZoneSystem.instance == null || ZDOMan.instance == null) return true;
                 Peers.RemoveAll(p => p.Expires < DateTime.UtcNow); if (Peers.Count == 0) return true;
                 var near = (List<ZDO>)_near.GetValue(__instance); var distant = (List<ZDO>)_distant.GetValue(__instance); near.Clear(); distant.Clear();
-                var pos = Peers.Select(p => p.Pos).ToList();
-                var tn = new List<ZDO>(); var td = new List<ZDO>(); var sim = _simDist.GetValue(ZoneSystem.instance); var uid = ZNet.GetUID();
-                foreach (var p in pos)
+                var tn = new List<ZDO>(); var td = new List<ZDO>(); var sim = _simDist.GetValue(ZoneSystem.instance); var seen = new HashSet<ZDO>();
+                foreach (var p in Peers)
                 {
-                    _local.Invoke(ZoneSystem.instance, new object[] { p });
-                    _release.Invoke(ZDOMan.instance, new object[] { p, uid });
-                    var zone = _getZone.Invoke(null, new object[] { p }); tn.Clear(); td.Clear();
-                    _find.Invoke(ZDOMan.instance, new object[] { zone, sim, tn, td }); near.AddRange(tn); distant.AddRange(td);
+                    _local.Invoke(ZoneSystem.instance, new object[] { p.Pos });
+                    var zone = _getZone.Invoke(null, new object[] { p.Pos }); tn.Clear(); td.Clear();
+                    _find.Invoke(ZDOMan.instance, new object[] { zone, sim, tn, td });
+                    foreach (var z in tn) if (seen.Add(z)) near.Add(z);
+                    foreach (var z in td) if (seen.Add(z)) distant.Add(z);
                 }
+                // one release pass from the first peer only: releasing per peer would hand back objects near the other peers every frame (ownership flapping, network churn)
+                _release.Invoke(ZDOMan.instance, new object[] { Peers[0].Pos, ZNet.GetUID() });
                 _create.Invoke(__instance, new object[] { near, distant }); _remove.Invoke(__instance, new object[] { near, distant }); _frames++;
                 return false;
             }
@@ -80,7 +82,13 @@ namespace HubnerExt
             if (ZNet.instance == null || !ZNet.instance.IsDedicated()) return ToolOutput.Err("only on a dedicated server (the client simulates its own area)");
             var name = McpJson.GetStr(a, "name") ?? "vp"; var ex = Peers.FirstOrDefault(p => p.Name == name);
             if (ex == null && Peers.Count >= MaxPeers) return ToolOutput.Err("at most " + MaxPeers + " virtual peers");
-            var pos = new Vector3((float)U.D(a, "x", 0), 0, (float)U.D(a, "z", 0)); var mins = Math.Max(1, Math.Min(240, McpJson.Get(a, "minutes", 30)));
+            var pos = new Vector3((float)U.D(a, "x", 0), 0, (float)U.D(a, "z", 0)); var mins = Math.Max(1, Math.Min(240, McpJson.Get(a, "minutes", 20)));
+            if (!McpJson.GetBool(a, "force", false))
+                foreach (var pl in ZNet.instance.GetPlayerList())
+                {
+                    var d = new Vector2(pl.m_position.x - pos.x, pl.m_position.z - pos.z).magnitude;
+                    if (d < NearPlayer) return ToolOutput.Err("player " + pl.m_name + " is " + U.N(Math.Round(d)) + " m from that spot: a virtual peer there would change what their area simulates; pass force=true if you mean it");
+                }
             if (ex == null) { ex = new VP { Name = name }; Peers.Add(ex); }
             ex.Pos = pos; ex.Expires = DateTime.UtcNow.AddMinutes(mins);
             return U.Json("{\"added\":" + U.S(name) + ",\"minutes\":" + U.N(mins) + ",\"peers\":" + Peers.Count + "}");

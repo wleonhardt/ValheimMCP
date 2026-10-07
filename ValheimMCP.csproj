@@ -1,73 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk">
+    <!-- Hubner fork of myrcutio/ValheimMCP (MIT, see LICENSE): adds a tool registry and a hot-reloadable
+         extension host (BepInEx/hubner-ext/*.dll). Game and BepInEx assemblies are read from ext/lib (not committed):
+         dotnet build -c Release ValheimMCP.csproj   (override with -p:LibDir=/path/to/lib; output goes to ./out/) -->
     <PropertyGroup>
         <TargetFramework>net472</TargetFramework>
         <LangVersion>9.0</LangVersion>
         <AssemblyName>ValheimMCP</AssemblyName>
         <RootNamespace>ValheimMCP</RootNamespace>
-
-        <!-- SINGLE SOURCE OF TRUTH for the mod's identity/version. These flow into
-             the assembly version, the generated PluginInfo class (consumed by
-             Plugin.cs / McpServer.cs), and Thunderstore/manifest.json (synced by
-             scripts/package.sh). To cut a release, bump <Version> here only. -->
-        <Version>0.2.2</Version>
+        <!-- SINGLE SOURCE OF TRUTH for the core's identity/version: flows into PluginInfo and the assembly version. -->
+        <Version>0.4.0</Version>
         <BepInExPluginGuid>com.valheimmcp.server</BepInExPluginGuid>
-        <BepInExPluginName>Valheim MCP Server</BepInExPluginName>
+        <BepInExPluginName>Valheim MCP Server (Hubner)</BepInExPluginName>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-        <!-- Suppress modding-common warnings (unassigned fields set by Unity/reflection) -->
         <NoWarn>$(NoWarn);CS0649;CS0169</NoWarn>
-
-        <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
-        <R2ModmanProfile>valheim-modding</R2ModmanProfile>
-        <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles/$(R2ModmanProfile)/BepInEx</BepInExDir>
-
-        <OutputPath>$(BepInExDir)/plugins/idontunderstand-ValheimMCP/ValheimMCP/</OutputPath>
+        <LibDir Condition="'$(LibDir)'==''">$(MSBuildProjectDirectory)/ext/lib</LibDir>
+        <OutputPath>$(MSBuildProjectDirectory)/out/</OutputPath>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
     </PropertyGroup>
-
-    <!-- net472 reference assemblies so `dotnet build` works on Linux without a
-         .NET Framework targeting pack installed. -->
     <ItemGroup>
-        <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
-            <PrivateAssets>all</PrivateAssets>
-        </PackageReference>
+        <Compile Include="src/ValheimMCP/**/*.cs" />
+        <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3"><PrivateAssets>all</PrivateAssets></PackageReference>
+        <Reference Include="BepInEx"><HintPath>$(LibDir)/core/BepInEx.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="0Harmony"><HintPath>$(LibDir)/core/0Harmony.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="assembly_valheim"><HintPath>$(LibDir)/Managed/assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine"><HintPath>$(LibDir)/Managed/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.CoreModule"><HintPath>$(LibDir)/Managed/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(LibDir)/Managed/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     </ItemGroup>
-
-    <ItemGroup>
-        <Reference Include="BepInEx">
-            <HintPath>$(BepInExDir)/core/BepInEx.dll</HintPath>
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="0Harmony">
-            <HintPath>$(BepInExDir)/core/0Harmony.dll</HintPath>
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="assembly_valheim">
-            <HintPath>$(ValheimDir)/valheim_Data/Managed/assembly_valheim.dll</HintPath>
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="UnityEngine">
-            <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.dll</HintPath>
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="UnityEngine.CoreModule">
-            <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
-            <Private>false</Private>
-        </Reference>
-        <!-- EncodeToPNG for render_view -->
-        <Reference Include="UnityEngine.ImageConversionModule">
-            <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.ImageConversionModule.dll</HintPath>
-            <Private>false</Private>
-        </Reference>
-    </ItemGroup>
-
-    <!-- Generate PluginInfo.cs from the MSBuild properties above so the GUID/name/
-         version exist in exactly one place. Hand-rolled (no BepInEx.PluginInfoProps
-         dependency) to match this project's dependency-free convention. Semicolons
-         are escaped as %3B so MSBuild doesn't treat them as item separators. -->
-    <Target Name="GeneratePluginInfo" BeforeTargets="CoreCompile"
-            Inputs="$(MSBuildProjectFullPath)"
-            Outputs="$(IntermediateOutputPath)PluginInfo.g.cs">
+    <Target Name="GeneratePluginInfo" BeforeTargets="CoreCompile" Inputs="$(MSBuildProjectFullPath)" Outputs="$(IntermediateOutputPath)PluginInfo.g.cs">
         <PropertyGroup>
-            <PluginInfoContent>// &lt;auto-generated/&gt; Generated from ValheimMCP.csproj — do not edit.
+            <PluginInfoContent>// &lt;auto-generated/&gt;
 namespace ValheimMCP
 {
     internal static class PluginInfo
@@ -79,9 +42,7 @@ namespace ValheimMCP
 }
 </PluginInfoContent>
         </PropertyGroup>
-        <WriteLinesToFile File="$(IntermediateOutputPath)PluginInfo.g.cs"
-                          Lines="$(PluginInfoContent)"
-                          Overwrite="true" WriteOnlyWhenDifferent="true" />
+        <WriteLinesToFile File="$(IntermediateOutputPath)PluginInfo.g.cs" Lines="$(PluginInfoContent)" Overwrite="true" />
         <ItemGroup>
             <Compile Include="$(IntermediateOutputPath)PluginInfo.g.cs" />
         </ItemGroup>

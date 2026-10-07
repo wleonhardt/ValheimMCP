@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### 0.4.0 core / 0.7.0 extension (review fixes)
+- Live-server safety: `plan_apply` is an iterator sliced by the job runner (`hubner.jobBudgetMs` per frame); a tool call that times out is cancelled instead of running late; `vpeer_add` is gated, releases ownership once per frame and refuses spots near real players; server chat capture peeks the RPC hash instead of deserializing every routed RPC (and no longer double-captures).
+- Protection by component: creatures, tamed animals, ships, carts and dropped items are never adopted, cleared or box-deleted; forced deletes/edits need `forceConfirm:'player-built'` and are logged.
+- Plans: stable `key` per item (moves are moves), world-wide sweep of a plan's objects (no stale pieces after a shrink), `floats` extras, fireplaces spawn fuelled.
+- Journal: batched writes per call, compaction, `ints`/`floats`/`strings` journaled and restored by undo; the client's `undo` marks entries undone on disk.
+- Fixes: `Zdos.NameOf` no longer freezes a one-entry table when called before the world loads; `stability_scan` skips non-supporting pieces and reports the game's own `minSupport`/`atRisk`; `sign_check` ignores chest plaques; `prefab_info` validates its argument; number arguments are checked (no raw `InvalidCastException` stacks); tool exceptions return one line, the stack goes to the log.
+- Config: `hubner:` section (`sandboxNames`, `writeFlagMinutes`, `jobBudgetMs`); versions come from the csproj files; the auto-join password can come from `HUBNER_AUTOJOIN_PASSWORD`.
+- Python: `Client` class with `sandbox` / `twin` instances, one `goto`, automatic sliced jobs for big plans; `mcp.call` takes `url`.
+- Tests: `tests/ValheimMCP.Tests` (xunit, game-free sources linked in) run in CI.
+
 - Hardening: Origin/Host validation, 8 MB body cap, optional bearer token (`server.token`).
 - Server twin: virtual peers (`vpeer_*`) give the dedicated server real colliders and physics; whitelisted physics tools run there.
 - Chat: server-side capture (`Say` and `ChatMessage`), `chat_send`, `chat_bubble`.

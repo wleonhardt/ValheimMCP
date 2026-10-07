@@ -207,20 +207,42 @@ There are **no terrain-editing tools** by design.
 You need the game's managed assemblies and BepInEx core libraries, which are **not** in this repository (they are Iron Gate's and BepInEx's files). Copy them to `ext/lib/` (`core/0Harmony.dll`, `core/BepInEx.dll`, `Managed/assembly_valheim.dll`, `assembly_utils.dll`, `UnityEngine*.dll`) or pass `-p:LibDir=/path/to/lib`.
 
 ```bash
-dotnet build -c Release ValheimMCP.csproj -p:OutputPath="$PWD/out/"   # core plugin -> ./out/ValheimMCP.dll (the default OutputPath is a r2modman profile)
-dotnet build -c Release ext/HubnerExt.csproj                          # client extension -> ./out/HubnerExt.dll (reads ./out/ValheimMCP.dll and ext/lib)
-dotnet build -c Release ext/HubnerExtServer.csproj                    # server extension
+dotnet build -c Release ValheimMCP.csproj              # core plugin -> ./out/ValheimMCP.dll
+dotnet build -c Release ext/HubnerExt.csproj           # client extension -> ./out/HubnerExt.dll (reads ./out/ValheimMCP.dll and ext/lib)
+dotnet build -c Release ext/HubnerExtServer.csproj     # server extension -> ./out/server/HubnerExt.dll
+dotnet test tests/ValheimMCP.Tests                     # unit tests of the game-free parts (no game DLLs needed; this is what CI runs)
 ```
-Override any reference location with `-p:McpDll=/path/ValheimMCP.dll` or `-p:LibDir=/path/lib`. Copy `out/ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubner-ext/`, and `config/valheimmcp.client.yml` or `config/valheimmcp.server.yml` to `BepInEx/config/valheimmcp.yml`.
+Override any reference location with `-p:McpDll=/path/ValheimMCP.dll` or `-p:LibDir=/path/lib`. Versions: core in `ValheimMCP.csproj`, extension in `ext/HubnerExt*.csproj` (both `<Version>`; `ext_info` reports them). Copy `out/ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubner-ext/`, and `config/valheimmcp.client.yml` or `config/valheimmcp.server.yml` to `BepInEx/config/valheimmcp.yml`.
 
 ## Python client (`python/`)
-`mcp.py` is a tiny MCP-over-HTTP client; `hubner.py` wraps the tools (`render`, `walk`, `plan_apply`, `go_fast`, `server_writes`, ...). Environment: `HUBNER_URL` (default `http://127.0.0.1:8731/mcp`), `HUBNER_SERVER_SSH`, `HUBNER_GATE_FLAG`, `HUBNER_LAUNCH`.
+`mcp.py` is a tiny MCP-over-HTTP client; `hubner.py` has a `Client` class with the tools as methods plus three ready instances: `default` (follows `HUBNER_URL`), `sandbox` (the game client, 8731) and `twin` (the dedicated server, `HUBNER_SERVER_URL`, default 8741, adds `confirm:'server-write'` to writes). `from hubner import *` still gives the module-level functions bound to `default`.
+```python
+from hubner import sandbox, twin
+with twin.writes():                                   # opens ALLOW_SERVER_WRITES over ssh for the block, always removes it
+    twin.plan_apply('castle-x', items)                # > 300 items: runs as a sliced job (job_start + poll), never freezes the game
+sandbox.goto(-200, -300); sandbox.walk([[-200, -290]]); sandbox.render('shot.png', x=-200, z=-300, yaw=200, pitch=20, dist=30)
+with twin.peer(-200, -300): twin.stability_scan(-250, -350, -150, -250)
+```
+Environment: `HUBNER_URL`, `HUBNER_SERVER_URL`, `HUBNER_SERVER_SSH` (user@host), `HUBNER_GATE_FLAG` (flag path on the server; both required for `writes()`), `HUBNER_TOKEN`, `HUBNER_LAUNCH`, `HUBNER_JOB_THRESHOLD`, `HUBNER_NOJUMP`.
+
+## Plans: identity, jobs, undo
+- Send a stable `key` per item from your generator (for example `tower:NW:wall:c3:k5`): a moved piece is then a *move*, not a delete plus a spawn. Without a key the identity is prefab + position (0.1 m) + height (0.5 m) + yaw.
+- `plan_apply` sweeps the plan's objects everywhere this process knows them (the server: the whole world); pass `box` to limit the sweep.
+- Big plans: `job_start {tool:'plan_apply', args}`; the job runs in slices of `hubner.jobBudgetMs` per frame (default 8 ms) so players never see a hitch. The Python client does this by itself over `HUBNER_JOB_THRESHOLD` items.
+- Everything is journaled (`hubner-ext/journal.jsonl`, batched per call, compacted on load). `undo_group` restores position, rotation, text, tags and any `ints`/`floats`/`strings` the operation changed (door states, fuel).
+- Fireplace prefabs spawn with full fuel (`floats.fuel` to override).
+
+## Safety: what the write tools refuse
+- Terrain and internal prefabs, players. Creatures, tamed animals, ships, carts and dropped items are decided by the prefab's components (never adopted, never cleared as overlap, deleted only forced).
+- Player-built objects (`creator != 0`) need `force:true` **and** `forceConfirm:'player-built'`; every forced object is logged.
+- Server writes need the gate flag file (`ALLOW_SERVER_WRITES`, valid for `hubner.writeFlagMinutes` after it was touched) and `confirm:'server-write'`. `vpeer_add` is gated too and refuses a spot within 200 m of a real player unless forced.
+- A tool call that hits the HTTP timeout is cancelled before it runs: a retry cannot execute a write twice.
 
 ## Virtual peers: server-side physics with no player connected
-A stock dedicated server never instantiates the world (no reference position), so it has no colliders, heightmaps or `WearNTear`. `vpeer_add {name,x,z,minutes}` makes the server run the game's own `CreateLocalZones` / `FindSectorObjects` / `CreateObjects` / `RemoveObjects` around positions you choose (idea from ddormer/valheim-serverside, rewritten; off by default, at most 4 peers, auto-expiring, behind the write gate). While one exists the server twin also answers `raycast`, `surface_probe`, `headroom`, `stability_scan`, `walk_check`, `terrain_info`, `sign_check` and `bed_check`. Python: `with hubner.vpeer(x, z): ...`.
+A stock dedicated server never instantiates the world (no reference position), so it has no colliders, heightmaps or `WearNTear`. `vpeer_add {name,x,z,minutes}` makes the server run the game's own `CreateLocalZones` / `FindSectorObjects` / `CreateObjects` / `RemoveObjects` around positions you choose (idea from ddormer/valheim-serverside, rewritten; off by default, at most 4 peers, auto-expiring, behind the write gate, refused within 200 m of a real player unless forced). While one exists the server twin also answers `raycast`, `surface_probe`, `headroom`, `stability_scan`, `walk_check`, `terrain_info`, `sign_check` and `bed_check`. Python: `with hubner.vpeer(x, z): ...`.
 
 ## Chat
-`chat_tail` captures chat on the client (`Chat.OnNewChatMessage`) and on the server (the Talker RPC `Say` for Normal/Whisper and the routed `ChatMessage` for Shout/Ping, read before the server relays them). `chat_send` speaks as the sandbox character (180 characters, 15 m for Normal); `chat_bubble` shows a speech bubble for a named speaker.
+`chat_tail` captures chat on the client (`Chat.OnNewChatMessage`) and on the server (one hook on `ZRoutedRpc.RPC_RoutedRPC` that peeks the method hash and decodes only the Talker RPC `Say` for Normal/Whisper and the routed `ChatMessage` for Shout/Ping). `chat_send` speaks as the sandbox character (180 characters, 15 m for Normal); `chat_bubble` shows a speech bubble for a named speaker.
 
 ## Other tools added from a community review
 `prefab_find` (name and component search, build costs), `visible_objects` (frustum + occlusion + type taxonomy), `interact` (press E), `probe_fan` (12-heading steering probe), `base_survey` (clusters, stations, beds), `player_status`.
@@ -230,6 +252,7 @@ A stock dedicated server never instantiates the world (no reference position), s
 - The MCP endpoint binds to loopback and is unauthenticated: reach it through an SSH tunnel, never expose it.
 - Server writes need the gate flag file (`ALLOW_SERVER_WRITES`) next to the extension; `hubner.server_writes()` opens it and always removes it again.
 - Take a world backup before large write batches.
+- Pass the auto-join password as the environment variable `HUBNER_AUTOJOIN_PASSWORD` rather than on the command line.
 
 ## Licence
 MIT, same as upstream (see `LICENSE`). Upstream: https://github.com/myrcutio/ValheimMCP

@@ -86,6 +86,12 @@ namespace HubnerExt
         }
         static void MenuTick() { try { if (_auto != null) _auto.Tick(); Env.Tick(); } catch { } }
 
+        // reflective field handles, resolved once (SetControlsPrefix runs every physics tick)
+        const BindingFlags FI = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        static readonly FieldInfo FLookYaw = typeof(Character).GetField("m_lookYaw", FI), FTeleporting = typeof(Player).GetField("m_teleporting", FI), FDebugFly = typeof(Player).GetField("m_debugFly", FI);
+        internal static bool Teleporting(Player p) { try { return FTeleporting != null && (bool)FTeleporting.GetValue(p); } catch (Exception ex) { U.Once("m_teleporting", ex); return false; } }
+        static bool Flying(Player p) { try { return FDebugFly != null && (bool)FDebugFly.GetValue(p); } catch (Exception ex) { U.Once("m_debugFly", ex); return false; } }
+
         // Harmony prefix: Player.SetControls(Vector3 movedir, bool attack, ..., bool jump, bool crouch, bool run, ...) - replace move/jump/run while walking.
         static void SetControlsPrefix(Player __instance, ref Vector3 movedir, ref bool jump, ref bool run)
         {
@@ -93,7 +99,7 @@ namespace HubnerExt
             if (w == null || !w.Active || __instance != Player.m_localPlayer) return;
             // SetControls takes the move direction relative to the character's look yaw; convert our world direction
             Quaternion yaw = Quaternion.identity;
-            try { var f = typeof(Character).GetField("m_lookYaw", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); if (f != null) yaw = (Quaternion)f.GetValue(__instance); } catch { }
+            try { if (FLookYaw != null) yaw = (Quaternion)FLookYaw.GetValue(__instance); } catch (Exception ex) { U.Once("m_lookYaw", ex); }
             movedir = Quaternion.Inverse(yaw) * w.MoveDir; jump = w.Jump; run = w.Run;
             w.Jump = false;
         }
@@ -104,9 +110,8 @@ namespace HubnerExt
             var p = Player.m_localPlayer;
             if (p == null) return ToolOutput.Err("no local player (menu or respawning)");
             var pos = p.transform.position;
-            bool tele = false; try { var tf = typeof(Player).GetField("m_teleporting", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); tele = tf != null && (bool)tf.GetValue(p); } catch { }
-            bool fly = false; try { var f = typeof(Player).GetField("m_debugFly", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); fly = f != null && (bool)f.GetValue(p); } catch { }
-            bool god = false; try { god = p.InGodMode(); } catch { }
+            bool tele = Teleporting(p), fly = Flying(p);
+            bool god = false; try { god = p.InGodMode(); } catch (Exception ex) { U.Once("InGodMode", ex); }
             return U.Json("{\"pos\":" + U.V(pos) + ",\"grounded\":" + (p.IsOnGround() ? "true" : "false") + ",\"god\":" + (god ? "true" : "false") + ",\"flying\":" + (fly ? "true" : "false") + ",\"inWater\":" + (p.IsSwimming() ? "true" : "false")
                 + ",\"health\":" + U.N(p.GetHealth()) + ",\"teleporting\":" + (tele ? "true" : "false") + ",\"walking\":" + (_walker != null && _walker.Active ? "true" : "false") + ",\"dead\":" + (p.IsDead() ? "true" : "false") + "}");
         }
@@ -115,14 +120,14 @@ namespace HubnerExt
         {
             if (Player.m_localPlayer == null) return ToolOutput.Err("no local player");
             if (_walker == null) { Install(); if (_walker == null) return ToolOutput.Err("controller not installed: " + LastError + " [harmony=" + (_h != null) + " walker=" + (_walker != null) + "]"); }
-            try { var tf = typeof(Player).GetField("m_teleporting", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); if (tf != null && (bool)tf.GetValue(Player.m_localPlayer)) return ToolOutput.Err("character is still teleporting: wait until player_state.teleporting is false"); } catch { }
+            if (Teleporting(Player.m_localPlayer)) return ToolOutput.Err("character is still teleporting: wait until player_state.teleporting is false");
             var pts = McpJson.GetList(a, "points"); if (pts == null || pts.Count == 0) return ToolOutput.Err("points required");
             var list = new List<Vector3>();
             foreach (var o in pts)
             {
                 var l = o as List<object>; if (l == null || l.Count < 2) continue;
-                if (l.Count == 2) list.Add(new Vector3((float)(double)l[0], float.NaN, (float)(double)l[1]));
-                else list.Add(new Vector3((float)(double)l[0], (float)(double)l[1], (float)(double)l[2]));
+                var v = U.Vec(l); if (float.IsNaN(v.x) || float.IsNaN(v.z)) return ToolOutput.Err("points must be [x,z] or [x,y,z] numbers");
+                list.Add(v);
             }
             if (list.Count == 0) return ToolOutput.Err("no valid points");
             if (McpJson.GetBool(a, "nav", false))                                   // replace the straight legs by the game's own navmesh route
@@ -136,8 +141,8 @@ namespace HubnerExt
                 }
                 list = nav;
             }
-            try { Player.m_localPlayer.SetGodMode(true); } catch { }
-            try { var f = typeof(Player).GetField("m_debugFly", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); if (f != null) f.SetValue(Player.m_localPlayer, false); } catch { }
+            try { Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }
+            try { if (FDebugFly != null) FDebugFly.SetValue(Player.m_localPlayer, false); } catch (Exception ex) { U.Once("m_debugFly.set", ex); }
             _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
         }
@@ -158,7 +163,7 @@ namespace HubnerExt
         {
             var p = Player.m_localPlayer; var zs = ZoneSystem.instance;
             if (p == null) return U.Json("{\"player\":false,\"ready\":false}");
-            bool tele = false; try { var tf = typeof(Player).GetField("m_teleporting", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); tele = tf != null && (bool)tf.GetValue(p); } catch { }
+            bool tele = Teleporting(p);
             var pos = p.transform.position; float x = (float)U.D(a, "x", pos.x), z = (float)U.D(a, "z", pos.z), rad = (float)U.D(a, "radius", 30);
             bool loaded = zs != null && zs.IsZoneLoaded(new Vector3(x, 0, z)); float h; bool gok = zs != null && zs.GetGroundHeight(new Vector3(x, 5000f, z), out h);
             int inst = 0; foreach (var nv in U.Instances()) { var d = nv.transform.position - new Vector3(x, nv.transform.position.y, z); if (d.x * d.x + d.z * d.z < rad * rad) inst++; }
@@ -379,10 +384,12 @@ namespace HubnerExt
             string _spec, _pw; float _next; bool _done; int _tries;
             public AutoJoin()
             {
+                // -hubner-autojoin host:port,profile[,password]; the password is better passed as HUBNER_AUTOJOIN_PASSWORD (environment) so it is not in the process list
                 var args = Environment.GetCommandLineArgs();
                 for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-hubner-autojoin") _spec = args[i + 1];
                 if (string.IsNullOrEmpty(_spec)) _done = true;
                 else { var sp = _spec.Split(','); if (sp.Length > 2) _pw = sp[2]; }
+                var env = Environment.GetEnvironmentVariable("HUBNER_AUTOJOIN_PASSWORD"); if (!string.IsNullOrEmpty(env)) _pw = env;
             }
             float _godNext;
             public void Tick()
@@ -404,7 +411,7 @@ namespace HubnerExt
                 var hp = parts[0].Split(':'); int port = hp.Length > 1 ? int.Parse(hp[1], CultureInfo.InvariantCulture) : 2456;
                 _tries++;
                 Mode = "data";                                                       // AutoJoinServer only queues at the menu; the data path builds the join itself
-                var res = DoJoin(parts.Length > 1 ? parts[1] : "ClaudeEyes", hp[0], port, parts.Length > 2 ? parts[2] : null);
+                var res = DoJoin(parts.Length > 1 ? parts[1] : "ClaudeEyes", hp[0], port, _pw);
                 Debug.Log("[hubner autojoin] attempt " + _tries + ": " + res);
             }
         }

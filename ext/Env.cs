@@ -26,7 +26,8 @@ namespace HubnerExt
             r.Add("env_release", "Release any time/weather override held by time_set / weather_set.", "{\"type\":\"object\",\"properties\":{}}", Release, true);
         }
 
-        static FieldInfo F(string n) { return typeof(EnvMan).GetField(n, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); }
+        static readonly Dictionary<string, FieldInfo> _f = new Dictionary<string, FieldInfo>();
+        static FieldInfo F(string n) { if (!_f.TryGetValue(n, out var fi)) _f[n] = fi = typeof(EnvMan).GetField(n, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); return fi; }
 
         static ToolOutput TimeSet(Dictionary<string, object> a)
         {

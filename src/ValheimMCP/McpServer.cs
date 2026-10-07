@@ -286,8 +286,14 @@ namespace ValheimMCP
                     if (ModConfig.IsToolDenied(name)) return Result(id, ToolText("tool denied by config (tools.deny): " + name, true));
                     if (tool.Write && !ModConfig.ToolsWrite) return Result(id, ToolText("write tools are disabled (tools.write=false in valheimmcp.yml)", true));
                     var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, out var outp, out var terr);
-                    if (!ok) return Result(id, ToolText("tool timed out after " + ModConfig.ToolTimeoutMs + "ms (game not ticking or zone loading?)", true));
-                    if (terr != null) return Result(id, ToolText("tool threw: " + terr, true));
+                    if (!ok) return Result(id, ToolText("tool timed out after " + ModConfig.ToolTimeoutMs + "ms (game not ticking or zone loading?); the call was cancelled and will not run late", true));
+                    if (terr != null)
+                    {
+                        // the stack goes to the log; the caller gets one line (argument mistakes are the usual cause)
+                        Plugin.Log?.LogWarning("[ValheimMCP] tool " + name + " threw: " + terr);
+                        var hint = terr is InvalidCastException || terr is NullReferenceException || terr is FormatException ? " (check the argument names and types in the tool's schema)" : "";
+                        return Result(id, ToolText("tool " + name + " threw " + terr.GetType().Name + ": " + terr.Message + hint, true));
+                    }
                     if (outp == null) return Result(id, ToolText("(no output)", false));
                     if (outp.Png != null) return Result(id, ToolImage(Convert.ToBase64String(outp.Png), "image/png", outp.Text));
                     return Result(id, ToolText(outp.Text ?? "", outp.IsError));

@@ -38,6 +38,12 @@ namespace ValheimMCP
 
         private static List<string> _allow = new();
         private static List<string> _deny = new();
+        private static MiniYaml _y = MiniYaml.Parse("");
+
+        /// <summary>Any scalar from valheimmcp.yml by dotted path (extensions read their own `hubner:` section through this).</summary>
+        public static string Setting(string path, string dflt) { return _y.Get(path, dflt); }
+        public static int SettingInt(string path, int dflt) { return _y.GetInt(path, dflt); }
+        public static List<string> SettingList(string path) { return _y.GetList(path); }
 
         public static void Load()
         {
@@ -50,7 +56,7 @@ namespace ValheimMCP
                     Plugin.Log?.LogInfo($"[ValheimMCP] wrote default config: {path}");
                 }
 
-                var y = MiniYaml.Parse(File.ReadAllText(path));
+                var y = MiniYaml.Parse(File.ReadAllText(path)); _y = y;
                 Host = y.Get("server.host", Host);
                 Token = y.Get("server.token", Token) ?? "";
                 Port = y.GetInt("server.port", Port);
@@ -186,6 +192,15 @@ tools:
   write: false
   timeoutMs: 30000
   deny: []
+
+# Hubner extension settings (read by BepInEx/hubner-ext/HubnerExt.dll).
+#   sandboxNames: character names that count as the sandbox (players tool, restart checks)
+#   writeFlagMinutes: how long the server's ALLOW_SERVER_WRITES flag file stays valid after it was touched
+#   jobBudgetMs: main-thread time a queued job may use per frame (plan_apply and friends are sliced)
+hubner:
+  sandboxNames: [Odev, MaRkO, ClaudeEyes]
+  writeFlagMinutes: 30
+  jobBudgetMs: 8
 ";
     }
 }

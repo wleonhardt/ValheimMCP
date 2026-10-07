@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests for the game-free parts of the plugin. The source files are linked in (no reference to the plugin DLL, which needs
+       Valheim's assemblies to build), so these run on any machine and in CI: dotnet test tests/ValheimMCP.Tests -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <LangVersion>9.0</LangVersion>
+    <NoWarn>$(NoWarn);CS8632</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/ValheimMCP/MiniJson.cs" Link="src/MiniJson.cs" />
+    <Compile Include="../../src/ValheimMCP/Json.cs" Link="src/Json.cs" />
+    <Compile Include="../../src/ValheimMCP/MiniYaml.cs" Link="src/MiniYaml.cs" />
+    <Compile Include="../../src/ValheimMCP/RequestPolicy.cs" Link="src/RequestPolicy.cs" />
+    <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+</Project>

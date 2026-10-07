@@ -15,14 +15,34 @@ namespace ValheimMCP
         public static ToolOutput Image(byte[] png, string caption = null) { return new ToolOutput { Png = png, Text = caption }; }
     }
 
-    /// <summary>JSON helpers for extensions (the core's own writer is internal).</summary>
+    /// <summary>JSON helpers for extensions (the core's own writer and parser are internal).</summary>
     public static class McpJson
     {
         public static string Str(string s) { return Json.Str(s); }
         public static string Num(double d) { return d.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }
+        /// <summary>Parse JSON text: objects -> Dictionary, arrays -> List, numbers -> double. Throws FormatException.</summary>
+        public static object Parse(string text) { return MiniJson.Parse(text); }
+        /// <summary>Config scalar from valheimmcp.yml by dotted path (e.g. "hubner.writeFlagMinutes").</summary>
+        public static string Setting(string path, string dflt) { return ModConfig.Setting(path, dflt); }
+        public static int SettingInt(string path, int dflt) { return ModConfig.SettingInt(path, dflt); }
+        public static List<string> SettingList(string path) { return ModConfig.SettingList(path); }
+        /// <summary>A number argument. Accepts JSON numbers and numeric strings ("12.5"); anything else yields the default.</summary>
         public static double Get(Dictionary<string, object> a, string key, double dflt)
         {
-            return a != null && a.TryGetValue(key, out var v) && v is double d ? d : dflt;
+            if (a == null || !a.TryGetValue(key, out var v) || v == null) return dflt;
+            if (v is double d) return d;
+            if (v is string s && double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p)) return p;
+            if (v is bool b) return b ? 1 : 0;
+            return dflt;
+        }
+        /// <summary>Element i of a JSON number list as a double, or NaN when it is not a number: callers get a clean error instead of an InvalidCastException.</summary>
+        public static double At(List<object> l, int i)
+        {
+            if (l == null || i >= l.Count) return double.NaN;
+            var v = l[i];
+            if (v is double d) return d;
+            if (v is string s && double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p)) return p;
+            return double.NaN;
         }
         public static string GetStr(Dictionary<string, object> a, string key, string dflt = null)
         {

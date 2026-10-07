@@ -46,7 +46,7 @@ namespace HubnerExt
                 "Simulate a player walking a polyline of waypoints [[x,y,z],...] with a capsule (radius, height, stepHeight, maxSlopeDeg). Closed doors are treated as passable (players open them). Reports the first blocking collider, headroom failures and unsupported drops. Use it to prove stairs, doors and corridors are walkable.",
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"radius\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"},\"stepHeight\":{\"type\":\"number\"},\"maxSlopeDeg\":{\"type\":\"number\"}},\"required\":[\"points\"]}", Walk.Check);
             Reg.Add(r, "stability_scan",
-                "Structural support values (the game's own, from each piece) in a box: min/avg, list of pieces below a threshold (will collapse when NoBuildingFall is off).",
+                "Structural support of the supporting pieces (WearNTear with m_supports, so furniture and torches are excluded) in a box, from the game's own cached values: pieces, min/avg, atRisk = pieces whose support is below their material's own GetMinSupport (what falls when NoBuildingFall is off), and the list below `threshold` (default: each piece's minSupport). Values are a converging iteration seeded from ground contact: scan a freshly spawned plan only after ~90 s with the area instantiated.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"threshold\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}},\"required\":[\"x0\",\"z0\",\"x1\",\"z1\"]}", Read.Stability);
             Reg.Add(r, "inspect_type", "Debug: list fields/methods of a game type by name (substring filter on members).",
                 "{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\"},\"filter\":{\"type\":\"string\"}},\"required\":[\"type\"]}", Read.InspectType);
@@ -204,7 +204,8 @@ namespace HubnerExt
         public static ToolOutput PrefabInfo(Dictionary<string, object> a)
         {
             if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
-            var name = McpJson.GetStr(a, "name");
+            var name = McpJson.GetStr(a, "name") ?? McpJson.GetStr(a, "prefab");
+            if (string.IsNullOrEmpty(name)) return ToolOutput.Err("name required (the prefab name)");
             var prefab = ZNetScene.instance.GetPrefab(name);
             if (prefab == null) return ToolOutput.Err("unknown prefab: " + name);
             GameObject go = null;
@@ -338,20 +339,27 @@ namespace HubnerExt
             return U.Json("{\"teleporting\":" + (ok ? "true" : "false") + ",\"accepted\":" + (ok ? "true" : "false") + ",\"distant\":" + (dist ? "true" : "false") + ",\"to\":" + U.V(new Vector3(x, y, z)) + ",\"groundSnapped\":" + (snapped ? "true" : "false") + ",\"godMode\":true}");
         }
 
+        static readonly MethodInfo _minSup = typeof(WearNTear).GetMethod("GetMinSupport", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        static float MinSupport(WearNTear w) { try { return _minSup != null ? (float)_minSup.Invoke(w, null) : 0f; } catch (Exception ex) { U.Once("GetMinSupport", ex); return 0f; } }
+
         public static ToolOutput Stability(Dictionary<string, object> a)
         {
-            var thr = (float)U.D(a, "threshold", 20); var lim = (int)U.D(a, "limit", 100);
-            var low = new List<string>(); var n = 0; double sum = 0; float min = float.MaxValue;
+            if (!U.Has(a, "x0")) return ToolOutput.Err("x0,z0,x1,z1 required");
+            bool hasThr = U.Has(a, "threshold"); var thr = (float)U.D(a, "threshold", 0); var lim = (int)U.D(a, "limit", 100);
+            var low = new List<string>(); var n = 0; double sum = 0; float min = float.MaxValue; int atRisk = 0, skipped = 0;
             foreach (var nv in U.Instances())
             {
                 if (!U.InBox(nv.transform.position, a)) continue;
-                if (nv.GetComponent<WearNTear>() == null) continue;
+                var w = nv.GetComponent<WearNTear>(); if (w == null) continue;
+                if (!w.m_supports) { skipped++; continue; }                                  // furniture, torches, banners: carry no support, cannot collapse
                 var s = nv.GetZDO().GetFloat("support", -1f);
                 if (s < 0) continue;
+                float minSup = MinSupport(w);
                 n++; sum += s; if (s < min) min = s;
-                if (s < thr && low.Count < lim) low.Add("{\"id\":" + U.S(U.Id(nv.GetZDO())) + ",\"prefab\":" + U.S(U.PrefabName(nv)) + ",\"pos\":" + U.V(nv.transform.position) + ",\"support\":" + U.N(s) + "}");
+                bool risk = s < minSup; if (risk) atRisk++;
+                if ((hasThr ? s < thr : risk) && low.Count < lim) low.Add("{\"id\":" + U.S(U.Id(nv.GetZDO())) + ",\"prefab\":" + U.S(U.PrefabName(nv)) + ",\"pos\":" + U.V(nv.transform.position) + ",\"support\":" + U.N(s) + ",\"minSupport\":" + U.N(minSup) + ",\"atRisk\":" + (risk ? "true" : "false") + "}");
             }
-            return U.Json("{\"pieces\":" + n + ",\"min\":" + (n > 0 ? U.N(min) : "null") + ",\"avg\":" + (n > 0 ? U.N(sum / n) : "null") + ",\"below\":[" + string.Join(",", low.ToArray()) + "]}");
+            return U.Json("{\"pieces\":" + n + ",\"nonSupporting\":" + skipped + ",\"min\":" + (n > 0 ? U.N(min) : "null") + ",\"avg\":" + (n > 0 ? U.N(sum / n) : "null") + ",\"atRisk\":" + atRisk + ",\"below\":[" + string.Join(",", low.ToArray()) + "]}");
         }
 
         public static ToolOutput InspectType(Dictionary<string, object> a)
@@ -478,7 +486,7 @@ namespace HubnerExt
             if (mask == 0) return ToolOutput.Err("none of the expected physics layers exist (mask==0): walk_check would pass everything; refusing");
             var P = new List<Vector3>();
             foreach (var o in pts)
-            { var l = o as List<object>; if (l == null || l.Count < 3) return ToolOutput.Err("point must be [x,y,z]"); P.Add(new Vector3((float)(double)l[0], (float)(double)l[1], (float)(double)l[2])); }
+            { var l = o as List<object>; if (l == null || l.Count < 3) return ToolOutput.Err("point must be [x,y,z]"); var v = U.Vec(l); if (float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z)) return ToolOutput.Err("point must be [x,y,z] numbers"); P.Add(v); }
             var cur = P[0];
             const float ds = 0.2f;
             var steps = 0; var maxRise = 0f; var minHead = 99f;
@@ -564,7 +572,7 @@ namespace HubnerExt
         private static Quaternion RotOf(Dictionary<string, object> d)
         {
             var l = McpJson.GetList(d, "rot");
-            if (l != null && l.Count >= 3) return Quaternion.Euler((float)(double)l[0], (float)(double)l[1], (float)(double)l[2]);
+            if (l != null && l.Count >= 3) return Quaternion.Euler((float)McpJson.At(l, 0), (float)McpJson.At(l, 1), (float)McpJson.At(l, 2));
             return Quaternion.Euler(0f, (float)McpJson.Get(d, "yaw", 0), 0f);
         }
 
@@ -653,6 +661,7 @@ namespace HubnerExt
             else if (U.Has(a, "x0"))
             {
                 var filters = U.Split(McpJson.GetStr(a, "prefab"));
+                if (filters == null) return ToolOutput.Err("box delete requires a prefab filter");
                 var bf = U.Has(a, "built") ? (bool?)McpJson.GetBool(a, "built", false) : null;
                 foreach (var nv in U.Instances())
                 {
@@ -660,9 +669,9 @@ namespace HubnerExt
                     if (U.IsForbidden(U.PrefabName(nv))) continue;
                     if (!U.MatchPrefab(U.PrefabName(nv), filters)) continue;
                     if (bf != null && ((nv.GetZDO().GetLong("creator", 0L) != 0L) != bf.Value)) continue;
+                    if (U.IsLiving(nv.GetZDO().GetPrefab())) continue;                     // creatures, tames, ships, items are never swept by a box delete
                     targets.Add(nv);
                 }
-                if (filters == null) return ToolOutput.Err("box delete requires a prefab filter");
                 if (!McpJson.GetBool(a, "dryRun", false) && !McpJson.GetBool(a, "confirm", false)) return ToolOutput.Err("box delete matched " + targets.Count + " objects; pass confirm=true (or dryRun=true)");
             }
             else return ToolOutput.Err("give ids[] or x0,z0,x1,z1 + prefab");
@@ -686,40 +695,28 @@ namespace HubnerExt
             return U.Json("{\"deleted\":" + n + ",\"skipped\":" + skipped + "}");
         }
 
+        /// <summary>Undo the last n entries through the shared journal path (marks them undone on disk, so a restart does not replay them twice).</summary>
         public static ToolOutput Undo(Dictionary<string, object> a)
         {
             var count = (int)McpJson.Get(a, "count", 1);
             var undone = 0; var errs = new List<string>();
-            while (count-- > 0 && Journal.Entries.Count > 0)
+            Journal.Begin();
+            try
             {
-                var e = Journal.Entries[Journal.Entries.Count - 1];
-                Journal.Entries.RemoveAt(Journal.Entries.Count - 1);
-                try
+                while (count-- > 0 && Journal.Entries.Count > 0)
                 {
-                    if (e.Kind == "spawn")
+                    var e = Journal.Entries[Journal.Entries.Count - 1];
+                    try
                     {
-                        var z = U.FindZdo(e.Id); var nv = z == null ? null : ZNetScene.instance.FindInstance(z);
-                        if (nv != null) { nv.ClaimOwnership(); ZNetScene.instance.Destroy(nv.gameObject); }
+                        var err = Plans.UndoEntry(e);
+                        if (err != null) errs.Add(err);
+                        Journal.Remove(e); undone++;
+                        if (e.Kind == "delete" && e.Scale != Vector3.one) { var z = U.FindZdo(e.Id); }      // scale is not restored at ZDO level (rare: only the client's spawn tool sets it)
                     }
-                    else if (e.Kind == "delete")
-                    {
-                        var prefab = ZNetScene.instance.GetPrefab(e.Prefab);
-                        if (prefab != null)
-                        {
-                            var go = UnityEngine.Object.Instantiate(prefab, e.Pos, e.Rot); go.transform.localScale = e.Scale;
-                            var nv = go.GetComponent<ZNetView>();
-                            if (nv != null && nv.GetZDO() != null) { if (!string.IsNullOrEmpty(e.Text)) nv.GetZDO().Set("text", e.Text); if (e.Creator != 0) nv.GetZDO().Set("creator", e.Creator); }
-                        }
-                    }
-                    else if (e.Kind == "modify")
-                    {
-                        var z = U.FindZdo(e.Id); var nv = z == null ? null : ZNetScene.instance.FindInstance(z);
-                        if (nv != null) { nv.ClaimOwnership(); nv.transform.position = e.Pos; nv.transform.rotation = e.Rot; nv.transform.localScale = e.Scale; z.SetPosition(e.Pos); z.SetRotation(e.Rot); z.Set("text", e.Text ?? ""); }
-                    }
-                    undone++;
+                    catch (Exception ex) { errs.Add(e.Kind + " " + e.Id + ": " + ex.Message); Journal.Remove(e); }
                 }
-                catch (Exception ex) { errs.Add(e.Kind + " " + e.Id + ": " + ex.Message); }
             }
+            finally { Journal.End(); }
             var ej = new List<string>(); foreach (var er in errs) ej.Add(U.S(er));
             return U.Json("{\"undone\":" + undone + ",\"errors\":[" + string.Join(",", ej.ToArray()) + "]}");
         }

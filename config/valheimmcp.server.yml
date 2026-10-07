@@ -13,3 +13,9 @@ tools:
   write: false
   timeoutMs: 60000
   deny: []
+
+# Hubner extension settings (BepInEx/hubner-ext/HubnerExt.dll)
+hubner:
+  sandboxNames: [Odev, MaRkO, ClaudeEyes]   # character names that count as the sandbox (players tool, restart checks)
+  writeFlagMinutes: 30                      # validity of the ALLOW_SERVER_WRITES flag after it was touched
+  jobBudgetMs: 8                            # main-thread time a sliced job (plan_apply) may use per frame: keep small, players share this thread

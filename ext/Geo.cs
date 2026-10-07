@@ -38,7 +38,7 @@ namespace HubnerExt
         static List<float[]> Pts(Dictionary<string, object> a)
         {
             var res = new List<float[]>(); var l = McpJson.GetList(a, "points"); if (l == null) return res;
-            foreach (var o in l) { var p = o as List<object>; if (p == null || p.Count < 2) continue; res.Add(p.Select(v => (float)(double)v).ToArray()); }
+            foreach (var o in l) { var p = o as List<object>; if (p == null || p.Count < 2) continue; var arr = new float[p.Count]; for (int i = 0; i < p.Count; i++) arr[i] = (float)McpJson.At(p, i); if (float.IsNaN(arr[0]) || float.IsNaN(arr[1])) continue; res.Add(arr); }
             return res;
         }
 
@@ -142,7 +142,7 @@ namespace HubnerExt
             {
                 if (nv == null || U.PrefabName(nv) != "sign") continue;
                 var p = nv.transform.position; if (p.x < x0 || p.x > x1 || p.z < z0 || p.z > z1) continue;
-                var zdo = nv.GetZDO(); var text = zdo != null ? zdo.GetString("text", "") : ""; if (text.Length == 0) continue;
+                var zdo = nv.GetZDO(); var text = zdo != null ? zdo.GetString("text", "") : ""; if (text.Trim().Length == 0 || text.Trim() == "•") continue;      // "•" = an unlabelled chest plaque the game makes, not a sign anyone reads
                 total++;
                 var col = nv.GetComponentInChildren<Collider>(); var centre = col != null ? col.bounds.center : p; var f = nv.transform.forward; f.y = 0f; f.Normalize();
                 // buried: a collider of something else inside the volume directly in front of the face

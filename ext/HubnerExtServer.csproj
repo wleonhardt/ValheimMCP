@@ -3,6 +3,7 @@
         <TargetFramework>net472</TargetFramework>
         <LangVersion>9.0</LangVersion>
         <AssemblyName>HubnerExt</AssemblyName>
+        <Version>0.7.0</Version>
         <RootNamespace>HubnerExt</RootNamespace>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <NoWarn>$(NoWarn);CS0649;CS0169;CS8632</NoWarn>
@@ -15,7 +16,7 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
     <ItemGroup>
-        <Compile Include="Common.cs" /><Compile Include="Shared.cs" /><Compile Include="Plans.cs" /><Compile Include="Audit.cs" /><Compile Include="InsightShared.cs" /><Compile Include="VirtualPeers.cs" /><Compile Include="ClientTools.cs" /><Compile Include="Geo.cs" /><Compile Include="Reg.cs" />
+        <Compile Include="Common.cs" /><Compile Include="FlatJson.cs" /><Compile Include="Shared.cs" /><Compile Include="Plans.cs" /><Compile Include="Audit.cs" /><Compile Include="InsightShared.cs" /><Compile Include="VirtualPeers.cs" /><Compile Include="ClientTools.cs" /><Compile Include="Geo.cs" /><Compile Include="Reg.cs" />
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3"><PrivateAssets>all</PrivateAssets></PackageReference>
