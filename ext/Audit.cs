@@ -179,15 +179,43 @@ namespace HubnerExt
             return n;
         }
 
+        static readonly ChatPace Pace = new ChatPace();
+        static readonly Dictionary<string, KeyValuePair<double, string>> LastLine = new Dictionary<string, KeyValuePair<double, string>>();
+        internal static readonly SentLog Sent = new SentLog();
+        static readonly List<string> UntrustedText = new List<string>(); static readonly Dictionary<string, string> TrustByName = new Dictionary<string, string>();
+
+        /// <summary>The last untrusted lines people typed: what a reply must not repeat.</summary>
+        internal static List<string> RecentUntrustedLines() { lock (ChatRows) return new List<string>(UntrustedText); }
+
+        /// <summary>Was the last line from this player name trusted (by platform id)? Unknown names are not.</summary>
+        internal static bool IsTrusted(string name) { lock (ChatRows) { string t; return name != null && TrustByName.TryGetValue(name, out t) && t == "trusted"; } }
+
+        static List<string> OnlineNames()
+        {
+            var l = new List<string>();
+            try { if (ZNet.instance != null) foreach (var p in ZNet.instance.GetPlayerList()) l.Add(p.m_name); } catch (Exception ex) { U.Once("OnlineNames", ex); }
+            return l;
+        }
+
         static void AddChat(string type, string name, string text, string id = "")
         {
             if (type == "Whisper" && !Cfg.Bool("hubner.captureWhispers", false)) return;       // private by default: a whisper is not meant for whoever drives this tool
             lock (ChatRows)
             {
                 // what people type is data for whoever reads this (often a model): cleaned for reading, tagged with how far to trust the speaker (by platform id, never by name alone) and with hints
+                var now = Time.realtimeSinceStartup; var who = string.IsNullOrEmpty(id) ? name : id;
                 var trust = ChatRules.Trust(name, id, Cfg.List("hubner.trustedPlayers"), CountNamed(name));
-                var hints = ChatRules.Hints(text);
-                ChatRows.Add("{\"seq\":" + (++_chatSeq) + ",\"time\":" + U.S(DateTime.UtcNow.ToString("HH:mm:ss")) + ",\"type\":" + U.S(type) + ",\"name\":" + U.S(ChatRules.ForReading(name, 40)) + ",\"id\":" + U.S(id) + ",\"trust\":" + U.S(trust) + ",\"untrusted\":" + (trust == "trusted" ? "false" : "true") +
+                var hints = ChatRules.Hints(text, Reg.Category.Keys);
+                if (ChatRules.NameLooksOff(name)) hints.Add("name_suspicious");
+                KeyValuePair<double, string> prev;
+                if (LastLine.TryGetValue(who ?? "", out prev) && now - prev.Key <= 2.0) hints.AddRange(ChatRules.AcrossLines(prev.Value, text));
+                LastLine[who ?? ""] = new KeyValuePair<double, string>(now, text); if (LastLine.Count > 300) LastLine.Clear();
+                if (Pace.Flooding(now, who, text)) hints.Add("spam");
+                var ours = Sent.IsOurs(now, text);
+                TrustByName[name ?? ""] = trust; if (trust != "trusted" && !ours) { UntrustedText.Add(text ?? ""); if (UntrustedText.Count > 20) UntrustedText.RemoveAt(0); }
+                var mine = Cfg.List("hubner.sandboxNames") ?? new List<string>();
+                var to = ChatRules.Addressing(text, mine, OnlineNames());
+                ChatRows.Add("{\"seq\":" + (++_chatSeq) + ",\"time\":" + U.S(DateTime.UtcNow.ToString("HH:mm:ss")) + ",\"type\":" + U.S(type) + ",\"name\":" + U.S(ChatRules.ForReading(name, 40)) + ",\"id\":" + U.S(id) + ",\"trust\":" + U.S(trust) + ",\"untrusted\":" + (trust == "trusted" ? "false" : "true") + ",\"ours\":" + (ours ? "true" : "false") + ",\"to\":" + U.S(to) +
                     ",\"hints\":[" + string.Join(",", hints.Select(U.S).ToArray()) + "],\"text\":" + U.S(ChatRules.ForReading(text, 300)) + "}");
                 if (ChatRows.Count > 500) ChatRows.RemoveAt(0);
             }

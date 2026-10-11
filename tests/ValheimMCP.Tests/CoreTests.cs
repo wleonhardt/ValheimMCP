@@ -751,11 +751,11 @@ public class ChatRulesTests
     [Fact] public void MachineOutputAndNoiseAreTagged() { Assert.Contains("machine", ChatRules.Hints("{\"tool_use\":\"x\"}")); Assert.Contains("machine", ChatRules.Hints(new string('a', 250))); Assert.Contains("noise", ChatRules.Hints("!!!!!!!!!!!!!!!!!!!")); }
 
     [Fact]
-    public void TrustIsByPlatformIdAndANameOnlyWhileItIsUnique()
+    public void TrustIsByPlatformIdAndANameIsOnlyAHintWhileItIsUnique()
     {
         var trusted = new[] { "Steam_7656", "Thor" };
         Assert.Equal("trusted", ChatRules.Trust("Anyone", "Steam_7656", trusted, 1));
-        Assert.Equal("trusted", ChatRules.Trust("Thor", "Steam_1", trusted, 1));
+        Assert.Equal("name_only", ChatRules.Trust("Thor", "Steam_1", trusted, 1));         // a name alone is a hint, not trust
         Assert.Equal("other", ChatRules.Trust("Thor", "Steam_1", trusted, 2));          // a namesake is never trusted
         Assert.Equal("other", ChatRules.Trust("Thor", "", trusted, 0));
         Assert.Equal("other", ChatRules.Trust("Thor", "Steam_7656", null, 1));

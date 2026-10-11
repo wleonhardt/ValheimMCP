@@ -271,7 +271,10 @@ namespace HubnerExt
         private static readonly System.Text.RegularExpressions.Regex Tags = new System.Text.RegularExpressions.Regex("<[^>\n]{0,40}>", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
         private static readonly System.Text.RegularExpressions.Regex Urls = new System.Text.RegularExpressions.Regex(@"(?i)\b(?:https?://|www\.)\S+", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
         private static readonly System.Text.RegularExpressions.Regex Manipulation = new System.Text.RegularExpressions.Regex(
-            @"(?i)\b(ignore|disregard|forget)\b.{0,30}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instructions?|rules?|prompts?)\b|\bsystem prompt\b|\byou are now\b|\bdeveloper mode\b|\b(as|i am|i'm)\b.{0,12}\b(admin|owner|operator|developer|the server)\b.{0,40}\b(run|execute|give|send|delete|spawn|teleport)\b|\b(api[ _-]?key|access token|password|secret)\b|^\s*/\w+",
+            @"(?i)\b(ignore|disregard|forget)\b.{0,30}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instructions?|rules?|prompts?)\b|\bsystem prompt\b|\byour (prompt|instructions)\b|\bnew instructions?\b|\byou are now\b|\b(developer|dan|jailbreak|god) mode\b|\bjailbreak\b|\bobey me\b|\b(as|i am|i'm)\b.{0,12}\b(admin|owner|operator|developer|the server)\b.{0,40}\b(run|execute|give|send|delete|spawn|teleport)\b|\b(run|execute|give|send|delete|spawn|teleport)\b.{0,40}\b(i am|i'm|as)\b.{0,12}\b(admin|owner|operator|developer|the server)\b|\b(api[ _-]?key|access token|password|secret)\b|\.env\b|\b(devcommands|imacheater|killall|removedrops|resetcharacter|exploremap|debugmode)\b|^\s*/\w+",
+            System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+        private static readonly System.Text.RegularExpressions.Regex Machine = new System.Text.RegularExpressions.Regex(
+            @"```|""\w+""\s*:|\b\w+=\S+\s+\w+=\S+|\b(INFO|WARN|WARNING|ERROR|DEBUG)\b\s*[:\]\-]|=>|\btool_(use|result|call)\b|\b\d{1,2}:\d\d:\d\d\b",
             System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
 
         /// <summary>Is this character one that hides text from a reader (controls, zero-width, bidi marks)?</summary>
@@ -305,29 +308,110 @@ namespace HubnerExt
         /// <summary>A line for a reader: invisible characters, markup and links gone, one line, cut; a leading / or ! kept (it is what makes a line look like a command).</summary>
         public static string ForReading(string text, int maxLen) { return Clean(text, maxLen, false); }
 
-        /// <summary>Hints for whoever reads a chat line: never an order to refuse it, only a warning that it looks like an attempt to steer a model, a machine's output, or noise.</summary>
-        public static List<string> Hints(string text)
+        /// <summary>Hints for whoever reads a chat line: never an order to refuse it, only a warning that it looks like an attempt to steer a model, a machine's output, a call of one of our tools, or noise.</summary>
+        public static List<string> Hints(string text) { return Hints(text, null); }
+
+        public static List<string> Hints(string text, ICollection<string> toolNames)
         {
             var hints = new List<string>();
             var s = Clean(text ?? "", 2000, false);       // keep a leading / or !: that is what makes a line a command
             var raw = text ?? "";
             try { if (Manipulation.IsMatch(s) || (raw != s && Manipulation.IsMatch(Fold(raw)))) hints.Add("manipulation"); }
             catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { hints.Add("manipulation"); /* allow: a line built to stall the matcher is flagged */ }
-            if (s.Length > 200 || s.StartsWith("{") || s.StartsWith("[") || s.Contains("tool_use") || CountDigits(s) >= 6 && s.Contains("=")) hints.Add("machine");
+            var machine = s.Length > 200 || s.StartsWith("{") || s.StartsWith("[") || CountDigits(s) >= 6 && s.Contains("=");
+            try { machine = machine || Machine.IsMatch(s); } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { machine = true; /* allow: a line built to stall the matcher is flagged */ }
+            if (machine) hints.Add("machine");
+            if (toolNames != null && MentionsTool(s, toolNames)) hints.Add("tool_talk");
             if (s.Length >= 8 && Letters(s) < s.Length * 0.4) hints.Add("noise");
             return hints;
         }
+
+        /// <summary>Does the line name one of the tools a reader of this chat has? A player has no reason to type those.</summary>
+        public static bool MentionsTool(string line, ICollection<string> toolNames)
+        {
+            foreach (var w in System.Text.RegularExpressions.Regex.Split((line ?? "").ToLowerInvariant(), @"[^a-z0-9_]+"))
+                if (w.Length >= 5 && w.IndexOf('_') > 0 && toolNames.Contains(w)) return true;
+            return false;
+        }
+
+        /// <summary>A speaker's name arrives from the client as a string and is shown beside the text: the same hints apply.</summary>
+        public static bool NameLooksOff(string name) { return Hints(name ?? "").Count > 0; }
+
+        /// <summary>An injection can be cut across two lines. Hints that appear only when the previous line of the same speaker is joined to this one (prefixed split_).</summary>
+        public static List<string> AcrossLines(string previous, string text)
+        {
+            var res = new List<string>(); if (string.IsNullOrEmpty(previous)) return res;
+            var own = new HashSet<string>(Hints(previous)); foreach (var h in Hints(text)) own.Add(h);
+            foreach (var h in Hints(previous + " " + text)) if (!own.Contains(h)) res.Add("split_" + h);
+            return res;
+        }
+
+        /// <summary>Who a line is for: "me" when it names one of my names, "someone_else" when it opens with another player's name, else "everyone".</summary>
+        public static string Addressing(string text, ICollection<string> myNames, ICollection<string> otherNames)
+        {
+            var s = Clean(text ?? "", 300, false).ToLowerInvariant();
+            foreach (var n in myNames) if (!string.IsNullOrEmpty(n) && ContainsWord(s, n.ToLowerInvariant())) return "me";
+            foreach (var n in otherNames)
+            {
+                if (string.IsNullOrEmpty(n)) continue; var l = n.ToLowerInvariant();
+                if (s.StartsWith(l, StringComparison.Ordinal) && (s.Length == l.Length || !char.IsLetterOrDigit(s[l.Length]))) return "someone_else";
+            }
+            return "everyone";
+        }
+
+        private static bool ContainsWord(string s, string w)
+        {
+            var i = 0;
+            while ((i = s.IndexOf(w, i, StringComparison.Ordinal)) >= 0)
+            {
+                var before = i == 0 || !char.IsLetterOrDigit(s[i - 1]); var after = i + w.Length >= s.Length || !char.IsLetterOrDigit(s[i + w.Length]);
+                if (before && after) return true; i += w.Length;
+            }
+            return false;
+        }
+
+        /// <summary>
+        ///     The guard on what the harness says: a model that read an injected line must not repeat it, hand out a position to a stranger, or echo an untrusted line back.
+        ///     null = fine; otherwise why not.
+        /// </summary>
+        public static string SayVerdict(string text, bool listenerTrusted, IEnumerable<string> untrustedLines)
+        {
+            var s = Clean(text ?? "", 300, false);
+            try { if (Manipulation.IsMatch(s)) return "the line repeats a manipulation phrase"; } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return "the line stalls the matcher"; /* allow: the refusal is the answer */ }
+            if (!listenerTrusted && Coordinates.IsMatch(s)) return "the line gives a position to someone who is not trusted";
+            var mine = Words(s);
+            if (untrustedLines != null) foreach (var u in untrustedLines) if (SharesRun(mine, Words(Clean(u, 300, false)), 4)) return "the line repeats part of an untrusted line";
+            return null;
+        }
+
+        private static readonly System.Text.RegularExpressions.Regex Coordinates = new System.Text.RegularExpressions.Regex(@"-?\d{2,5}(?:\.\d+)?\s*[,;]\s*-?\d{2,5}(?:\.\d+)?|-?\d{3,5}(?:\.\d+)?\s+-?\d{3,5}(?:\.\d+)?", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+
+        private static string[] Words(string s) { return System.Text.RegularExpressions.Regex.Split(s.ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(w => w.Length > 0).ToArray(); }
+
+        private static bool SharesRun(string[] a, string[] b, int run)
+        {
+            for (var i = 0; i + run <= a.Length; i++)
+                for (var j = 0; j + run <= b.Length; j++)
+                {
+                    var k = 0; while (k < run && a[i + k] == b[j + k]) k++;
+                    if (k == run) return true;
+                }
+            return false;
+        }
+
+        /// <summary>The text with case, spacing and punctuation gone, to recognise a line we sent when the game hands it back (it shouts in capitals, whispers in lower case, turns brackets into spaces).</summary>
+        public static string Norm(string text) { return string.Concat(Words(Clean(text ?? "", 500, false))); }
 
         private static string Fold(string raw) { return Clean(raw, 2000, false).ToLowerInvariant(); }
         private static int CountDigits(string s) { var n = 0; foreach (var c in s) if (char.IsDigit(c)) n++; return n; }
         private static int Letters(string s) { var n = 0; foreach (var c in s) if (char.IsLetter(c)) n++; return n; }
 
-        /// <summary>Trust by platform id, never by name: a name can be copied, an id cannot. A name counts only while exactly one player online carries it.</summary>
+        /// <summary>Trust by platform id, never by name: a name can be copied, an id cannot. "trusted" = an id on the list. "name_only" = only the name is on the list and exactly one player online carries it; that is a hint, not trust.</summary>
         public static string Trust(string name, string platformId, ICollection<string> trusted, int playersWithThatName)
         {
             if (trusted == null || trusted.Count == 0) return "other";
             if (!string.IsNullOrEmpty(platformId) && trusted.Contains(platformId)) return "trusted";
-            if (!string.IsNullOrEmpty(name) && trusted.Contains(name) && playersWithThatName == 1) return "trusted";
+            if (!string.IsNullOrEmpty(name) && trusted.Contains(name) && playersWithThatName == 1) return "name_only";       // a name can be copied while the real player is away: weaker than an id match, still untrusted
             return "other";
         }
     }
@@ -335,7 +419,9 @@ namespace HubnerExt
     /// <summary>How fast the harness may speak: a global gap, a gap per speaker, and no repeating itself.</summary>
     internal sealed class ChatLimiter
     {
-        public double GlobalGap = 6, SpeakerGap = 15, RepeatWindow = 300;
+        public double GlobalGap = 6, SpeakerGap = 15, RepeatWindow = 300, BudgetWindow = 600;
+        public int SpeakerBudget = 6;                       // lines to one speaker per BudgetWindow: two bots answering each other stop here
+        private readonly Dictionary<string, List<double>> _budget = new Dictionary<string, List<double>>();
         private double _lastAny = double.NegativeInfinity;
         private readonly Dictionary<string, double> _lastBy = new Dictionary<string, double>();
         private readonly Dictionary<string, double> _seen = new Dictionary<string, double>();
@@ -347,6 +433,13 @@ namespace HubnerExt
             double t;
             if (speaker != null && _lastBy.TryGetValue(speaker, out t) && now - t < SpeakerGap) return "too soon after the last line to " + speaker + " (" + SpeakerGap + " s)";
             if (_seen.TryGetValue(text, out t) && now - t < RepeatWindow) return "the same line was sent less than " + RepeatWindow + " s ago";
+            if (speaker != null)
+            {
+                List<double> used; if (!_budget.TryGetValue(speaker, out used)) _budget[speaker] = used = new List<double>();
+                used.RemoveAll(u => now - u > BudgetWindow);
+                if (used.Count >= SpeakerBudget) return "already " + used.Count + " lines to " + speaker + " in " + BudgetWindow + " s; let them be (two bots can answer each other for ever)";
+                used.Add(now);
+            }
             _lastAny = now; if (speaker != null) _lastBy[speaker] = now; _seen[text] = now;
             if (_seen.Count > 200) foreach (var k in _seen.Where(kv => now - kv.Value > RepeatWindow).Select(kv => kv.Key).ToList()) _seen.Remove(k);
             return null;
@@ -356,6 +449,35 @@ namespace HubnerExt
 
 namespace HubnerExt
 {
+    /// <summary>Spam in the chat ring: four lines in ten seconds, or the same line twice in a minute, from one speaker. A flooder would push the real lines out of the 500-row ring.</summary>
+    internal sealed class ChatPace
+    {
+        public double Window = 10, RepeatWindow = 60; public int MaxInWindow = 4;
+        private readonly Dictionary<string, List<KeyValuePair<double, string>>> _by = new Dictionary<string, List<KeyValuePair<double, string>>>();
+
+        /// <summary>Records the line and says whether this speaker is flooding. Speaker should be the platform id (a name can change between lines).</summary>
+        public bool Flooding(double now, string speaker, string text)
+        {
+            List<KeyValuePair<double, string>> l; if (!_by.TryGetValue(speaker ?? "", out l)) _by[speaker ?? ""] = l = new List<KeyValuePair<double, string>>();
+            l.RemoveAll(e => now - e.Key > RepeatWindow);
+            var norm = ChatRules.Norm(text);
+            var repeats = l.Count(e => e.Value == norm) >= 1;
+            var recent = l.Count(e => now - e.Key <= Window) + 1;
+            l.Add(new KeyValuePair<double, string>(now, norm));
+            if (_by.Count > 300) foreach (var k in _by.Where(kv => kv.Value.Count == 0 || now - kv.Value[kv.Value.Count - 1].Key > RepeatWindow).Select(kv => kv.Key).ToList()) _by.Remove(k);
+            return recent >= MaxInWindow || repeats;
+        }
+    }
+
+    /// <summary>The lines this harness sent lately, to recognise them when the game hands them back as chat.</summary>
+    internal sealed class SentLog
+    {
+        public double Window = 120;
+        private readonly List<KeyValuePair<double, string>> _sent = new List<KeyValuePair<double, string>>();
+        public void Add(double now, string text) { _sent.Add(new KeyValuePair<double, string>(now, ChatRules.Norm(text))); _sent.RemoveAll(e => now - e.Key > Window); }
+        public bool IsOurs(double now, string text) { var n = ChatRules.Norm(text); return n.Length > 0 && _sent.Any(e => now - e.Key <= Window && e.Value == n); }
+    }
+
     /// <summary>Tameable's arithmetic as the game does it (Tameable.IsHungry, GetTameness).</summary>
     internal static class Husbandry
     {
