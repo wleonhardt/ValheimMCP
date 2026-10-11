@@ -18,6 +18,7 @@ New readers, all on the server and the client, all checked against the decompile
 - `plan_check` takes its ground from the terrain collider's triangles where the zone is loaded (edits included) and says where each height came from; the tilt is the triangle's normal.
 
 Test tooling
+- Scene fixtures: `scene_capture` / `scene_get` write a piece of the world as `hubner.scene/1` (prefab geometry once per prefab, objects, terrain vertex heights, the support and health the GAME recorded); `python/live/capture_scene.py` saves it into `tests/ValheimMCP.Tests/fixtures/scenes/`, where `dotnet test` runs our support model on it and compares it with the recorded values. A hand-built tower pins the known wood series (100, 73.75, 54.39).
 - `python/live/accept.py` with 24 cases (`--list`, `--dry-run`, `--only`; pass / fail / skipped / blocked; acting cases clean up and are checked for dropped calls, stalls and journal errors) and `hubner.live_guard()` (endpoint explicit, game in a world, world on `HUBNER_LIVE_WORLDS`).
 - `scripts/check.py` (all checks, `--changed`), `scripts/lint_docs.py` (links, paths and tool names in the documents), a chat corpus with a holdout set.
 

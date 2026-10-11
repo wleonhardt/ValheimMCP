@@ -26,3 +26,7 @@ python3 python/live/accept.py --only plan,remove-collapse
 - A case that acts builds its own scenario at `HUBNER_TEST_X/Z` (a quiet, flat spot) and removes it; the runner then checks that the extension dropped no calls, reported no main-thread stall, has no journal error and the plan list is as before.
 - Reports go to `python/live/reports/accept-<commit>.md` and `.json` (git-ignored). Exit code = number of failed cases (a blocked guard counts as one).
 - The offline tests of the runner and the cases are in `../tests/test_accept.py`.
+
+## Scene capture
+
+`capture_scene.py NAME X Z [RADIUS] [NOTE]` saves the world round a point as a unit-test fixture (`tests/ValheimMCP.Tests/fixtures/scenes/NAME.scene.json`). Capture a collapse, a surprise from `plan_check`, or a stable build: `dotnet test` then checks our support model against the support values the game recorded for the same pieces. When they disagree the scene is the bug report: fix the model and commit the scene with the fix. Pieces within 12 m of the capture edge are not judged (their supporters may lie outside it), so capture with a radius at least 12 m bigger than what you care about.
