@@ -273,4 +273,40 @@ namespace HubnerExt
 
         public static string Render(KeyValuePair<string, int> e) { return e.Value > 1 ? e.Key + "  (x" + e.Value + ")" : e.Key; }
     }
+
+    /// <summary>One group of a digest: how many objects of a kind and the box they lie in.</summary>
+    internal sealed class DigestGroup
+    {
+        public string Prefab = "", Name = ""; public int Count, Built;
+        public double MinX = double.MaxValue, MaxX = double.MinValue, MinZ = double.MaxValue, MaxZ = double.MinValue;
+    }
+
+    /// <summary>Compact summaries for a reader with a token budget: a hundred identical trees are one line with a count.</summary>
+    internal static class Digest
+    {
+        /// <summary>A name a person would say: Pickable_Mushroom -> Mushroom, piece_walltorch -> walltorch, Beech_small1 -> Beech small.</summary>
+        public static string Readable(string prefab)
+        {
+            var s = prefab ?? "";
+            foreach (var pre in new[] { "Pickable_", "piece_", "Piece_" }) if (s.StartsWith(pre, StringComparison.Ordinal) && s.Length > pre.Length) { s = s.Substring(pre.Length); break; }
+            s = s.Replace('_', ' ').TrimEnd(' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9').TrimEnd();
+            return s.Length > 0 ? s : prefab ?? "";
+        }
+
+        /// <summary>The most numerous kinds first, at most <paramref name="max" /> groups; everything else is counted in <paramref name="others" />.</summary>
+        public static List<DigestGroup> Groups(IEnumerable<KeyValuePair<string, double[]>> items, int max, out int others)
+        {
+            // item: prefab -> [x, z, built(0/1)]
+            var by = new Dictionary<string, DigestGroup>();
+            foreach (var kv in items)
+            {
+                DigestGroup g; if (!by.TryGetValue(kv.Key, out g)) by[kv.Key] = g = new DigestGroup { Prefab = kv.Key, Name = Readable(kv.Key) };
+                g.Count++; if (kv.Value[2] > 0) g.Built++;
+                g.MinX = Math.Min(g.MinX, kv.Value[0]); g.MaxX = Math.Max(g.MaxX, kv.Value[0]); g.MinZ = Math.Min(g.MinZ, kv.Value[1]); g.MaxZ = Math.Max(g.MaxZ, kv.Value[1]);
+            }
+            var ordered = by.Values.OrderByDescending(g => g.Count).ThenBy(g => g.Prefab, StringComparer.Ordinal).ToList();
+            others = ordered.Skip(max).Sum(g => g.Count);
+            return ordered.Take(max).ToList();
+        }
+    }
 }

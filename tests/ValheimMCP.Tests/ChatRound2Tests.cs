@@ -149,3 +149,27 @@ public class JournalWorldTests
         Assert.Equal(Match.Ambiguous, Identity.Judge(Match.Ambiguous, "", "", false));
     }
 }
+
+public class DigestTests
+{
+    [Theory]
+    [InlineData("Pickable_Mushroom", "Mushroom")] [InlineData("piece_walltorch", "walltorch")] [InlineData("Beech_small1", "Beech small")] [InlineData("Rock_3", "Rock")] [InlineData("wood_wall_roof", "wood wall roof")] [InlineData("1234", "1234")]
+    public void ReadableNamesAreWhatAPersonWouldSay(string prefab, string name) => Assert.Equal(name, Digest.Readable(prefab));
+
+    [Fact] public void ThreeThousandObjectsBecomeAFewLines()
+    {
+        var items = new List<KeyValuePair<string, double[]>>();
+        for (var i = 0; i < 2000; i++) items.Add(new KeyValuePair<string, double[]>("Beech_small1", new double[] { i % 50, i % 70, 0 }));
+        for (var i = 0; i < 900; i++) items.Add(new KeyValuePair<string, double[]>("wood_wall", new double[] { i % 30, i % 20, 1 }));
+        for (var i = 0; i < 100; i++) items.Add(new KeyValuePair<string, double[]>("Rock_" + i % 40, new double[] { i, i, 0 }));
+        int others; var g = Digest.Groups(items, 5, out others);
+        Assert.Equal(5, g.Count); Assert.Equal("Beech_small1", g[0].Prefab); Assert.Equal(2000, g[0].Count); Assert.Equal("wood_wall", g[1].Prefab); Assert.Equal(900, g[1].Built);
+        Assert.Equal(3000 - g.Sum(x => x.Count), others);
+        Assert.True(g.Count <= 5);                                  // the budget: the digest never lists more groups than asked for
+    }
+    [Fact] public void TheBoxOfAGroupIsTheBoxOfItsMembers()
+    {
+        int others; var g = Digest.Groups(new[] { new KeyValuePair<string, double[]>("a", new double[] { 1, 5, 0 }), new KeyValuePair<string, double[]>("a", new double[] { 4, 2, 1 }) }, 10, out others).Single();
+        Assert.Equal(new[] { 1.0, 4.0, 2.0, 5.0 }, new[] { g.MinX, g.MaxX, g.MinZ, g.MaxZ }); Assert.Equal(1, g.Built); Assert.Equal(0, others);
+    }
+}

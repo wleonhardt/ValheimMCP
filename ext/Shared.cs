@@ -138,8 +138,8 @@ namespace HubnerExt
         {
             r.Add("ext_info", "Extension version, role (client or server) and whether writes are enabled.", "{\"type\":\"object\",\"properties\":{}}", Info);
             r.Add("objects",
-                "List world objects near a point or in a box from the ZDO table (every object this process knows; on the dedicated server that is the whole world, on the client the loaded area). Filters: prefab substring(s) comma separated, built=true (creator!=0) / false, limit (default 300, max 3000), offset. Fast: indexed by zone.",
-                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"y0\":{\"type\":\"number\"},\"y1\":{\"type\":\"number\"},\"prefab\":{\"type\":\"string\"},\"built\":{\"type\":\"boolean\"},\"limit\":{\"type\":\"number\"},\"offset\":{\"type\":\"number\"}}}", Objects);
+                "List world objects near a point or in a box from the ZDO table (every object this process knows; on the dedicated server that is the whole world, on the client the loaded area). Filters: prefab substring(s) comma separated, built=true (creator!=0) / false, limit (default 300, max 3000), offset, digest:true for a summary instead of rows (kinds with counts, how many are player-built and the box they lie in; groups = most numerous kinds to list, default 30). Fast: indexed by zone.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"y0\":{\"type\":\"number\"},\"y1\":{\"type\":\"number\"},\"prefab\":{\"type\":\"string\"},\"built\":{\"type\":\"boolean\"},\"limit\":{\"type\":\"number\"},\"offset\":{\"type\":\"number\"},\"digest\":{\"type\":\"boolean\"},\"groups\":{\"type\":\"number\"}}}", Objects);
             r.Add("portals",
                 "The portals this process knows from the game's portal list (the generic objects query does not see portals): id, prefab, position, tag, and the tag's partner count so unpaired or ambiguous tags stand out. On the dedicated server that is every portal in the world; a joined client holds only the portals of the sectors it has been near, so the list can be incomplete there (the result says which). Use before spawning a tagged portal.",
                 "{\"type\":\"object\",\"properties\":{}}", Portals);
@@ -196,7 +196,7 @@ namespace HubnerExt
             var filters = U.Split(McpJson.GetStr(a, "prefab"));
             var limit = (int)Math.Min(3000, U.D(a, "limit", 300)); var offset = (int)U.D(a, "offset", 0);
             var bf = U.Has(a, "built") ? (bool?)McpJson.GetBool(a, "built", false) : null;
-            var rows = new List<string>(); var total = 0;
+            var rows = new List<string>(); var total = 0; var digest = McpJson.GetBool(a, "digest", false); var digestItems = new List<KeyValuePair<string, double[]>>();
             foreach (var z in Zdos.InBox(x0, z0, x1, z1))
             {
                 var rec = Zdos.ToRec(z);
@@ -207,8 +207,14 @@ namespace HubnerExt
                 if (!U.MatchPrefab(rec.Prefab, filters)) continue;
                 if (bf != null && ((rec.Creator != 0L) != bf.Value)) continue;
                 total++;
+                if (digest) { digestItems.Add(new KeyValuePair<string, double[]>(rec.Prefab, new double[] { rec.Pos.x, rec.Pos.z, rec.Creator != 0L ? 1 : 0 })); continue; }
                 if (total <= offset || rows.Count >= limit) continue;
                 rows.Add(Zdos.Json(rec));
+            }
+            if (digest)
+            {
+                int others; var groups = Digest.Groups(digestItems, Math.Max(1, (int)Math.Min(100, U.D(a, "groups", 30))), out others);
+                return U.Json("{\"total\":" + total + ",\"groups\":[" + string.Join(",", System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(groups, g => "{\"name\":" + U.S(g.Name) + ",\"prefab\":" + U.S(g.Prefab) + ",\"count\":" + g.Count + ",\"built\":" + g.Built + ",\"box\":[" + U.N(Math.Round(g.MinX)) + "," + U.N(Math.Round(g.MinZ)) + "," + U.N(Math.Round(g.MaxX)) + "," + U.N(Math.Round(g.MaxZ)) + "]}"))) + "],\"inOtherKinds\":" + others + "}");
             }
             return U.Json("{\"total\":" + total + ",\"returned\":" + rows.Count + ",\"offset\":" + offset + ",\"objects\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
