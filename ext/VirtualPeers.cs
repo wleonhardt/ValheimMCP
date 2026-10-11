@@ -33,6 +33,13 @@ namespace HubnerExt
             Install();
         }
 
+        /// <summary>Hot reload / shutdown: the patch and the peers belong to this load of the extension; leaving them behind makes the next load run a second, stale copy.</summary>
+        public static void Uninstall()
+        {
+            try { if (_h != null) _h.UnpatchSelf(); } catch (Exception ex) { U.Once("VirtualPeers.Uninstall", ex); }
+            _h = null; Peers.Clear();
+        }
+
         static void Install()
         {
             if (_h != null) return;
@@ -83,6 +90,7 @@ namespace HubnerExt
             var name = McpJson.GetStr(a, "name") ?? "vp"; var ex = Peers.FirstOrDefault(p => p.Name == name);
             if (ex == null && Peers.Count >= MaxPeers) return ToolOutput.Err("at most " + MaxPeers + " virtual peers");
             var pos = new Vector3((float)U.D(a, "x", 0), 0, (float)U.D(a, "z", 0)); var mins = Math.Max(1, Math.Min(240, McpJson.Get(a, "minutes", 20)));
+            if (!WorldBounds.InWorld(pos.x, 0, pos.z) || double.IsNaN(mins)) return ToolOutput.Err("x, z and minutes must be finite numbers inside the world");
             if (!McpJson.GetBool(a, "force", false))
                 foreach (var pl in ZNet.instance.GetPlayerList())
                 {

@@ -18,6 +18,7 @@ namespace HubnerExt
         public void Unload()
         {
             Audit.Uninstall();
+            VirtualPeers.Uninstall();
 #if !SERVER
             Control.Uninstall();
 #endif
@@ -64,30 +65,43 @@ namespace HubnerExt
 
         public static bool Ready { get { return ZDOMan.instance != null && ZoneSystem.instance != null; } }
 
-        /// <summary>All ZDOs this process knows whose position is inside the box (the server knows every zone, a client only the area it has loaded).</summary>
-        public static List<ZDO> InBox(float x0, float z0, float x1, float z1)
+        /// <summary>
+        ///     The ZDOs inside the box, one fresh list per zone sector, so a caller can spread the work over frames (a list per call
+        ///     would be one long stall on a server that knows the whole world) and may change the world between chunks.
+        ///     The box is clamped to the world (a typo such as 1e9 used to loop over millions of empty zones on the main thread);
+        ///     sector index 0 means "outside the zone grid" and is never scanned as if it were a zone.
+        /// </summary>
+        public static IEnumerable<List<ZDO>> InBoxChunks(float x0, float z0, float x1, float z1)
         {
-            var res = new List<ZDO>();
-            if (!Ready) return res;
+            if (!Ready) yield break;
             if (_bySector == null) _bySector = typeof(ZDOMan).GetField("m_objectsBySector", BindingFlags.NonPublic | BindingFlags.Instance);
             var arr = _bySector.GetValue(ZDOMan.instance) as List<ZDO>[];
-            if (arr == null) return res;
-            var a = ZoneSystem.GetZone(new Vector3(Math.Min(x0, x1), 0, Math.Min(z0, z1)));
-            var b = ZoneSystem.GetZone(new Vector3(Math.Max(x0, x1), 0, Math.Max(z0, z1)));
-            float lx = Math.Min(x0, x1), hx = Math.Max(x0, x1), lz = Math.Min(z0, z1), hz = Math.Max(z0, z1);
+            if (arr == null) yield break;
+            float lx = WorldBounds.Clamp(Math.Min(x0, x1)), hx = WorldBounds.Clamp(Math.Max(x0, x1)), lz = WorldBounds.Clamp(Math.Min(z0, z1)), hz = WorldBounds.Clamp(Math.Max(z0, z1));
+            var a = ZoneSystem.GetZone(new Vector3(lx, 0, lz));
+            var b = ZoneSystem.GetZone(new Vector3(hx, 0, hz));
             for (int sx = a.x; sx <= b.x; sx++)
                 for (int sy = a.y; sy <= b.y; sy++)
                 {
                     var idx = ZoneSystem.SectorToIndex(sx, sy).Sector;
-                    if (idx >= arr.Length) continue;
+                    if (idx == 0 || idx >= arr.Length) continue;
                     var list = arr[idx];
-                    if (list == null) continue;
+                    if (list == null || list.Count == 0) continue;
+                    var chunk = new List<ZDO>();
                     foreach (var z in list)
                     {
                         var p = z.GetPosition();
-                        if (p.x >= lx && p.x <= hx && p.z >= lz && p.z <= hz) res.Add(z);
+                        if (p.x >= lx && p.x <= hx && p.z >= lz && p.z <= hz) chunk.Add(z);
                     }
+                    if (chunk.Count > 0) yield return chunk;
                 }
+        }
+
+        /// <summary>All ZDOs this process knows whose position is inside the box (the server knows every zone, a client only the area it has loaded).</summary>
+        public static List<ZDO> InBox(float x0, float z0, float x1, float z1)
+        {
+            var res = new List<ZDO>();
+            foreach (var chunk in InBoxChunks(x0, z0, x1, z1)) res.AddRange(chunk);
             return res;
         }
 
@@ -130,7 +144,7 @@ namespace HubnerExt
             r.Add("verify_plan",
                 "Compare a build plan with the world. items:[{prefab,x,y,z,yaw,text?}] (positions are prefab pivots, as spawned). Reports ok / moved / missing / duplicate / wrong-text counts with examples, and 'extra' objects of plan prefabs inside the plan's box that the plan does not contain. tol (default 0.06 m) is the position match, yawTol 2 degrees.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"alsoPrefabs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"tol\":{\"type\":\"number\"},\"matchRadius\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Verify.Plan);
-            r.Add("snapshot", "Record every object in a box under a name (kept in memory and on disk) so a later snapshot_diff can show exactly what changed.",
+            r.Add("snapshot", "Record every object in a box under a name (kept in memory; a copy is also written to hubner-ext/snapshots/<name>.jsonl for inspection) so a later snapshot_diff can show exactly what changed. Name: letters, digits, _ - . (max 64).",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"name\",\"x0\",\"z0\",\"x1\",\"z1\"]}", Snap.Take);
             r.Add("snapshot_diff", "Diff the current world against a named snapshot: added, removed, moved/changed objects (limit examples).",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"limit\":{\"type\":\"number\"}},\"required\":[\"name\"]}", Snap.Diff);
@@ -170,7 +184,7 @@ namespace HubnerExt
         {
             if (!Zdos.Ready) return ToolOutput.Err("no world loaded");
             float x0, z0, x1, z1;
-            if (U.Has(a, "x0")) { x0 = (float)U.D(a, "x0", 0); x1 = (float)U.D(a, "x1", 0); z0 = (float)U.D(a, "z0", 0); z1 = (float)U.D(a, "z1", 0); }
+            if (U.Has(a, "x0")) { if (!(U.Has(a, "x1") && U.Has(a, "z0") && U.Has(a, "z1"))) return ToolOutput.Err("a box needs x0,z0,x1,z1"); x0 = (float)U.D(a, "x0", 0); x1 = (float)U.D(a, "x1", 0); z0 = (float)U.D(a, "z0", 0); z1 = (float)U.D(a, "z1", 0); }
             else if (U.Has(a, "x")) { var r = (float)U.D(a, "radius", 20); x0 = (float)U.D(a, "x", 0) - r; x1 = x0 + 2 * r; z0 = (float)U.D(a, "z", 0) - r; z1 = z0 + 2 * r; }
             else return ToolOutput.Err("give x,z[,radius] or x0,z0,x1,z1");
             var filters = U.Split(McpJson.GetStr(a, "prefab"));
@@ -196,7 +210,7 @@ namespace HubnerExt
         static ToolOutput PrefabSearch(Dictionary<string, object> a)
         {
             if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
-            var q = McpJson.GetStr(a, "contains", ""); var lim = (int)U.D(a, "limit", 100);
+            var q = McpJson.GetStr(a, "contains", ""); var lim = Math.Max(1, (int)U.D(a, "limit", 100));
             var res = new List<string>();
             foreach (var n in ZNetScene.instance.GetPrefabNames())
                 if (n.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0) { res.Add(U.S(n)); if (res.Count >= lim) break; }
@@ -250,8 +264,9 @@ namespace HubnerExt
             float z0 = (float)Math.Min(U.D(a, "z0", 0), U.D(a, "z1", 0)), z1 = (float)Math.Max(U.D(a, "z0", 0), U.D(a, "z1", 0));
             var cell = (float)Math.Max(1, U.D(a, "cell", 4)); var minD = (float)U.D(a, "minDelta", 0.15);
             var wantRaster = McpJson.GetBool(a, "raster", true);
-            var nx = (int)Math.Ceiling((x1 - x0) / cell); var nz = (int)Math.Ceiling((z1 - z0) / cell);
-            if (nx * nz > 20000) return ToolOutput.Err("raster too large; increase cell");
+            double fx = Math.Ceiling((x1 - x0) / cell), fz = Math.Ceiling((z1 - z0) / cell);
+            if (double.IsNaN(fx) || double.IsNaN(fz) || fx * fz > 20000) return ToolOutput.Err("raster too large; increase cell");     // checked in double: int * int wraps for a huge box and passed
+            var nx = (int)fx; var nz = (int)fz;
             var grid = new float[nx, nz]; var hit = new bool[nx, nz];
             var hash = "_TerrainCompiler".GetStableHashCode();
             var zones = new List<string>(); long modified = 0, paint = 0; var tcCount = 0;
@@ -414,6 +429,7 @@ namespace HubnerExt
         {
             if (!Zdos.Ready) return ToolOutput.Err("no world loaded");
             var name = McpJson.GetStr(a, "name");
+            if (!SafeNames.IsFileStem(name)) return ToolOutput.Err("snapshot name must be 1-64 characters of letters, digits, _ - . (it becomes a file name)");
             var s = new S { Box = new[] { (float)U.D(a, "x0", 0), (float)U.D(a, "z0", 0), (float)U.D(a, "x1", 0), (float)U.D(a, "z1", 0) } };
             foreach (var z in Zdos.InBox(s.Box[0], s.Box[1], s.Box[2], s.Box[3])) { var r = Zdos.ToRec(z); if (!r.Prefab.StartsWith("_")) s.Items[r.Id] = r; }
             All[name] = s;
@@ -423,7 +439,7 @@ namespace HubnerExt
                 var sb = new StringBuilder(); foreach (var r in s.Items.Values) sb.AppendLine(Zdos.Json(r));
                 File.WriteAllText(Path.Combine(dir, name + ".jsonl"), sb.ToString());
             }
-            catch { }
+            catch (Exception ex) { U.Once("Snap.Take", ex); }
             return U.Json("{\"snapshot\":" + U.S(name) + ",\"objects\":" + s.Items.Count + "}");
         }
 

@@ -265,3 +265,77 @@ public class ToolProfileTests
     [Fact] public void BuildAndControlAreDisjointOnWrites() { Assert.Contains("build", ToolProfiles.Categories("build")); Assert.DoesNotContain("control", ToolProfiles.Categories("build")); Assert.Contains("control", ToolProfiles.Categories("control")); }
     [Fact] public void TerseCutsAtFirstSentence() { Assert.Equal("Walk the character with the game's real movement.", ToolProfiles.Terse("Walk the character with the game's real movement. points:[[x,z]] waypoints. More.")); Assert.Equal("short", ToolProfiles.Terse("short")); }
 }
+
+public class WriteGateTests
+{
+    const string Flag = "/srv/BepInEx/hubner-ext/ALLOW_SERVER_WRITES";
+
+    static string Check(bool dry, bool honoursDry, bool exists = true, bool fresh = true, string confirm = WriteGate.Confirm)
+        => WriteGate.Check(dry, honoursDry, exists, fresh, 30, Flag, confirm);
+
+    [Fact] public void OpenGateWithConfirmPasses() => Assert.Null(Check(false, false));
+    [Fact] public void MissingFlagRefuses() => Assert.Contains("server writes are off", Check(false, false, exists: false));
+    [Fact] public void ExpiredFlagRefuses() => Assert.Contains("expired", Check(false, false, fresh: false));
+    [Fact] public void WrongConfirmRefuses() => Assert.Contains("confirm", Check(false, false, confirm: "yes"));
+    [Fact] public void MissingConfirmRefuses() => Assert.Contains("confirm", Check(false, false, confirm: null));
+
+    [Fact]
+    public void DryRunSkipsTheGateOnlyWhenTheHandlerHonoursIt()
+    {
+        Assert.Null(Check(true, true, exists: false));                       // plan_apply dry:true only reports
+        // zdo_delete / zdo_set / container_set / doors_set / undo_group ignore 'dry': with the gate closed they must refuse
+        Assert.Contains("server writes are off", Check(true, false, exists: false));
+        Assert.Contains("confirm", Check(true, false, confirm: null));
+    }
+}
+
+public class SafeNamesTests
+{
+    [Theory]
+    [InlineData("base-1")]
+    [InlineData("castle_x.v2")]
+    [InlineData("A")]
+    public void FileStemsPass(string n) => Assert.True(SafeNames.IsFileStem(n));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("../journal")]
+    [InlineData("..")]
+    [InlineData(".")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    [InlineData("/etc/passwd")]
+    [InlineData("name with space")]
+    [InlineData("a..b")]
+    public void PathsAndOddNamesAreRefused(string n) => Assert.False(SafeNames.IsFileStem(n));
+
+    [Fact] public void LongNamesAreRefused() => Assert.False(SafeNames.IsFileStem(new string('a', 65)));
+}
+
+public class WorldBoundsTests
+{
+    [Fact] public void InsideAndOutside()
+    {
+        Assert.True(WorldBounds.InWorld(0, 30, 0));
+        Assert.True(WorldBounds.InWorld(-10500, 0, 10500));
+        Assert.False(WorldBounds.InWorld(1e9, 0, 0));
+        Assert.False(WorldBounds.InWorld(0, 0, -1e9));
+        Assert.False(WorldBounds.InWorld(0, 6000, 0));
+    }
+
+    [Fact] public void NonFiniteIsOutside()
+    {
+        Assert.False(WorldBounds.InWorld(double.NaN, 0, 0));
+        Assert.False(WorldBounds.InWorld(0, double.PositiveInfinity, 0));
+        Assert.False(WorldBounds.InWorld(0, 0, double.NegativeInfinity));
+    }
+
+    [Fact] public void ClampKeepsABoxInsideTheWorld()
+    {
+        Assert.Equal(WorldBounds.Limit, WorldBounds.Clamp(1e9f));
+        Assert.Equal(-WorldBounds.Limit, WorldBounds.Clamp(-1e9f));
+        Assert.Equal(123f, WorldBounds.Clamp(123f));
+        Assert.Equal(0f, WorldBounds.Clamp(float.NaN));
+    }
+}

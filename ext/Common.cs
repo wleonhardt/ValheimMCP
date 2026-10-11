@@ -19,6 +19,7 @@ namespace HubnerExt
         public static bool CoreHasSettings { get { return MInt != null; } }
         public static int Int(string key, int dflt) { try { return MInt != null ? (int)MInt.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
         public static string Str(string key, string dflt) { try { return MStr != null ? (string)MStr.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
+        public static bool Bool(string key, bool dflt) { var v = Str(key, null); if (v == null) return dflt; v = v.Trim().ToLowerInvariant(); return v == "true" || v == "yes" || v == "on" ? true : (v == "false" || v == "no" || v == "off" ? false : dflt); }
         public static List<string> List(string key) { try { return MList != null ? (List<string>)MList.Invoke(null, new object[] { key }) : null; } catch { return null; } }
     }
 
@@ -34,6 +35,14 @@ namespace HubnerExt
             if (v is string s && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var p)) return p;
             return double.NaN;
         }
+
+        /// <summary>Is this character one of hubner.sandboxNames? Only those get god mode from teleport/walk: the extension must not make someone's real character invulnerable.</summary>
+        public static bool IsSandbox(string playerName)
+        {
+            var names = Cfg.List("hubner.sandboxNames");
+            return names != null && !string.IsNullOrEmpty(playerName) && names.Contains(playerName);
+        }
+        public static bool IsSandbox(Player p) { return p != null && IsSandbox(p.GetPlayerName()); }
 
         /// <summary>Prefabs that edit terrain or the terrain data itself. Never spawned, modified or deleted by these tools (owner rule: no land editing).</summary>
         private static readonly string[] Forbidden = { "digg", "raise", "terrain", "cultivat", "mud_road", "paved_road", "path_v2", "replant", "levelground", "level_ground", "flatten", "TerrainOp" };
@@ -203,6 +212,11 @@ namespace HubnerExt
     internal static class Journal
     {
         public static readonly List<JEntry> Entries = new List<JEntry>();
+        /// <summary>Counts every change to the journal: lets callers (the pre-save list sanitiser) skip work when nothing was written.</summary>
+        public static long Version;
+        /// <summary>Last file error (empty = fine). A journal that cannot be written means writes can no longer be undone after a restart: status and selftest show it.</summary>
+        public static string LastError = "";
+        public static int SkippedLines;
         private static long _seq;
         private static bool _loaded;
         private static StringBuilder _batch;
@@ -218,8 +232,9 @@ namespace HubnerExt
                 var byseq = new Dictionary<long, JEntry>(); var order = new List<long>(); int undone = 0;
                 foreach (var line in File.ReadAllLines(File_))
                 {
-                    var d = FlatJson.Parse(line); if (d == null) continue;
+                    var d = FlatJson.Parse(line); if (d == null) { if (line.Trim().Length > 0) SkippedLines++; continue; }
                     if (d.ContainsKey("undone")) { byseq.Remove((long)FlatJson.N(d, "undone")); undone++; continue; }
+                    if (d.ContainsKey("remap")) { var from = FlatJson.S(d, "remap"); var to = FlatJson.S(d, "to"); foreach (var pe in byseq.Values) if (pe.Id == from) pe.Id = to; continue; }
                     var e = new JEntry
                     {
                         Seq = (long)FlatJson.N(d, "seq"), Time = FlatJson.S(d, "t"), Kind = FlatJson.S(d, "kind"), Id = FlatJson.S(d, "id"), Prefab = FlatJson.S(d, "prefab"),
@@ -227,6 +242,7 @@ namespace HubnerExt
                         Creator = (long)FlatJson.N(d, "creator"), Scale = Vector3.one
                     };
                     var p = FlatJson.A(d, "pos"); if (p != null && p.Length >= 3) e.Pos = new Vector3(p[0], p[1], p[2]);
+                    var sc = FlatJson.A(d, "scale"); if (sc != null && sc.Length >= 3) e.Scale = new Vector3(sc[0], sc[1], sc[2]);
                     var q = FlatJson.A(d, "rot"); if (q != null && q.Length >= 4) e.Rot = new Quaternion(q[0], q[1], q[2], q[3]); else e.Rot = Quaternion.identity;
                     var ints = FlatJson.O(d, "ints"); if (ints != null) { e.Ints = new Dictionary<string, int>(); foreach (var kv in ints) if (kv.Value is double dv) e.Ints[kv.Key] = (int)dv; }
                     var fl = FlatJson.O(d, "floats"); if (fl != null) { e.Floats = new Dictionary<string, float>(); foreach (var kv in fl) if (kv.Value is double dv) e.Floats[kv.Key] = (float)dv; }
@@ -234,9 +250,10 @@ namespace HubnerExt
                     byseq[e.Seq] = e; order.Add(e.Seq); _seq = Math.Max(_seq, e.Seq);
                 }
                 foreach (var s in order) if (byseq.TryGetValue(s, out var en)) { Entries.Add(en); byseq.Remove(s); }
+                if (SkippedLines > 0) Plugin.Log?.LogWarning("[hubner-ext] journal: " + SkippedLines + " unreadable line(s) skipped (a torn write after a crash?)");
                 if (undone > 1000 && undone > Entries.Count) Compact();
             }
-            catch (Exception ex) { U.Once("Journal.load", ex); }
+            catch (Exception ex) { LastError = "load: " + ex.Message; U.Once("Journal.load", ex); }
         }
 
         /// <summary>Rewrite the file with only the live entries (drops the undone markers and the entries they cancel).</summary>
@@ -245,9 +262,12 @@ namespace HubnerExt
             try
             {
                 var sb = new StringBuilder(); foreach (var e in Entries) sb.Append(Line(e));
-                File.WriteAllText(File_ + ".tmp", sb.ToString()); File.Copy(File_ + ".tmp", File_, true); File.Delete(File_ + ".tmp");
+                var tmp = File_ + ".tmp";
+                File.WriteAllText(tmp, sb.ToString());
+                if (File.Exists(File_)) File.Replace(tmp, File_, null); else File.Move(tmp, File_);       // a crash leaves either the old or the new file, never half of one
+                LastError = "";
             }
-            catch (Exception ex) { U.Once("Journal.compact", ex); }
+            catch (Exception ex) { LastError = "compact: " + ex.Message; U.Once("Journal.compact", ex); }
         }
 
         public static void Load() { EnsureLoaded(); }
@@ -281,6 +301,7 @@ namespace HubnerExt
             sb.Append("{\"seq\":" + e.Seq + ",\"t\":" + U.S(e.Time) + ",\"kind\":" + U.S(e.Kind) + ",\"id\":" + U.S(e.Id) + ",\"prefab\":" + U.S(e.Prefab) + ",\"pos\":" + U.V(e.Pos)
                 + ",\"rot\":[" + U.N(e.Rot.x) + "," + U.N(e.Rot.y) + "," + U.N(e.Rot.z) + "," + U.N(e.Rot.w) + "],\"text\":" + U.S(e.Text ?? "") + ",\"tag\":" + U.S(e.Tag ?? "") + ",\"plan\":" + U.S(e.Plan ?? "")
                 + ",\"key\":" + U.S(e.Key ?? "") + ",\"creator\":" + e.Creator + ",\"group\":" + U.S(e.Group ?? "") + ",\"note\":" + U.S(e.Note ?? ""));
+            if (e.Scale != Vector3.one && e.Scale != Vector3.zero) sb.Append(",\"scale\":" + U.V(e.Scale));
             if (e.Ints != null && e.Ints.Count > 0) { sb.Append(",\"ints\":{"); bool f = true; foreach (var kv in e.Ints) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + kv.Value.ToString(CultureInfo.InvariantCulture)); } sb.Append('}'); }
             if (e.Floats != null && e.Floats.Count > 0) { sb.Append(",\"floats\":{"); bool f = true; foreach (var kv in e.Floats) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + U.N(kv.Value)); } sb.Append('}'); }
             if (e.Strings != null && e.Strings.Count > 0) { sb.Append(",\"strings\":{"); bool f = true; foreach (var kv in e.Strings) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + U.S(kv.Value)); } sb.Append('}'); }
@@ -289,14 +310,14 @@ namespace HubnerExt
 
         static void Write(string text)
         {
-            try { Directory.CreateDirectory(Dir); File.AppendAllText(File_, text); }
-            catch (Exception ex) { U.Once("Journal.write", ex); }
+            try { Directory.CreateDirectory(Dir); File.AppendAllText(File_, text); LastError = ""; }
+            catch (Exception ex) { LastError = "write: " + ex.Message; U.Once("Journal.write", ex); }
         }
 
         public static void Add(JEntry e)
         {
             EnsureLoaded();
-            e.Seq = ++_seq; e.Time = DateTime.UtcNow.ToString("o");
+            e.Seq = ++_seq; e.Time = DateTime.UtcNow.ToString("o"); Version++;
             Entries.Add(e);
             var line = Line(e);
             if (_batch != null) _batch.Append(line); else Write(line);
@@ -306,9 +327,21 @@ namespace HubnerExt
         public static void Remove(JEntry e)
         {
             for (int i = Entries.Count - 1; i >= 0; i--) if (ReferenceEquals(Entries[i], e)) { Entries.RemoveAt(i); break; }     // newest first: undo takes from the end
+            Version++;
             var line = "{\"undone\":" + e.Seq + "}\n";
             if (_batch != null) _batch.Append(line); else Write(line);
         }
-        public static void Flush() { }
+
+        /// <summary>Undoing a delete recreates the object under a new id: every other entry that names the old id must follow, or an older spawn/modify of the same object can no longer be undone.</summary>
+        public static void Remap(string oldId, string newId)
+        {
+            if (string.IsNullOrEmpty(oldId) || oldId == newId) return;
+            var any = false;
+            foreach (var x in Entries) if (x.Id == oldId) { x.Id = newId; any = true; }
+            if (!any) return;
+            Version++;
+            var line = "{\"remap\":" + U.S(oldId) + ",\"to\":" + U.S(newId) + "}\n";
+            if (_batch != null) _batch.Append(line); else Write(line);
+        }
     }
 }

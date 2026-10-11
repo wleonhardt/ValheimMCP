@@ -23,7 +23,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"fix\":{\"type\":\"boolean\"},\"examples\":{\"type\":\"number\"},\"confirm\":{\"type\":\"string\"}}}", a => McpJson.GetBool(a, "fix", false) ? Plans.GuardPublic(a, AuditTool) : AuditTool(a), Plans.WriteFlag);     // a read-only scan needs no gate
             r.Add("selftest", "Run the extension's own health checks (ZDO table, journal, tools, hooks, control, sector integrity, write gate) and report each as ok/fail with detail. Cheap; run after a reload or when something behaves oddly.",
                 "{\"type\":\"object\",\"properties\":{}}", SelfTest);
-            r.Add("players", "Connected peers (server: every player): name, position, host/steam id, uid, and sandbox=true when the name is the Hubner sandbox character (Odev/MaRkO/ClaudeEyes). Use before a restart: a sandbox-only list means the restart can proceed after the sandbox client is closed.",
+            r.Add("players", "Connected peers (server: every player): name, position, host/steam id, uid, and sandbox=true when the name is listed in hubner.sandboxNames; host (IP / Steam id) only when hubner.exposePeerHosts is true. Use before a restart: a sandbox-only list means the restart can proceed after the sandbox client is closed.",
                 "{\"type\":\"object\",\"properties\":{}}", PlayersTool);
             r.Add("status", "One-call overview: role, version, uptime, object and player counts, write gate state, journal size, save state, queued jobs, hook state.",
                 "{\"type\":\"object\",\"properties\":{}}", Status);
@@ -33,6 +33,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"lines\":{\"type\":\"number\"},\"filter\":{\"type\":\"string\"},\"level\":{\"type\":\"string\"}}}", LogTail);
             r.Add("job_start", "Queue a long write tool (plan_apply, plan_remove, zdo_delete, zdo_set, clear_overlaps, zdo_audit) to run on the game's frames instead of inside the HTTP call: plan_apply runs in slices of at most hubner.jobBudgetMs per frame (default 8), so a big plan never freezes players; the others run in one frame but off the HTTP timeout. tool + args as for the tool itself (the write gate and confirm apply as usual). Returns a job id; poll job_status.",
                 "{\"type\":\"object\",\"properties\":{\"tool\":{\"type\":\"string\"},\"args\":{\"type\":\"object\"}},\"required\":[\"tool\"]}", JobStart, Plans.WriteFlag);
+            r.Add("job_cancel", "Stop a job: a queued job never starts, a running sliced job (plan_apply) stops after the piece it is on and its journal batch is flushed, so job_status/undo_group still show what was done. id required.",
+                "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"}},\"required\":[\"id\"]}", JobCancel, Plans.WriteFlag);
             r.Add("job_status", "Status/result of a queued job (queued | running | done | error, with progress frames for sliced jobs) or the list of recent jobs when no id is given.",
                 "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"}}}", JobStatus);
             JobTools["zdo_audit"] = x => McpJson.GetBool(x, "fix", false) ? Plans.GuardPublic(x, AuditTool) : AuditTool(x);
@@ -67,7 +69,7 @@ namespace HubnerExt
         }
         public static void Uninstall() { try { if (_h != null) _h.UnpatchSelf(); } catch { } _h = null; }
         internal static string HookError = "";
-        static void BeforeSave() { try { SanitizeLists(); } catch { } }
+        static void BeforeSave() { try { SanitizeLists(); } catch (Exception ex) { U.Once("BeforeSave", ex); } }
         // ------------------------------------------------------------------ chat capture (client: Chat.OnNewChatMessage fires for every message the player would see)
         static readonly List<string> ChatRows = new List<string>(); static int _chatSeq;
         static void ChatMsg(object[] __args)
@@ -128,6 +130,7 @@ namespace HubnerExt
         }
         static void AddChat(string type, string name, string text)
         {
+            if (type == "Whisper" && !Cfg.Bool("hubner.captureWhispers", false)) return;       // private by default: a whisper is not meant for whoever drives this tool
             lock (ChatRows)
             {
                 ChatRows.Add("{\"seq\":" + (++_chatSeq) + ",\"time\":" + U.S(DateTime.UtcNow.ToString("HH:mm:ss")) + ",\"type\":" + U.S(type) + ",\"name\":" + U.S(name) + ",\"text\":" + U.S(text) + "}");
@@ -138,9 +141,10 @@ namespace HubnerExt
         {
             int since = (int)McpJson.Get(a, "since", 0), limit = Math.Max(1, (int)McpJson.Get(a, "limit", 100));
             var rows = new List<string>();
-            lock (ChatRows) { int first = _chatSeq - ChatRows.Count; for (int i = 0; i < ChatRows.Count; i++) if (first + i + 1 > since) rows.Add(ChatRows[i]); }
+            int last;
+            lock (ChatRows) { last = _chatSeq; int first = _chatSeq - ChatRows.Count; for (int i = 0; i < ChatRows.Count; i++) if (first + i + 1 > since) rows.Add(ChatRows[i]); }
             if (rows.Count > limit) rows = rows.GetRange(rows.Count - limit, limit);
-            return U.Json("{\"last\":" + _chatSeq + ",\"count\":" + rows.Count + ",\"messages\":[" + string.Join(",", rows.ToArray()) + "]}");
+            return U.Json("{\"last\":" + last + ",\"count\":" + rows.Count + ",\"messages\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
         static void SceneTick() { try { RunJobs(); } catch (Exception ex) { U.Once("SceneTick", ex); } }
@@ -158,7 +162,32 @@ namespace HubnerExt
             return (int)ZoneSystem.SectorToIndex(z.x, z.y).Sector;
         }
 
-        /// <summary>After objects were moved: drop every stale or repeated list entry for them in ONE pass over the sector lists, so a world save writes each object once.</summary>
+        static MethodInfo _setDirty;
+        /// <summary>The world file is written per chunk and only dirty chunks are rewritten: a sector list we edited must be marked dirty or the edit may never reach disk.</summary>
+        static void MarkDirty(int sector)
+        {
+            try
+            {
+                if (_setDirty == null) _setDirty = typeof(ZDOMan).GetMethod("SetDirtyChunks", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (_setDirty != null) _setDirty.Invoke(ZDOMan.instance, new object[] { new ZoneSystem.SectorIndex { Sector = (uint)sector } });
+            }
+            catch (Exception ex) { U.Once("MarkDirty", ex); }
+        }
+
+        /// <summary>
+        ///     The entry of <paramref name="z" /> at position k of list i is wrong (the object belongs in sector <paramref name="expected" />, or is listed twice).
+        ///     Remove it, and make sure the object is listed where it belongs: some objects (portals) keep their old list when they move, so dropping the
+        ///     entry alone would remove them from the next save.
+        /// </summary>
+        static void Refile(List<ZDO>[] arr, int i, int k, ZDO z, int expected)
+        {
+            arr[i].RemoveAt(k); MarkDirty(i);
+            if (expected < 0 || expected >= arr.Length) return;
+            var target = arr[expected] ?? (arr[expected] = new List<ZDO>());
+            if (!target.Contains(z)) { target.Add(z); MarkDirty(expected); }
+        }
+
+        /// <summary>After objects were moved: fix every stale or repeated list entry for them in ONE pass over the sector lists, so a world save writes each object once.</summary>
         public static int FixMoved(HashSet<ZDO> moved)
         {
             var arr = Lists(); if (arr == null || moved.Count == 0) return 0;
@@ -169,16 +198,22 @@ namespace HubnerExt
                 for (int k = l.Count - 1; k >= 0; k--)
                 {
                     var z = l[k]; if (!moved.Contains(z)) continue;
-                    if (ExpectedSector(z.GetPosition()) != i) { l.RemoveAt(k); removed++; continue; }
-                    if (!seen.Add(z)) { l.RemoveAt(k); removed++; }
+                    var exp = ExpectedSector(z.GetPosition());
+                    if (exp != i) { Refile(arr, i, k, z, exp); removed++; continue; }
+                    if (!seen.Add(z)) { l.RemoveAt(k); MarkDirty(i); removed++; }
                 }
             }
             return removed;
         }
 
-        /// <summary>Non-destructive: drop list entries that sit in the wrong sector or appear twice (objects stay). Run before every world save so the save file never contains an object twice.</summary>
-        public static int SanitizeLists()
+        /// <summary>Count of list entries the last sanitise pass fixed (world_save reports it).</summary>
+        public static int LastSanitized;
+        static long _sanitizedAtVersion = -1;
+
+        /// <summary>Fix list entries that sit in the wrong sector or appear twice (objects stay). Run before every world save so the save file never contains an object twice; skipped when this extension wrote nothing since the last pass.</summary>
+        public static int SanitizeLists(bool force = false)
         {
+            if (!force && _sanitizedAtVersion == Journal.Version) return 0;
             var arr = Lists(); if (arr == null) return 0;
             int removed = 0; var seen = new HashSet<ZDO>();
             for (int i = 0; i < arr.Length; i++)
@@ -187,9 +222,12 @@ namespace HubnerExt
                 for (int k = l.Count - 1; k >= 0; k--)
                 {
                     var z = l[k];
-                    if (ExpectedSector(z.GetPosition()) != i || !seen.Add(z)) { l.RemoveAt(k); removed++; }
+                    var exp = ExpectedSector(z.GetPosition());
+                    if (exp != i) { Refile(arr, i, k, z, exp); removed++; continue; }
+                    if (!seen.Add(z)) { l.RemoveAt(k); MarkDirty(i); removed++; }
                 }
             }
+            _sanitizedAtVersion = Journal.Version; LastSanitized = removed;
             return removed;
         }
 
@@ -214,14 +252,14 @@ namespace HubnerExt
                     var hash = z.GetPrefab(); var name = hash == 0 ? "#0" : Zdos.NameOf(hash);
                     if (hash == 0 || (name.Length > 0 && name[0] == '#'))
                     {
-                        invalid++; if (exInvalid.Count < maxEx) exInvalid.Add(U.Id(z) + " " + name + " " + U.V(p) + " plan=" + z.GetString(Plans.PlanKey, ""));
-                        if (fix && !string.IsNullOrEmpty(z.GetString(Plans.PlanKey, ""))) toDestroy.Add(z);
+                        invalid++; if (exInvalid.Count < maxEx) exInvalid.Add(U.Id(z) + " " + name + " " + U.V(p) + " plan=" + z.GetString(Plans.PlanHash, ""));
+                        if (fix && !string.IsNullOrEmpty(z.GetString(Plans.PlanHash, ""))) toDestroy.Add(z);
                     }
                     bool bad = false;
                     if (ExpectedSector(p) != i) { stale++; bad = true; if (exStale.Count < maxEx) exStale.Add(U.Id(z) + " " + name + " in list " + i + " expected " + ExpectedSector(p)); }
                     if (!seen.Add(z)) { dupRef++; bad = true; if (exDup.Count < maxEx) exDup.Add(U.Id(z) + " " + name + " listed twice"); }
                     if (bad && fix) { l.RemoveAt(k); removed++; continue; }
-                    if (string.IsNullOrEmpty(z.GetString(Plans.PlanKey, "")) && z.m_uid.UserID != 1L && hash != 0)
+                    if (string.IsNullOrEmpty(z.GetString(Plans.PlanHash, "")) && z.m_uid.UserID != 1L && hash != 0)
                     {
                         var key = hash + "|" + Math.Round(p.x, 1) + "|" + Math.Round(p.y, 1) + "|" + Math.Round(p.z, 1) + "|" + Math.Round(z.GetRotation().eulerAngles.y);
                         if (!groups.TryGetValue(key, out var g)) groups[key] = g = new List<ZDO>(); g.Add(z);
@@ -243,7 +281,7 @@ namespace HubnerExt
             Action<string, bool, string> add = (n, ok, d) => c.Add(new Check { Name = n, Ok = ok, Detail = d });
             add("zdo table", Zdos.Ready, Zdos.Ready ? "ZDOMan + ZoneSystem ready" : "not ready");
             try { var d = Path.Combine(BepInEx.Paths.BepInExRootPath, "hubner-ext"); Directory.CreateDirectory(d); var f = Path.Combine(d, ".write-test"); File.WriteAllText(f, "x"); File.Delete(f); add("journal dir writable", true, d); } catch (Exception ex) { add("journal dir writable", false, ex.Message); }
-            add("journal", true, Journal.Entries.Count + " entries in memory");
+            add("journal", string.IsNullOrEmpty(Journal.LastError), Journal.Entries.Count + " entries in memory" + (string.IsNullOrEmpty(Journal.LastError) ? "" : "; last error: " + Journal.LastError) + (Journal.SkippedLines > 0 ? "; " + Journal.SkippedLines + " unreadable line(s) skipped at load" : ""));
             add("job hook", _h != null && string.IsNullOrEmpty(HookError), string.IsNullOrEmpty(HookError) ? "ZNetScene.Update postfix" : HookError);
             if (Zdos.Ready)
             {
@@ -266,20 +304,25 @@ namespace HubnerExt
             return U.Json("{\"ok\":" + (c.All(x => x.Ok) ? "true" : "false") + ",\"checks\":[" + string.Join(",", c.Select(x => "{\"name\":" + U.S(x.Name) + ",\"ok\":" + (x.Ok ? "true" : "false") + ",\"detail\":" + U.S(x.Detail) + "}").ToArray()) + "]}");
         }
 
+        static string _health = "ok"; static DateTime _healthAt = DateTime.MinValue;
+        /// <summary>The checks write a file and sample up to 200k objects, so status shows the result of the last run (at most a minute old); selftest always runs them.</summary>
         internal static string HealthSummary()
         {
-            try { var f = RunChecks().Where(x => !x.Ok).Select(x => x.Name).ToArray(); return f.Length == 0 ? "ok" : "failing: " + string.Join(", ", f); } catch (Exception ex) { return "selftest error: " + ex.Message; }
+            if ((DateTime.UtcNow - _healthAt).TotalSeconds < 60) return _health;
+            try { var f = RunChecks().Where(x => !x.Ok).Select(x => x.Name).ToArray(); _health = f.Length == 0 ? "ok" : "failing: " + string.Join(", ", f); } catch (Exception ex) { _health = "selftest error: " + ex.Message; }
+            _healthAt = DateTime.UtcNow; return _health;
         }
 
         static ToolOutput PlayersTool(Dictionary<string, object> a)
         {
             if (ZNet.instance == null) return U.Json("{\"count\":0,\"players\":[]}");
             var rows = new List<string>(); int sandbox = 0;
-            var names = Cfg.List("hubner.sandboxNames"); if (names == null || names.Count == 0) names = new List<string> { "Odev", "MaRkO", "ClaudeEyes" };
+            var names = Cfg.List("hubner.sandboxNames") ?? new List<string>();
+            bool showHosts = Cfg.Bool("hubner.exposePeerHosts", false);                  // an IP address or Steam id is personal data about a real player: off unless the operator turns it on
             foreach (var p in ZNet.instance.GetPeers())
             {
                 string name = p.m_playerName ?? ""; bool sb = names.Contains(name); if (sb) sandbox++;
-                string host = ""; try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch { }
+                string host = ""; if (showHosts) { try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch { } }
                 rows.Add("{\"name\":" + U.S(name) + ",\"host\":" + U.S(host) + ",\"uid\":" + p.m_uid + ",\"pos\":" + U.V(p.m_refPos) + ",\"sandbox\":" + (sb ? "true" : "false") + "}");
             }
             return U.Json("{\"count\":" + rows.Count + ",\"sandbox\":" + sandbox + ",\"players\":[" + string.Join(",", rows.ToArray()) + "]}");
@@ -300,7 +343,7 @@ namespace HubnerExt
                 var peers = ZNet.instance.GetPeers(); sb.Append(",\"peers\":" + (peers == null ? 0 : peers.Count));
                 try { sb.Append(",\"saveStart\":" + U.N(ZNet.instance.SaveStartTime) + ",\"saveDone\":" + U.N(ZNet.instance.SaveDoneTime)); } catch { }
             }
-            sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"health\":" + U.S(HealthSummary()));
+            sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"journalError\":" + U.S(Journal.LastError) + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"health\":" + U.S(HealthSummary()));
             return U.Json(sb.Append('}').ToString());
         }
 
@@ -330,13 +373,36 @@ namespace HubnerExt
         internal static Dictionary<string, Func<Dictionary<string, object>, ToolOutput>> JobTools = new Dictionary<string, Func<Dictionary<string, object>, ToolOutput>>();
         internal static Dictionary<string, Func<Dictionary<string, object>, IEnumerator<ToolOutput>>> JobIters = new Dictionary<string, Func<Dictionary<string, object>, IEnumerator<ToolOutput>>>();
 
+        /// <summary>True while a sliced job (plan_apply) is between frames: its lists would go stale if another write ran now.</summary>
+        internal static bool SlicedJobRunning { get { foreach (var j in _jobs) if (j.State == "running" && j.Iter != null) return true; return false; } }
+        /// <summary>True while the job runner itself is executing a job (so the writer-busy check does not refuse the job's own work).</summary>
+        internal static bool InJobRun;
+
+        static ToolOutput JobCancel(Dictionary<string, object> a)
+        {
+            var id = (int)McpJson.Get(a, "id", -1); var j = _jobs.FirstOrDefault(x => x.Id == id); if (j == null) return ToolOutput.Err("no such job");
+            if (j.State == "queued") { j.State = "cancelled"; return U.Json("{\"job\":" + id + ",\"state\":\"cancelled\"}"); }
+            if (j.State == "running")
+            {
+                try { if (j.Iter != null) j.Iter.Dispose(); } catch (Exception ex) { U.Once("JobCancel", ex); }      // runs the iterator's finally blocks: the journal batch is flushed
+                j.State = "cancelled"; j.Result = "cancelled after " + j.Frames + " frames";
+                return U.Json("{\"job\":" + id + ",\"state\":\"cancelled\",\"frames\":" + j.Frames + "}");
+            }
+            return ToolOutput.Err("job " + id + " is already " + j.State);
+        }
+
         static ToolOutput JobStart(Dictionary<string, object> a)
         {
             var tool = McpJson.GetStr(a, "tool");
             if (tool == null || !(JobTools.ContainsKey(tool) || JobIters.ContainsKey(tool))) return ToolOutput.Err("tool not allowed for jobs: " + tool + " (allowed: " + string.Join(", ", JobTools.Keys.Concat(JobIters.Keys).ToArray()) + ")");
             var args = McpJson.GetObj(a, "args") ?? new Dictionary<string, object>();
+            if (_jobs.Count >= 50)                                                          // only finished jobs are forgotten: a queued or running one must not vanish
+            {
+                var finished = _jobs.FirstOrDefault(x => x.State != "queued" && x.State != "running");
+                if (finished == null) return ToolOutput.Err("50 jobs are queued or running: wait for them or job_cancel");
+                _jobs.Remove(finished);
+            }
             var j = new Job { Id = ++_jobSeq, Tool = tool, Args = args }; _jobs.Add(j);
-            if (_jobs.Count > 50) _jobs.RemoveAt(0);
             return U.Json("{\"job\":" + j.Id + ",\"state\":\"queued\",\"sliced\":" + (JobIters.ContainsKey(tool) ? "true" : "false") + "}");
         }
 
@@ -345,6 +411,12 @@ namespace HubnerExt
         static void RunJobs()
         {
             var j = _jobs.FirstOrDefault(x => x.State == "running") ?? _jobs.FirstOrDefault(x => x.State == "queued"); if (j == null) return;
+            InJobRun = true;
+            try { RunJob(j); } finally { InJobRun = false; }
+        }
+
+        static void RunJob(Job j)
+        {
             if (j.State == "queued")
             {
                 j.State = "running";

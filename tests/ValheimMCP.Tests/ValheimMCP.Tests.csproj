@@ -18,6 +18,7 @@
     <Compile Include="../../src/ValheimMCP/JsonRpc.cs" Link="src/JsonRpc.cs" />
     <Compile Include="../../src/ValheimMCP/SafeRegex.cs" Link="src/SafeRegex.cs" />
     <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
+    <Compile Include="../../ext/Pure.cs" Link="ext/Pure.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
