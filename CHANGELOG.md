@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### 0.6.0 core / 0.9.0 extension (what the ClaudeNJevHeim review suggested)
+Behaviour you may notice
+- A JSON-RPC message without an id is a notification and is never executed (a `tools/call` without an id used to run).
+- Undo after a restart works by what survives a restart. ZDO ids are valid for one world load only (the game renumbers every ZDO when it loads a save), so journal entries now carry the id of the world load and the plan identity (`hub_plan` + `hub_key`); an entry from an earlier run is found by plan tag, or for a plain spawn by prefab and position, and an ambiguous match is refused instead of guessed. A modify of an untagged object after a restart is reported as gone.
+- `Plans.Protected` also refuses (without `force` + `forceConfirm`) a dead player's tombstone, anything inside an enabled guard stone's area, a container that holds items, and a piece of a build of creator-0 pieces (two creator-0 pieces within 6 m). `plan_apply` refuses to place or move a piece inside an enabled ward and counts pieces inside a known location's radius as `noBuildAdvice`.
+- The walker yields to the human for 1.5 s after any input and stops its clocks meanwhile; it no longer turns the view every tick; it does not press ward-locked or keyed doors (`Door.Interact` returns true for those and opens nothing), only doors the route crosses; stalls follow a ladder (measured hop, run up banks of 38-60 degrees, rest, step aside, re-route, give up); a teleport ends the walk. `walk_check` uses the player's capsule (0.49 x 1.85, step 0.45, slide limit 38 degrees, `run:true` for 60).
+- `chat_tail` rows are tagged `untrusted` (unless the speaker's platform id is in `hubner.trustedPlayers`) with `hints`, and the text is cleaned; `chat_send` allows one line per 6 s and no repeats within 5 minutes.
+- `job_status` has a `code` (done, cancelled, error, crash, unloaded, bad_args, refused). A sliced job interrupted by an extension reload is resubmitted by the next load (same game process, under 2 minutes).
+
+New
+- `ext_status` (core): loaded extensions with build stamps, reload count (Mono cannot unload assemblies: the log warns at 50), dropped calls, stall reports. Every assembly carries `hubner.commit/branch/dirty/worktree`; untracked files count as dirty.
+- Main-thread watchdog: work that runs longer than 2 s is logged with its name; a frame stall is logged too.
+- Bind check: an extension built against a newer core is refused before the old one is touched. Queued calls of a reloaded extension are dropped and their callers fail at once.
+- Tools: `plan_check` (structure model ported from WearNTear.UpdateSupport, overlaps with real collider boxes, tilt, water, yaw grid, fire clearance), `world_events`, `neighbours`, `locations_near`, `biome_at`, `fires`, `husbandry_state`, `death_state`, `cost_mode`, `job_cancel`; `players` reports inBed and dead.
+- CI: silent-catch lint with a baseline, write-API allowlist, generated `docs/TOOLS.md`.
+
 ### 0.5.0 core / 0.8.0 extension (review fixes)
 **Behaviour changes to know about**
 - `run_command` and `POST /command` now need `tools.write: true` (they used to run whenever the listener was up). `tools.deny` also blocks the built-in tools.

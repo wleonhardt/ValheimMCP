@@ -155,6 +155,8 @@ dotnet build -c Release ext/HubnerExt.csproj           # client extension -> ./o
 dotnet build -c Release ext/HubnerExtServer.csproj     # server extension -> ./out/server/HubnerExt.dll
 dotnet test tests/ValheimMCP.Tests                     # unit tests of the game-free parts (no game DLLs needed; this is what CI runs)
 python3 -m unittest discover -s python/tests           # offline tests of the Python client (also CI)
+python3 -m unittest discover -s scripts/tests          # the lints and their tests (also CI)
+python3 scripts/lint_catch.py && python3 scripts/lint_writes.py && python3 scripts/lint_tools.py     # silent catches vs baseline, write APIs only where guarded, docs/TOOLS.md current (--write regenerates it)
 ```
 Override any reference location with `-p:McpDll=/path/ValheimMCP.dll` or `-p:LibDir=/path/lib`. Versions: core in `ValheimMCP.csproj`, extension in `ext/Version.props` (`ext_info` reports it). Copy `out/ValheimMCP.dll` to `BepInEx/plugins/`, the extension DLL to `BepInEx/hubner-ext/`, and `config/valheimmcp.client.yml` or `config/valheimmcp.server.yml` to `BepInEx/config/valheimmcp.yml`.
 
@@ -222,7 +224,7 @@ Environment: `HUBNER_URL`, `HUBNER_SERVER_URL`, `HUBNER_SERVER_SSH` (user@host),
 - Send a stable `key` per item from your generator (for example `tower:NW:wall:c3:k5`): a moved piece is then a *move*, not a delete plus a spawn. Without a key the identity is prefab + position (0.1 m) + height (0.5 m) + yaw.
 - `plan_apply` sweeps the plan's objects everywhere this process knows them (the server: the whole world); pass `box` to limit the sweep. The sweep is skipped when any item had an error (`sweepSkipped`), unless `sweepOnErrors:true`. A dry run reports unknown prefabs too.
 - Big plans: `job_start {tool:'plan_apply', args}`; the job runs on the game's frames and checks `hubner.jobBudgetMs` (default 8 ms) every 8 items, so players never see a hitch. While it runs, other write tools are refused (`job_cancel` stops it). The Python client does this by itself over `HUBNER_JOB_THRESHOLD` items.
-- Everything is journaled (`hubner-ext/journal.jsonl`, batched per call, compacted atomically on load). `undo_group` restores position, rotation, scale, text, tags, chest contents and any `ints`/`floats`/`strings` the operation changed (door states, fuel). An entry that cannot be undone stays in the journal. Undoing a delete recreates the object under a new id and the older entries about it follow. A journal that cannot be written is reported by `status` and `selftest` (`journalError`).
+- Everything is journaled (`hubner-ext/journal.jsonl`, batched per call, compacted atomically on load; entries carry the world load they belong to and the plan identity, because ZDO ids are renumbered at every load). `undo_group` restores position, rotation, scale, text, tags, chest contents and any `ints`/`floats`/`strings` the operation changed (door states, fuel). An entry that cannot be undone stays in the journal. Undoing a delete recreates the object under a new id and the older entries about it follow. A journal that cannot be written is reported by `status` and `selftest` (`journalError`).
 - Fireplace prefabs spawn with full fuel (`floats.fuel` to override).
 
 ## Tool profiles (`tools.profile`, `tools.terse`)
@@ -233,7 +235,7 @@ Environment: `HUBNER_URL`, `HUBNER_SERVER_URL`, `HUBNER_SERVER_SSH` (user@host),
 
 ## Safety: what the write tools refuse
 - Terrain and internal prefabs, players. Creatures, tamed animals, ships, carts and dropped items are decided by the prefab's components (never adopted, never cleared as overlap, deleted or edited only forced).
-- Player-built objects (`creator != 0`) need `force:true` **and** `forceConfirm:'player-built'`; every forced object is logged. This holds for the plan/ZDO tools **and** the client's `spawn` / `modify` / `delete` / `container_set` (a player's chest is player-built).
+- Player-built objects (`creator != 0`) need `force:true` **and** `forceConfirm:'player-built'`; every forced object is logged. The same override is needed for a tombstone, anything inside an enabled guard stone's area, a container that holds items and a build of creator-0 pieces. This holds for the plan/ZDO tools **and** the client's `spawn` / `modify` / `delete` / `container_set` (a player's chest is player-built).
 - Positions must be finite and inside the world (about ±11 km); a box argument is clamped to it.
 - Server writes need the gate flag file (`ALLOW_SERVER_WRITES`, valid for `hubner.writeFlagMinutes` after it was touched) and `confirm:'server-write'`. A `dry:true` run skips the gate only on tools that honour it (`plan_apply`, `clear_overlaps`, `plan_remove`, `journal_compact`); every other tool refuses without the flag even with `dry`. `vpeer_add` is gated too and refuses a spot within 200 m of a real player unless forced.
 - `teleport`, `walk_to`, `menu_join`, `chat_send` and the other control tools are write tools. God mode goes only to characters listed in `hubner.sandboxNames`.
@@ -242,8 +244,14 @@ Environment: `HUBNER_URL`, `HUBNER_SERVER_URL`, `HUBNER_SERVER_SSH` (user@host),
 ## Virtual peers: server-side physics with no player connected
 A stock dedicated server never instantiates the world (no reference position), so it has no colliders, heightmaps or `WearNTear`. `vpeer_add {name,x,z,minutes}` makes the server run the game's own `CreateLocalZones` / `FindSectorObjects` / `CreateObjects` / `RemoveObjects` around positions you choose (idea from ddormer/valheim-serverside, rewritten; off by default, at most 4 peers, auto-expiring, behind the write gate, refused within 200 m of a real player unless forced). While one exists the server twin also answers `raycast`, `surface_probe`, `headroom`, `stability_scan`, `walk_check`, `terrain_info`, `sign_check` and `bed_check`. Python: `with hubner.vpeer(x, z): ...`.
 
+## Reading the world without a player (server and client)
+`plan_check` (structure, overlap, tilt, water, yaw grid, fire clearance before placing), `world_events` (structures that appeared, players who came, went or died), `neighbours` (who owns what round a point: pieces by creator, wards, tombstones, claimed beds, containers with items), `locations_near`, `biome_at`, `fires`, `husbandry_state`, `death_state`, `cost_mode`. The full list with the code each lives in is `docs/TOOLS.md` (generated; CI keeps it current).
+
+## Host
+`ext_status` shows what is loaded, with the build stamp (commit, dirty, branch, worktree) of the core and of each extension, how many reloads this process has done (every reload stays in memory: restart the game after about 50), calls dropped, and main-thread stall reports. A main-thread watchdog logs work that runs longer than 2 s with its name. An extension built against a newer core than the one running is refused before the old extension is touched; queued calls of a reloaded extension are dropped.
+
 ## Chat
-`chat_tail` captures chat on the client (`Chat.OnNewChatMessage`) and on the server (one hook on `ZRoutedRpc.RPC_RoutedRPC` that peeks the method hash and decodes only the Talker RPC `Say` for Normal/Whisper and the routed `ChatMessage` for Shout/Ping). `chat_send` speaks as the sandbox character (180 characters, 15 m for Normal); `chat_bubble` shows a speech bubble for a named speaker.
+Chat text is data from people and a model reads it: `chat_tail` rows are cleaned for reading, tagged `untrusted` unless the speaker's platform id is in `hubner.trustedPlayers`, and carry `hints` (manipulation, machine, noise) that warn and never decide; `chat_send` cleans its text and allows one line per 6 s. `chat_tail` captures chat on the client (`Chat.OnNewChatMessage`) and on the server (one hook on `ZRoutedRpc.RPC_RoutedRPC` that peeks the method hash and decodes only the Talker RPC `Say` for Normal/Whisper and the routed `ChatMessage` for Shout/Ping). `chat_send` speaks as the sandbox character (180 characters, 15 m for Normal); `chat_bubble` shows a speech bubble for a named speaker.
 
 ## Other tools added from a community review
 `prefab_find` (name and component search, build costs), `visible_objects` (frustum + occlusion + type taxonomy), `interact` (press E), `probe_fan` (12-heading steering probe), `base_survey` (clusters, stations, beds), `player_status`.

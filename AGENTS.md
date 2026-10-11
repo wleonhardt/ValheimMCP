@@ -17,11 +17,15 @@ Operations file for coding agents working in this repository.
   - `dotnet build -c Release ext/HubnerExtServer.csproj`
   - `dotnet test tests/ValheimMCP.Tests`
   - `python3 -m unittest discover -s python/tests`
+  - `python3 -m unittest discover -s scripts/tests` and `python3 scripts/lint_catch.py && python3 scripts/lint_writes.py && python3 scripts/lint_tools.py` (after adding or changing a tool: `python3 scripts/lint_tools.py --write`)
   The game libraries are read from `ext/lib` (git-ignored; copy or link them, or pass `-p:LibDir=...`).
 - Check `plans/decisions/` before proposing structural changes.
 - Project knowledge belongs in `plans/`, not in agent memory.
 - Every security-relevant rule gets a pure, game-free implementation that the unit tests link (see `RequestPolicy`, `CommandPolicy`, `JsonRpc`, `WriteGate`, `SafeNames`, `WorldBounds`). Do not bury a gate inside code that needs the game to run.
 - A tool that writes to the world must be registered as a write tool, go through `Plans.Guard` on the server, respect `Plans.Protected`, and be journaled. A new argument named `dry` only skips the server gate if the handler really only reports (`honoursDry`).
+- A new catch block logs (`U.Once`, `Plugin.Log`) or rethrows, or carries `// allow: why`: the silent-catch count may only go down (`scripts/lint-baseline.json`). Creating, destroying or moving objects is allowed only in the files `scripts/lint_writes.py` lists.
+- ZDO ids are valid for one world load only. Never persist one as the identity of an object: use `hub_plan` + `hub_key` (see `Identity` in `ext/Pure.cs`).
+- Build every project and run the tests before committing: `dotnet build -c Release ValheimMCP.csproj ext/HubnerExt.csproj ext/HubnerExtServer.csproj` (one per call) and `dotnet test`.
 - Never commit build output (`out/`, `*.pdb`, `*.dll`), symlinks, passwords, tokens, IP addresses or host names. CI rejects them.
 - Live testing needs the game and a world; mark what was not exercised live in the commit message and in `plans/next-up.md`.
 

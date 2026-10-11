@@ -21,18 +21,26 @@ Everything below compiles and the game-free parts are unit-tested, but none of i
 13. `players` shows no host by default; whispers do not appear in `chat_tail`.
 14. `snapshot` with name `../journal` is refused.
 
-### Adoption backlog from the ClaudeNJevHeim review (queued)
+### Live verification of the ClaudeNJevHeim adoption (needs live test)
 
-Details and sources: `research/2026-10-clauden-jevheim-review.md`. Do these first, in this order, each as its own commit with tests:
+Implemented with game-free tests (see CHANGELOG 0.6.0 / 0.9.0); none of it has run in the game. Check in this order:
 
-1. Journal identity across restarts (ZDO ids are renumbered on load): boot id plus plan/key, resolve by tag, refuse when ambiguous.
-2. Walker: skip ward-locked and key doors, open only doors on the route, drop `SetLookDir`, user override with a 1.5 s yield.
-3. `tools/call` without an id must not run.
-4. Retire queued calls of a reloaded extension; bind check before unloading the old extension (verify on the game's Mono).
-5. Extend `Plans.Protected`: tombstones, wards, private chests, creator-0 structures of other tools; no-build location circles in `plan_apply`.
-6. Reload ledger for interrupted jobs, typed job outcomes, atomic state-file writes, main-thread stall watchdog, build stamp.
-7. CI lints: silent catch with baseline, tool/docs sync, write-API allowlist.
-8. Chat hardening for `chat_send` / `chat_tail`.
+1. `ext_status`: build stamps show the right commit and `dirty`; hot-reload the extension a few times and watch `reloads` and `droppedCalls`; build an extension against a newer core and check it is refused with the old one still loaded (**verify `Module.ResolveMember` on Valheim's Mono**: the unit test runs on .NET).
+2. Watchdog: run a long `plan_apply` synchronously and look for a "main thread busy for ... ms in plan_apply" line in the BepInEx log.
+3. Journal across a restart: `plan_apply`, restart the server, `undo_group` the plan; the pieces must go. Spawn a plain piece with the client `spawn`, restart, `undo`; also check an ambiguous case is refused.
+4. Reload ledger: start a sliced `plan_apply` job of several hundred pieces, rebuild the extension mid-run; the new load must resume it (`status.resumeNote`), and a game restart must not.
+5. Walker: walk past a ward-locked door and a keyed door (must not loop, `lockedDoor` in `walk_status`); a normal door opens only when on the route; steer by hand during a walk (the walker yields for 1.5 s); a steep bank of 40-55 degrees is climbed at a run; a portal ends the walk (`teleported`); the view no longer swings.
+6. Ownership: `zdo_delete` of a tombstone, of a piece inside a ward, of a chest with items, and of one piece of a creator-0 ruin must be refused; `neighbours` lists them; `plan_apply` inside a ward reports `wardRefused`.
+7. `world_events`: build something as a player on the server, wait 30 s, read `structure_appeared` with the right player; a `plan_apply` shows as "the server's own tools"; join and leave; die and read `player_died`.
+8. `plan_check`: a wooden tower of 9 posts reports the top ones `unsupported`; compare with what the game really does (build it on the test world and see what falls); stone and wood differ as in the unit test; check the ground note when terrain was edited.
+9. Readers: `locations_near`, `biome_at`, `fires` (fuel against an in-game fire), `husbandry_state` (feed an animal, watch `fedSecondsLeft`), `death_state`, `cost_mode` against the world options, `players` (`inBed`, `dead`).
+10. Chat: type an injection attempt in game chat and read it with `chat_tail` (`untrusted`, `hints`); `chat_send` twice within 6 s must refuse the second.
+
+### Next candidates (not done)
+
+- Fix the 78 silent catches over time (`python3 scripts/lint_catch.py --list`), lowering the baseline as you go.
+- From the review but skipped on purpose: the design generator, work fronts and stands, the lease, the Jev judge (see `research/2026-10-clauden-jevheim-review.md`).
+- Plan how to read the rest of the friend's repository (`research/2026-10-clauden-jevheim-inspection-plan.md`).
 
 ### Other
 
@@ -41,3 +49,4 @@ Details and sources: `research/2026-10-clauden-jevheim-review.md`. Do these firs
 ## Done
 
 - 2026-10-11: review fixes applied in code, docs, CI, Python (branch `review-fixes`); see `decisions/0001-review-fixes.md` and the top section of `CHANGELOG.md`.
+- 2026-10-11: the 14 items of the ClaudeNJevHeim adoption list implemented with tests (see `decisions/0002-adopting-from-clauden-jevheim.md`); live verification above.
