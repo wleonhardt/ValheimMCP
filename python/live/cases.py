@@ -243,6 +243,17 @@ def breeding_case(ctx):
         ctx.check(f"{q['prefab']}: it counts itself", b['nearby'] >= 1, b)
 
 
+def ground_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    if not _has_prefab(c, POLE): raise Skip(f'prefab {POLE} not in this game')
+    item = [{'prefab': POLE, 'x': x, 'z': z, 'key': 'g'}]
+    auto = c.tool('plan_check', items=item); gen = c.tool('plan_check', items=item, ground='generator')
+    ctx.check('the ground note says where the heights came from', 'vertex heights' in auto['ground'], auto['ground'])
+    ctx.check('ground:generator uses only the generator', ' 0 vertex heights of the loaded terrain' in gen['ground'] or 'forced' in gen['ground'], gen['ground'])
+    if 'terrain triangles from 0 ' in auto['ground']: raise Skip('the zone at the test spot is not loaded here (the server without a virtual peer): the generator was used for everything')
+    ctx.check('a flat groundY still wins', c.tool('plan_check', items=item, groundY=0)['ground'].startswith('flat ground'))
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -326,6 +337,7 @@ CASES = [
     Case('creature-info', 'creature_info: stars scale health and damage, hits to kill follow', creature_case),
     Case('base-value', 'base_value counts the PlayerBase areas in reach; a raid needs three', base_value_case),
     Case('breeding', 'husbandry_state: why animals are not breeding agrees with their state', breeding_case),
+    Case('plan-check-ground', 'plan_check says where its ground came from and can be forced', ground_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

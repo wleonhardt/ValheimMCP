@@ -475,3 +475,44 @@ public class BreedingRulesTests
         s.NowTicks = 111 * Husbandry.TicksPerSecond; Assert.True(BreedingRules.Diagnose(Boar, s).Due);
     }
 }
+
+public class TerrainRulesTests
+{
+    [Fact] public void ACellIsSplitAlongTheDiagonalFromPlusXToPlusZ()
+    {
+        // a saddle: opposite corners high. Bilinear in the middle would be 5; the triangles put the middle ON the diagonal between the two low... corners (10,0) and (0,10) are both 0 here
+        Assert.Equal(0.0, TerrainRules.TriHeight(10, 0, 0, 10, 0.5, 0.5), 9);                // the centre lies on the diagonal v10-v01 (both 0): the collider is 0 there, bilinear says 5
+        Assert.Equal(10.0, TerrainRules.TriHeight(10, 0, 0, 10, 0, 0), 9); Assert.Equal(10.0, TerrainRules.TriHeight(10, 0, 0, 10, 1, 1), 9);
+        Assert.Equal(5.0, TerrainRules.TriHeight(10, 0, 0, 10, 0.25, 0.25), 9);            // halfway from the high corner to the diagonal
+    }
+    [Fact] public void TheTwoTrianglesMeetOnTheDiagonal()
+    {
+        Assert.Equal(TerrainRules.TriHeight(1, 4, 7, 9, 0.3, 0.7), TerrainRules.TriHeight(1, 4, 7, 9, 0.3 + 1e-12, 0.7 + 1e-12), 6);
+    }
+    [Fact] public void ATiltedCellHasTheNormalOfItsTriangle()
+    {
+        double nx, ny, nz;
+        TerrainRules.TriNormal(0, 1, 0, 1, 0.2, 0.2, out nx, out ny, out nz);              // rises 1 m per metre along +x: 45 degrees
+        Assert.Equal(Math.Sqrt(0.5), ny, 6); Assert.Equal(-Math.Sqrt(0.5), nx, 6); Assert.Equal(0, nz, 6);
+        Assert.Equal(45, TerrainRules.SlopeDeg(ny), 6);
+    }
+    [Fact] public void ASteepFaceSlidesAndAGentleOneDoesNot()
+    {
+        Assert.True(TerrainRules.Slides(Math.Cos(39 * Math.PI / 180))); Assert.False(TerrainRules.Slides(Math.Cos(37 * Math.PI / 180))); Assert.False(TerrainRules.Slides(1.0));
+    }
+    [Fact] public void ASteepMetreFaceInsideAGentleAverageStillSlides()
+    {
+        // heights along x: 0,0,1.2,1.2 -> the middle cell rises 1.2 m per metre (50 degrees) although the 3 m average slope is 21 degrees
+        Func<double, double, double> v = (x, z) => x <= 1 ? 0 : 1.2;
+        var ny = TerrainRules.NormalY(v, 1.5, 0.3);
+        Assert.True(TerrainRules.Slides(ny)); Assert.InRange(TerrainRules.SlopeDeg(ny), 49, 51);
+        Assert.False(TerrainRules.Slides(TerrainRules.NormalY(v, 0.5, 0.3)));
+    }
+    [Fact] public void HeightFromVerticesFindsTheCell()
+    {
+        Func<double, double, double> plane = (x, z) => 2 * x + 3 * z;
+        Assert.Equal(2 * 4.25 + 3 * 7.5, TerrainRules.Height(plane, 4.25, 7.5), 9);               // a plane is reproduced exactly by the triangles
+    }
+    [Theory] [InlineData(0.49, 0)] [InlineData(0.5, 1)] [InlineData(-0.5, 0)] [InlineData(-0.51, -1)] [InlineData(3.2, 3)]
+    public void TheNearestVertexRoundsHalfUp(double v, int vertex) => Assert.Equal(vertex, TerrainRules.NearestVertex(v));
+}

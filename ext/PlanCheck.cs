@@ -18,8 +18,8 @@ namespace HubnerExt
 
         public static void Register(ToolRegistry r)
         {
-            r.Add("plan_check", "Check a plan BEFORE placing it, from the prefabs' real collider boxes and the game's own structure rules (works on the dedicated server): items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz]}] (max 1500). Reports overlap (a piece that cannot clip is an error, building pieces a warning), unsupported (the structure model of WearNTear: contact by colliders grown 0.15 m, per-material loss, ground = full support; a piece under its material's minimum collapses), weak, tilt, water (sea level 30), yaw-grid (22.5 degrees), fire-clearance (1 m round a fire). Items with no y are checked at the ground but plan_apply refuses them unless they say seat:\"ground\" (missingY counts them; unknownKeys lists item keys the tools drop). Existing pieces in the area count as supporters and obstacles (those of plan:<name> are ignored: the plan replaces them). Ground: groundY (a flat pad) or, by default, the world generator's height, which does not know terrain edits. Read-only. Arguments: plan, items, groundY, margin (default 8), examples (default 10).",
-                "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"groundY\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Check);
+            r.Add("plan_check", "Check a plan BEFORE placing it, from the prefabs' real collider boxes and the game's own structure rules (works on the dedicated server): items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz]}] (max 1500). Reports overlap (a piece that cannot clip is an error, building pieces a warning), unsupported (the structure model of WearNTear: contact by colliders grown 0.15 m, per-material loss, ground = full support; a piece under its material's minimum collapses), weak, tilt, water (sea level 30), yaw-grid (22.5 degrees), fire-clearance (1 m round a fire). Items with no y are checked at the ground but plan_apply refuses them unless they say seat:\"ground\" (missingY counts them; unknownKeys lists item keys the tools drop). Existing pieces in the area count as supporters and obstacles (those of plan:<name> are ignored: the plan replaces them). Ground: groundY (a flat pad) or, by default, the terrain collider's triangles (the game's own, edits included) where the zone is loaded and the world generator's height elsewhere (the result says how many vertex heights came from which; ground:\"generator\" forces the generator). Read-only. Arguments: plan, items, groundY, margin (default 8), examples (default 10).",
+                "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"groundY\":{\"type\":\"number\"},\"ground\":{\"type\":\"string\"},\"margin\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Check);
             r.Add("plan_rules", "The rule book of plan_check: every rule with its origin (hard = the world enforces it after a spawn, ghost = only the hammer's placement check does, taste = our preference, never an error), the game's status code and the decompiled source it comes from. Read-only.", "{\"type\":\"object\",\"properties\":{}}", Rules);
         }
 
@@ -113,11 +113,27 @@ namespace HubnerExt
             if (items.Count > MaxItems) return ToolOutput.Err("max " + MaxItems + " items per call (the structure model is quadratic): split the plan by building");
             if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
             var plan = McpJson.GetStr(a, "plan"); var margin = Math.Max(1, Math.Min(30, U.D(a, "margin", 8))); var maxEx = Math.Max(1, (int)U.D(a, "examples", 10));
-            Func<double, double, double> ground;
-            string groundNote;
-            if (U.Has(a, "groundY")) { var gy = U.D(a, "groundY", 0); ground = (x, z) => gy; groundNote = "flat ground at y " + U.N(gy); }
-            else if (WorldGenerator.instance != null) { var wg = WorldGenerator.instance; ground = (x, z) => wg.GetHeight((float)x, (float)z); groundNote = "world generator height (terrain edits are not known)"; }
-            else { ground = null; groundNote = "no ground (nothing is grounded)"; }
+            Func<double, double, double> ground; Func<double, double, double> normalYAt = (x, z) => 1.0; Func<string> groundNote;
+            var mode = McpJson.GetStr(a, "ground") ?? "auto";
+            if (U.Has(a, "groundY")) { var gy = U.D(a, "groundY", 0); ground = (x, z) => gy; var note = "flat ground at y " + U.N(gy); groundNote = () => note; }
+            else if (WorldGenerator.instance != null)
+            {
+                // The ground is the terrain collider: whole-metre vertices joined by triangles (TerrainRules). Where the zone is loaded the vertex heights are read from the game's own
+                // terrain (edits included); elsewhere from the world generator, which does not know edits.
+                var wg = WorldGenerator.instance; int fromWorld = 0, fromGenerator = 0; var cache = new Dictionary<long, double>(); var zsys = ZoneSystem.instance;
+                Func<double, double, double> vertex = (vx, vz) =>
+                {
+                    var key = (long)(vx + 20000) * 100000L + (long)(vz + 20000); double h;
+                    if (cache.TryGetValue(key, out h)) return h;
+                    float gh;
+                    if (mode != "generator" && zsys != null && zsys.GetGroundHeight(new Vector3((float)vx, 0f, (float)vz), out gh)) { h = gh; fromWorld++; }
+                    else { h = wg.GetHeight((float)vx, (float)vz); fromGenerator++; }
+                    cache[key] = h; return h;
+                };
+                ground = (x, z) => TerrainRules.Height(vertex, x, z); normalYAt = (x, z) => TerrainRules.NormalY(vertex, x, z);
+                groundNote = () => "terrain triangles from " + fromWorld + " vertex heights of the loaded terrain (edits included) and " + fromGenerator + " from the world generator (which does not know edits)" + (mode == "generator" ? " [ground:generator forced]" : "");
+            }
+            else { ground = null; groundNote = () => "no ground (nothing is grounded)"; }
 
             var planned = new List<PlacedPiece>(); var unknown = new List<string>(); var bad = new List<string>();
             double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; var idx = 0; var unknownKeys = new Dictionary<string, int>(); var missingY = 0;
@@ -157,8 +173,7 @@ namespace HubnerExt
                 var gy = ground != null ? ground(p.Pos.X, p.Pos.Z) : double.NaN;
                 if (ground != null)
                 {
-                    var nx = ground(p.Pos.X + 1, p.Pos.Z) - ground(p.Pos.X - 1, p.Pos.Z); var nz = ground(p.Pos.X, p.Pos.Z + 1) - ground(p.Pos.X, p.Pos.Z - 1);
-                    var normalY = 1.0 / Math.Sqrt(1 + (nx / 2) * (nx / 2) + (nz / 2) * (nz / 2));
+                    var normalY = normalYAt(p.Pos.X, p.Pos.Z);
                     var t = PlanChecks.Tilt(p, normalY); if (t != null) problems.Add(t);
                     var w = PlanChecks.Water(p, gy); if (w != null) problems.Add(w);
                 }
@@ -192,7 +207,7 @@ namespace HubnerExt
             }
 
             var byRule = problems.GroupBy(p => p.Rule + "|" + p.Severity).OrderBy(g => g.Key).ToList();
-            var sb = new StringBuilder("{\"planned\":" + planned.Count + ",\"skipped\":" + (items.Count - planned.Count) + ",\"worldPiecesConsidered\":" + world + ",\"ground\":" + U.S(groundNote) + ",\"errors\":" + problems.Count(p => p.Severity == "error") + ",\"warnings\":" + problems.Count(p => p.Severity == "warning") +
+            var sb = new StringBuilder("{\"planned\":" + planned.Count + ",\"skipped\":" + (items.Count - planned.Count) + ",\"worldPiecesConsidered\":" + world + ",\"ground\":" + U.S(groundNote()) + ",\"errors\":" + problems.Count(p => p.Severity == "error") + ",\"warnings\":" + problems.Count(p => p.Severity == "warning") +
                 ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"unknownKeys\":{" + string.Join(",", unknownKeys.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "},\"missingY\":" + missingY + ",\"problems\":[");
             sb.Append(string.Join(",", byRule.Select(g => "{\"rule\":" + U.S(g.First().Rule) + ",\"severity\":" + U.S(g.First().Severity) + ",\"origin\":" + U.S(g.First().Origin) + ",\"code\":" + U.S(g.First().Code) + ",\"count\":" + g.Count() + ",\"examples\":[" + string.Join(",", g.Take(maxEx).Select(p => "{\"piece\":" + U.S(p.Piece) + ",\"detail\":" + U.S(p.Detail) + "}").ToArray()) + "]}").ToArray()));
             sb.Append("]}");
