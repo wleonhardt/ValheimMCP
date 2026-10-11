@@ -48,5 +48,6 @@ hubner:
   sandboxNames: [Odev, MaRkO, ClaudeEyes]   # character names that count as the sandbox: only they get god mode from teleport / walk_to / auto-join
   exposePeerHosts: false                    # true: the players tool returns each peer's IP / Steam id
   captureWhispers: false                    # true: chat_tail also records whispers
+  trustedPlayers: []                        # platform ids (Steam_7656...) whose chat is not marked untrusted by chat_tail
   writeFlagMinutes: 30                      # server only: validity of the ALLOW_SERVER_WRITES flag after it was touched
   jobBudgetMs: 8                            # main-thread time a sliced job (plan_apply) may use per frame

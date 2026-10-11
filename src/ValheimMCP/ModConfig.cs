@@ -172,12 +172,14 @@ tools:
 #   sandboxNames: character names that count as the sandbox; only they get god mode from teleport/walk. Empty = nobody
 #   exposePeerHosts: true lets the players tool return each peer's IP / Steam id (default false)
 #   captureWhispers: true lets chat_tail record whispers (default false)
+#   trustedPlayers: platform ids (Steam_7656...) of players whose chat chat_tail does not mark untrusted; a name counts only while one player carries it
 #   writeFlagMinutes: how long the server's ALLOW_SERVER_WRITES flag file stays valid after it was touched
 #   jobBudgetMs: main-thread time a queued job may use per frame (plan_apply and friends are sliced)
 hubner:
   sandboxNames: []
   exposePeerHosts: false
   captureWhispers: false
+  trustedPlayers: []
   writeFlagMinutes: 30
   jobBudgetMs: 8
 ";

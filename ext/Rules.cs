@@ -194,3 +194,94 @@ namespace HubnerExt
         }
     }
 }
+
+namespace HubnerExt
+{
+    /// <summary>Chat text going out (chat_send) or coming in (chat_tail) is data from people, and a model reads it: it is cleaned, rate limited and tagged, never trusted.</summary>
+    internal static class ChatRules
+    {
+        private static readonly System.Text.RegularExpressions.Regex Tags = new System.Text.RegularExpressions.Regex("<[^>\n]{0,40}>", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+        private static readonly System.Text.RegularExpressions.Regex Urls = new System.Text.RegularExpressions.Regex(@"(?i)\b(?:https?://|www\.)\S+", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+        private static readonly System.Text.RegularExpressions.Regex Manipulation = new System.Text.RegularExpressions.Regex(
+            @"(?i)\b(ignore|disregard|forget)\b.{0,30}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instructions?|rules?|prompts?)\b|\bsystem prompt\b|\byou are now\b|\bdeveloper mode\b|\b(as|i am|i'm)\b.{0,12}\b(admin|owner|operator|developer|the server)\b.{0,40}\b(run|execute|give|send|delete|spawn|teleport)\b|\b(api[ _-]?key|access token|password|secret)\b|^\s*/\w+",
+            System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+
+        /// <summary>Is this character one that hides text from a reader (controls, zero-width, bidi marks)?</summary>
+        public static bool Invisible(char c)
+        {
+            return c < 0x20 || (c >= 0x7F && c <= 0x9F) || (c >= 0x200B && c <= 0x200F) || (c >= 0x2028 && c <= 0x202E) || (c >= 0x2060 && c <= 0x2064) || c == 0xFEFF || c == 0x00AD;
+        }
+
+        /// <summary>The text a person would read: compatibility-normalised, no invisible characters, no markup tags, no links, no leading console prefix, one line, at most maxLen characters.</summary>
+        public static string Clean(string text, int maxLen) { return Clean(text, maxLen, true); }
+
+        private static string Clean(string text, int maxLen, bool stripPrefix)
+        {
+            var s = text ?? "";
+            try { s = s.Normalize(System.Text.NormalizationForm.FormKC); } catch (ArgumentException) { }
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (var c in s) sb.Append(c == '\n' || c == '\r' || c == '\t' ? ' ' : (Invisible(c) ? '\0' : c));
+            s = sb.ToString().Replace("\0", "");
+            try { s = Tags.Replace(s, ""); s = Urls.Replace(s, ""); } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { s = ""; }
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+            while (stripPrefix && s.Length > 0 && "/\\!#".IndexOf(s[0]) >= 0) s = s.Substring(1).TrimStart();      // a leading / \ ! # would make the game (or a bot) treat the line as a command
+            if (s.Length > maxLen)
+            {
+                var cut = maxLen;
+                if (char.IsHighSurrogate(s[cut - 1])) cut--;
+                s = s.Substring(0, cut).TrimEnd();
+            }
+            return s;
+        }
+
+        /// <summary>A line for a reader: invisible characters, markup and links gone, one line, cut; a leading / or ! kept (it is what makes a line look like a command).</summary>
+        public static string ForReading(string text, int maxLen) { return Clean(text, maxLen, false); }
+
+        /// <summary>Hints for whoever reads a chat line: never an order to refuse it, only a warning that it looks like an attempt to steer a model, a machine's output, or noise.</summary>
+        public static List<string> Hints(string text)
+        {
+            var hints = new List<string>();
+            var s = Clean(text ?? "", 2000, false);       // keep a leading / or !: that is what makes a line a command
+            var raw = text ?? "";
+            try { if (Manipulation.IsMatch(s) || (raw != s && Manipulation.IsMatch(Fold(raw)))) hints.Add("manipulation"); }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { hints.Add("manipulation"); }
+            if (s.Length > 200 || s.StartsWith("{") || s.StartsWith("[") || s.Contains("tool_use") || CountDigits(s) >= 6 && s.Contains("=")) hints.Add("machine");
+            if (s.Length >= 8 && Letters(s) < s.Length * 0.4) hints.Add("noise");
+            return hints;
+        }
+
+        private static string Fold(string raw) { return Clean(raw, 2000, false).ToLowerInvariant(); }
+        private static int CountDigits(string s) { var n = 0; foreach (var c in s) if (char.IsDigit(c)) n++; return n; }
+        private static int Letters(string s) { var n = 0; foreach (var c in s) if (char.IsLetter(c)) n++; return n; }
+
+        /// <summary>Trust by platform id, never by name: a name can be copied, an id cannot. A name counts only while exactly one player online carries it.</summary>
+        public static string Trust(string name, string platformId, ICollection<string> trusted, int playersWithThatName)
+        {
+            if (trusted == null || trusted.Count == 0) return "other";
+            if (!string.IsNullOrEmpty(platformId) && trusted.Contains(platformId)) return "trusted";
+            if (!string.IsNullOrEmpty(name) && trusted.Contains(name) && playersWithThatName == 1) return "trusted";
+            return "other";
+        }
+    }
+
+    /// <summary>How fast the harness may speak: a global gap, a gap per speaker, and no repeating itself.</summary>
+    internal sealed class ChatLimiter
+    {
+        public double GlobalGap = 6, SpeakerGap = 15, RepeatWindow = 300;
+        private double _lastAny = double.NegativeInfinity;
+        private readonly Dictionary<string, double> _lastBy = new Dictionary<string, double>();
+        private readonly Dictionary<string, double> _seen = new Dictionary<string, double>();
+
+        /// <summary>null = go ahead (and the call is recorded); otherwise why not.</summary>
+        public string Check(double now, string speaker, string text)
+        {
+            if (now - _lastAny < GlobalGap) return "too soon after the last line (" + GlobalGap + " s between lines)";
+            double t;
+            if (speaker != null && _lastBy.TryGetValue(speaker, out t) && now - t < SpeakerGap) return "too soon after the last line to " + speaker + " (" + SpeakerGap + " s)";
+            if (_seen.TryGetValue(text, out t) && now - t < RepeatWindow) return "the same line was sent less than " + RepeatWindow + " s ago";
+            _lastAny = now; if (speaker != null) _lastBy[speaker] = now; _seen[text] = now;
+            if (_seen.Count > 200) foreach (var k in _seen.Where(kv => now - kv.Value > RepeatWindow).Select(kv => kv.Key).ToList()) _seen.Remove(k);
+            return null;
+        }
+    }
+}

@@ -24,7 +24,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}}}", BaseSurvey);
             r.Add("player_status", "The sandbox character's state: health, stamina, position, biome, equipped item, status effects with remaining time, foods eaten with time left.",
                 "{\"type\":\"object\",\"properties\":{}}", PlayerStatus);
-            r.Add("chat_send", "Say a line in game chat as the sandbox character: text (max 180 chars, longer is cut), type Normal (15 m) | Shout | Whisper | Ping.",
+            r.Add("chat_send", "Say a line in game chat as the sandbox character: text (cleaned to one line of at most 120 characters; at most one line per 6 s, no repeats within 5 minutes), type Normal (15 m) | Shout | Whisper | Ping.",
                 "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"}},\"required\":[\"text\"]}", ChatSend, true);
             r.Add("chat_bubble", "Show a speech bubble above a position as a named speaker without a player (Thrall's technique: Chat.AddInworldText with a synthetic sender): name, text, x,y,z (default above the sandbox character). Local to this client.",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}},\"required\":[\"text\"]}", ChatBubble, true);
@@ -162,12 +162,16 @@ namespace HubnerExt
             sb.Append(",\"foods\":[" + string.Join(",", foods.ToArray()) + "]}"); return U.Json(sb.ToString());
         }
 
+        static readonly ChatLimiter Limiter = new ChatLimiter();
+
         static ToolOutput ChatSend(Dictionary<string, object> a)
         {
             if (Chat.instance == null) return ToolOutput.Err("chat not available (menu or loading)");
-            var t = McpJson.GetStr(a, "text") ?? ""; if (t.Length > 180) t = t.Substring(0, 180);
+            var t = ChatRules.Clean(McpJson.GetStr(a, "text") ?? "", 120);            // one line, no invisible characters, markup, links or leading / ! #
+            if (t.Length == 0) return ToolOutput.Err("nothing left to say after cleaning the text");
             Talker.Type ty;
             if (!Enum.TryParse(McpJson.GetStr(a, "type") ?? "Normal", true, out ty) || !Enum.IsDefined(typeof(Talker.Type), ty)) return ToolOutput.Err("type must be Normal, Shout, Whisper or Ping");     // a failed parse used to fall back to the enum's zero value (Whisper)
+            var why = Limiter.Check(Time.realtimeSinceStartup, null, t); if (why != null) return ToolOutput.Err("chat_send refused: " + why);
             Chat.instance.SendText(ty, t); return U.Json("{\"sent\":" + U.S(t) + ",\"type\":" + U.S(ty.ToString()) + "}");
         }
 
@@ -181,8 +185,8 @@ namespace HubnerExt
             {
                 var pt = ps[i].ParameterType;
                 if (pt == typeof(GameObject)) args[i] = pl != null ? pl.gameObject : null; else if (pt == typeof(long)) args[i] = 99992L; else if (pt == typeof(Vector3)) args[i] = pos;
-                else if (pt == typeof(Talker.Type)) args[i] = Talker.Type.Normal; else if (pt == typeof(string)) args[i] = McpJson.GetStr(a, "text") ?? "";
-                else { var obj = Activator.CreateInstance(pt); var nf = pt.GetField("Name"); if (nf != null) { object boxed = obj; nf.SetValue(boxed, McpJson.GetStr(a, "name") ?? "Voice"); obj = boxed; } args[i] = obj; }
+                else if (pt == typeof(Talker.Type)) args[i] = Talker.Type.Normal; else if (pt == typeof(string)) args[i] = ChatRules.Clean(McpJson.GetStr(a, "text") ?? "", 120);
+                else { var obj = Activator.CreateInstance(pt); var nf = pt.GetField("Name"); if (nf != null) { object boxed = obj; nf.SetValue(boxed, ChatRules.Clean(McpJson.GetStr(a, "name") ?? "Voice", 24)); obj = boxed; } args[i] = obj; }
             }
             m.Invoke(Chat.instance, args); return U.Json("{\"shown\":true,\"speaker\":" + U.S(McpJson.GetStr(a, "name") ?? "Voice") + "}");
         }
