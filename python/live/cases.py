@@ -308,6 +308,21 @@ def threats_case(ctx):
         ctx.check(f"{q['prefab']}: the distance is within the radius", q['distance'] <= 100, q)
 
 
+def level_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    g = _ground(c, x, z)
+    if g is None: raise Skip('terrain_info gave no ground height (area not loaded?)')
+    r = c.tool('level_check', x=x, z=z, half=4, targetY=round(g, 1))
+    ctx.check('a 9 x 9 pad has 81 vertices', r['vertices'] == 81, r['vertices'])
+    ctx.check('raised + lowered never exceeds the vertices', r['raised'] + r['lowered'] <= r['vertices'], r)
+    ctx.check('levelling to the ground you stand on is reachable', r['unreachable'] == 0, r)
+    far = c.tool('level_check', x=x, z=z, half=4, targetY=round(g, 1) + 100)
+    ctx.check('100 m up is out of reach everywhere', far['unreachable'] == far['vertices'] and far['maxShortfall'] >= 90, far)
+    ctx.check('and the note says so', any('8 m' in n for n in far['notes']), far['notes'])
+    if not r['levelTools']: raise Skip('this game has no terrain tool prefab with a level op')
+    ctx.check('every level tool needs at least one stroke', all(t['strokes'] >= 1 for t in r['levelTools']), r['levelTools'])
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -397,6 +412,7 @@ CASES = [
     Case('farm-state', 'farm_state: ready times and the grown flag agree', farm_case),
     Case('raid-state', 'raid_state: roll timer and events agree', raid_case),
     Case('threats-near', 'threats_near: ranked, tamed ignored, passive worlds respected', threats_case),
+    Case('level-check', 'level_check: reach, volumes and strokes agree', level_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

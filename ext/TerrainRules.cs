@@ -2,6 +2,7 @@
 // cell is split into two triangles along the diagonal from (x+1, z) to (x, z+1): the corner (x, z) is in the first triangle (fx + fz <= 1), the corner (x+1, z+1) in the second.
 // A height read by ray is the height on those triangles; a bilinear guess is up to 0.6 m off on a saddle. The slope a character slides on is the slope of the triangle under it.
 using System;
+using System.Collections.Generic;
 
 namespace HubnerExt
 {
@@ -45,5 +46,103 @@ namespace HubnerExt
 
         /// <summary>The vertex a point belongs to for the game's "nearest vertex" reads (Heightmap.WorldToVertex: floor(v + 0.5)).</summary>
         public static int NearestVertex(double v) { return (int)Math.Floor(v + 0.5); }
+    }
+
+    /// <summary>
+    ///     The terrain tools' maths (TerrainComp.LevelTerrain / RaiseTerrain / SmoothTerrain, decompiled), per vertex: height = base + level delta + smooth delta. Level sets the vertex to the
+    ///     target, but never further than 8 m from the base height; raise moves a vertex toward pos.y + delta x falloff; smooth pulls toward a height and keeps the smooth delta within 1 m.
+    ///     Every operation first folds the smooth delta into the level delta, as the game does.
+    /// </summary>
+    internal sealed class TerrainGrid
+    {
+        public const double LevelMax = 8, SmoothMax = 1;
+        readonly Func<int, int, double> _base; readonly Dictionary<long, double[]> _d = new Dictionary<long, double[]>();     // key -> [level, smooth]
+        public TerrainGrid(Func<int, int, double> baseHeight) { _base = baseHeight; }
+
+        static long Key(int x, int z) { return ((long)(x + 100000)) * 1000000L + (z + 100000); }
+        double[] D(int x, int z) { double[] d; if (!_d.TryGetValue(Key(x, z), out d)) _d[Key(x, z)] = d = new double[2]; return d; }
+        public double Base(int x, int z) { return _base(x, z); }
+        public double Height(int x, int z) { double[] d; return _d.TryGetValue(Key(x, z), out d) ? _base(x, z) + d[0] + d[1] : _base(x, z); }
+
+        /// <summary>Start from heights that already differ from the base (an edited terrain): the difference becomes the level delta.</summary>
+        public void SetCurrent(int x, int z, double height) { var d = D(x, z); d[0] = Math.Max(-LevelMax, Math.Min(LevelMax, height - _base(x, z))); d[1] = 0; }
+
+        public void Level(double cx, double cz, double targetY, double radius, bool square)
+        {
+            int vx = TerrainRules.NearestVertex(cx), vz = TerrainRules.NearestVertex(cz); var span = (int)Math.Ceiling(radius);
+            for (var z = vz - span; z <= vz + span; z++)
+                for (var x = vx - span; x <= vx + span; x++)
+                {
+                    if (!square && Math.Sqrt((x - vx) * (double)(x - vx) + (z - vz) * (double)(z - vz)) > radius) continue;
+                    var d = D(x, z); var h = _base(x, z) + d[0] + d[1];
+                    var delta = targetY - h + d[1]; d[1] = 0; d[0] = Math.Max(-LevelMax, Math.Min(LevelMax, d[0] + delta));
+                }
+        }
+
+        public void Raise(double cx, double cz, double posY, double radius, double delta, bool square, double power)
+        {
+            int vx = TerrainRules.NearestVertex(cx), vz = TerrainRules.NearestVertex(cz); var span = (int)Math.Ceiling(radius);
+            for (var z = vz - span; z <= vz + span; z++)
+                for (var x = vx - span; x <= vx + span; x++)
+                {
+                    var f = 1.0;
+                    if (!square)
+                    {
+                        var dist = Math.Sqrt((x - vx) * (double)(x - vx) + (z - vz) * (double)(z - vz)); if (dist > radius) continue;
+                        if (power > 0) { f = 1 - dist / radius; if (power != 1) f = Math.Pow(f, power); }
+                    }
+                    var dd = D(x, z); var h = _base(x, z) + dd[0] + dd[1]; var change = delta * f; var target = posY + change;
+                    if (delta < 0 && target > h) continue;
+                    if (delta > 0) { if (target < h) continue; if (target > h + change) target = h + change; }
+                    var nd = target - h + dd[1]; dd[1] = 0; dd[0] = Math.Max(-LevelMax, Math.Min(LevelMax, dd[0] + nd));
+                }
+        }
+
+        public void Smooth(double cx, double cz, double toY, double radius, double power)
+        {
+            int vx = TerrainRules.NearestVertex(cx), vz = TerrainRules.NearestVertex(cz); var span = (int)Math.Ceiling(radius);
+            for (var z = vz - span; z <= vz + span; z++)
+                for (var x = vx - span; x <= vx + span; x++)
+                {
+                    var dist = Math.Sqrt((x - vx) * (double)(x - vx) + (z - vz) * (double)(z - vz)); if (dist > radius) continue;
+                    var f = dist / radius; f = power == 3 ? f * f * f : Math.Pow(f, power);
+                    var d = D(x, z); var h = _base(x, z) + d[0] + d[1]; var change = (toY - h) * (1 - f);
+                    d[1] = Math.Max(-SmoothMax, Math.Min(SmoothMax, d[1] + change));
+                }
+        }
+    }
+
+    internal sealed class PadReport
+    {
+        public int Vertices, Unreachable, Raised, Lowered; public double MaxShortfall, FillM3, CutM3; public int Strokes;
+    }
+
+    internal static class PadPlanner
+    {
+        /// <summary>
+        ///     Can level strokes of this radius bring the vertices x0..x1, z0..z1 to <paramref name="targetY" />? A vertex more than 8 m from its base height cannot get there; volumes are
+        ///     the difference to the current heights (1 m x 1 m per vertex); strokes is the fewest on a square lattice that leaves no reachable vertex off target (a simulation, not a formula).
+        /// </summary>
+        public static PadReport Level(Func<int, int, double> baseHeight, Func<int, int, double> current, int x0, int z0, int x1, int z1, double targetY, double radius, bool square)
+        {
+            var rep = new PadReport();
+            for (var z = z0; z <= z1; z++)
+                for (var x = x0; x <= x1; x++)
+                {
+                    rep.Vertices++; var b = baseHeight(x, z); var reach = b + Math.Max(-TerrainGrid.LevelMax, Math.Min(TerrainGrid.LevelMax, targetY - b));
+                    var shortfall = Math.Abs(targetY - reach); if (shortfall > 1e-9) { rep.Unreachable++; rep.MaxShortfall = Math.Max(rep.MaxShortfall, shortfall); }
+                    var c = current(x, z); if (targetY > c) { rep.Raised++; rep.FillM3 += targetY - c; } else if (targetY < c) { rep.Lowered++; rep.CutM3 += c - targetY; }
+                }
+            for (var spacing = Math.Max(1, (int)Math.Floor(radius * (square ? 2 : 1.4))); spacing >= 1; spacing--)
+            {
+                var g = new TerrainGrid(baseHeight); var n = 0;
+                for (var z = z0; z <= z1 + spacing - 1; z += spacing)
+                    for (var x = x0; x <= x1 + spacing - 1; x += spacing) { g.Level(Math.Min(x, x1), Math.Min(z, z1), targetY, radius, square); n++; }
+                var ok = true;
+                for (var z = z0; z <= z1 && ok; z++) for (var x = x0; x <= x1; x++) { var b = baseHeight(x, z); var reach = b + Math.Max(-TerrainGrid.LevelMax, Math.Min(TerrainGrid.LevelMax, targetY - b)); if (Math.Abs(g.Height(x, z) - reach) > 1e-6) { ok = false; break; } }
+                if (ok) { rep.Strokes = n; break; }
+            }
+            return rep;
+        }
     }
 }

@@ -373,3 +373,29 @@ class ThreatCaseTests(unittest.TestCase):
     def test_raid_state_fails_when_the_roll_is_later_than_the_interval(self):
         self.fake.replies['raid_state'] = {'events': [{'name': 'x'}], 'secondsToNextRoll': 5000, 'rollIntervalSeconds': 2760, 'chancePercent': 20, 'current': None}
         self.assertEqual(accept.run_case(self.case('raid-state'), self.ctx)['verdict'], accept.FAIL)
+
+
+class LevelCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (5.0, 5.0)
+        self.fake.replies['terrain_info'] = {'groundY': 40.0}
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self): return [c for c in cases.CASES if c.key == 'level-check'][0]
+
+    def answer(self, a):
+        up = a['targetY'] > 100
+        return {'vertices': 81, 'raised': 0 if up else 10, 'lowered': 0 if up else 10, 'unreachable': 81 if up else 0, 'maxShortfall': 92 if up else 0, 'notes': ['81 vertices are more than 8 m from their base height'] if up else [], 'levelTools': [{'tool': 'x', 'strokes': 4}]}
+
+    def test_passes_on_a_consistent_answer(self):
+        self.fake.replies['level_check'] = self.answer
+        self.assertEqual(accept.run_case(self.case(), self.ctx)['verdict'], accept.PASS)
+
+    def test_fails_when_a_target_far_above_is_called_reachable(self):
+        self.fake.replies['level_check'] = lambda a: dict(self.answer(a), unreachable=0)
+        self.assertEqual(accept.run_case(self.case(), self.ctx)['verdict'], accept.FAIL)

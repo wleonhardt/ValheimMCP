@@ -647,3 +647,73 @@ public class RaidAndThreatRulesTests
         Assert.Equal(Threat.Now, ThreatRules.Rank(false, true, true, true, true, 1, 2, 5, 30));
     }
 }
+
+public class TerrainOpsTests
+{
+    static double Slope(int x, int z) => 0.5 * x;                             // a base that rises half a metre per metre along x
+
+    [Fact] public void LevelSetsTheVertexToTheTarget()
+    {
+        var g = new TerrainGrid(Slope); g.Level(0, 0, 3, 1, true);
+        foreach (var x in new[] { -1, 0, 1 }) Assert.Equal(3.0, g.Height(x, 0), 9);
+        Assert.Equal(Slope(2, 0), g.Height(2, 0), 9);                          // outside the stroke nothing moved
+    }
+    [Fact] public void LevelNeverGoesFurtherThanEightMetresFromTheBase()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.Level(0, 0, 20, 1, true);
+        Assert.Equal(8.0, g.Height(0, 0), 9);
+        g.Level(0, 0, -20, 1, true); Assert.Equal(-8.0, g.Height(0, 0), 9);
+    }
+    [Fact] public void ARoundStrokeLeavesTheCornersAlone()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.Level(0, 0, 2, 2, false);
+        Assert.Equal(2.0, g.Height(2, 0), 9); Assert.Equal(0.0, g.Height(2, 2), 9);          // distance 2.83 > 2
+    }
+    [Fact] public void RaiseGivesTheCentreTheFullDeltaAndTheEdgeNothingAndNeverLowers()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.Raise(0, 0, 0, 2, 1, false, 1);              // falloff (1 - d/2)
+        Assert.Equal(1.0, g.Height(0, 0), 9); Assert.Equal(0.5, g.Height(1, 0), 9); Assert.Equal(0.0, g.Height(2, 0), 9);
+        var higher = new TerrainGrid((x, z) => 5); higher.Raise(0, 0, 0, 1, 1, true, 0);     // the target 1 is under the ground at 5: a raise never lowers
+        Assert.Equal(5.0, higher.Height(0, 0), 9);
+    }
+    [Fact] public void RaiseCannotAddMoreThanItsDeltaToWhatIsThere()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.Raise(0, 0, 10, 1, 1, true, 0);              // asks for 11 but the vertex is at 0: it gets +1 only
+        Assert.Equal(1.0, g.Height(0, 0), 9);
+    }
+    [Fact] public void ADigOnlyLowersWhatIsAboveItsTarget()
+    {
+        var g = new TerrainGrid((x, z) => 10); g.Raise(0, 0, 9.5, 1.5, -0.5, false, 0.5);
+        Assert.True(g.Height(0, 0) < 10 && g.Height(0, 0) >= 9.0);
+        var below = new TerrainGrid((x, z) => 0); below.Raise(0, 0, 9.5, 1.5, -0.5, false, 0.5); Assert.Equal(0.0, below.Height(0, 0), 9);
+    }
+    [Fact] public void SmoothMovesTowardsTheHeightButNeverMoreThanOneMetre()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.Smooth(0, 0, 10, 2, 3);
+        Assert.Equal(1.0, g.Height(0, 0), 9);                                                // wanted 10, capped at 1
+        var s = new TerrainGrid((x, z) => 0); s.Smooth(0, 0, 0.5, 2, 3); Assert.Equal(0.5, s.Height(0, 0), 9);
+    }
+    [Fact] public void LevelFoldsTheSmoothDeltaIn()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.Smooth(0, 0, 10, 2, 3); g.Level(0, 0, 4, 0.5, true);
+        Assert.Equal(4.0, g.Height(0, 0), 9);
+    }
+    [Fact] public void AnEditedTerrainStartsFromItsCurrentHeight()
+    {
+        var g = new TerrainGrid((x, z) => 0); g.SetCurrent(0, 0, 3); Assert.Equal(3.0, g.Height(0, 0), 9);
+        g.Raise(0, 0, 3, 1, 1, true, 0); Assert.Equal(4.0, g.Height(0, 0), 9);
+    }
+
+    [Fact] public void APadWithinEightMetresOfTheBaseIsReachableAndCounted()
+    {
+        var r = PadPlanner.Level((x, z) => 10 + 0.5 * x, (x, z) => 10 + 0.5 * x, 0, 0, 3, 3, 11, 2, true);
+        Assert.Equal(16, r.Vertices); Assert.Equal(0, r.Unreachable); Assert.True(r.Strokes >= 1 && r.Strokes <= 4);
+        Assert.Equal(8, r.Raised); Assert.Equal(4, r.Lowered);                           // bases 10, 10.5, 11, 11.5 along x: two columns to raise, one already right, one to cut
+        Assert.Equal(4 * (1.0 + 0.5), r.FillM3, 9); Assert.Equal(4 * 0.5, r.CutM3, 9);
+    }
+    [Fact] public void AVertexMoreThanEightMetresAwayCannotBeReached()
+    {
+        var r = PadPlanner.Level((x, z) => x < 2 ? 0 : 30, (x, z) => x < 2 ? 0 : 30, 0, 0, 3, 3, 5, 3, true);
+        Assert.Equal(8, r.Unreachable); Assert.Equal(17, r.MaxShortfall, 9);              // x=2,3 stand on base 30: the target 5 is 25 m below it, 8 m is the most a stroke moves
+    }
+}
