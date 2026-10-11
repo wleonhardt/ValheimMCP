@@ -109,7 +109,7 @@ namespace HubnerExt
     /// <summary>The keys a plan_apply item understands, and what a missing one means. A key the tool does not know is dropped silently, so a typo (rotY) would build the wrong thing without a word.</summary>
     internal static class PlanItemRules
     {
-        public static readonly HashSet<string> Known = new HashSet<string> { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag" };
+        public static readonly HashSet<string> Known = new HashSet<string> { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag", "ctag", "ints", "floats" };
 
         public static List<string> Unknown(IEnumerable<string> keys)
         {
@@ -125,6 +125,20 @@ namespace HubnerExt
     {
         public static bool Burning(int state, double fuel, bool infinite) { return state == 1 && (fuel > 0 || infinite); }
         public static double FuelToFull(double fuel, double maxFuel, bool infinite) { return infinite ? 0 : Math.Max(0, Math.Floor(maxFuel - fuel)); }
+    }
+
+    /// <summary>The order a plan is built in. A spawned piece that stands on nothing is destroyed by its owner's support sweep a few seconds after it appears, so a sliced job that builds the roof before the walls loses the roof. Lowest first keeps every piece's supporter ahead of it (stable: equal heights keep the plan's order).</summary>
+    internal static class PlanOrder
+    {
+        /// <summary>Items that stand on the ground (seat:"ground") go first; others by y.</summary>
+        public static double Rank(double? y, string seat) { return seat == "ground" ? double.NegativeInfinity : (y.HasValue ? y.Value : 0); }
+
+        public static List<T> LowestFirst<T>(IList<T> items, Func<T, double> rank)
+        {
+            var idx = new List<KeyValuePair<int, T>>(); for (var i = 0; i < items.Count; i++) idx.Add(new KeyValuePair<int, T>(i, items[i]));
+            idx.Sort((a, b) => { var c = rank(a.Value).CompareTo(rank(b.Value)); return c != 0 ? c : a.Key.CompareTo(b.Key); });
+            var res = new List<T>(items.Count); foreach (var kv in idx) res.Add(kv.Value); return res;
+        }
     }
 
     /// <summary>The rows of the ownership summary.</summary>

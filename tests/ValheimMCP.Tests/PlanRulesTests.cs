@@ -299,7 +299,7 @@ public class SleepRulesTests
 public class PlanItemRulesTests
 {
     [Fact] public void ATypoedKeyIsReported() => Assert.Equal(new[] { "rotY" }, PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "rotY" }));
-    [Fact] public void EveryKeyTheToolReadsIsKnown() => Assert.Empty(PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag" }));
+    [Fact] public void EveryKeyTheToolReadsIsKnown() => Assert.Empty(PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag", "ctag", "ints", "floats" }));
     [Fact] public void AMissingYNeedsSeatGround() { Assert.True(PlanItemRules.MissingY(false, null)); Assert.False(PlanItemRules.MissingY(false, "ground")); Assert.False(PlanItemRules.MissingY(true, null)); }
 }
 
@@ -337,4 +337,16 @@ public class RemovalImpactTests
         var all = new List<PlacedPiece> { At(0, 1.95, "floating"), At(5, -0.05, "a") };            // nothing under "floating"
         Assert.Empty(RemovalImpact.Collapses(all, new HashSet<string> { "a" }, Flat));
     }
+}
+
+public class PlanOrderTests
+{
+    [Fact] public void LowestFirstKeepsSupportersAheadOfWhatTheyCarry()
+    {
+        var items = new[] { (y: 8.0, id: "roof"), (y: 0.0, id: "floor"), (y: 4.0, id: "wall"), (y: 0.0, id: "floor2") };
+        var sorted = PlanOrder.LowestFirst(items, i => PlanOrder.Rank(i.y, null));
+        Assert.Equal(new[] { "floor", "floor2", "wall", "roof" }, sorted.Select(i => i.id).ToArray());          // equal heights keep the plan's order
+    }
+    [Fact] public void SeatedItemsGoFirstWhateverTheirY() => Assert.True(PlanOrder.Rank(50, "ground") < PlanOrder.Rank(0, null));
+    [Fact] public void AnItemWithoutYRanksAsGroundLevel() => Assert.Equal(0, PlanOrder.Rank(null, null));
 }
