@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### Review fixes after the offline code review (0.9.1 core / 0.12.1 extension)
+Three reviewers read the new code against the decompiled game (record: `plans/research/2026-10-offline-code-review.md`). Behaviour you may notice:
+- **Chest contents were read with the wrong type**: a current world keeps them as a byte array. `containers`, `missing_for`, `plan_materials`, `fuel_forecast`, `neighbours`, `death_state` and the journal's chest contents now see real chests; `container_set` writes the key the game reads.
+- `chat_tail`: the sender id is checked against the connection (`id_mismatch`), odd ids are dropped, invisible Unicode (Tag block, bidi isolates) is removed, `chat_send` refuses a position in public chat (whisper to a trusted online player only), canonicalises `to` and has a global budget.
+- `plan_apply` and `plan_check`: a `y` that is not a number counts as missing; `seat:"ground"` uses the world generator's height when no terrain is loaded; error numbers are the caller's. `plan_remove` and `zdo_delete` refuse when their collapse check could not run.
+- Undo refuses entries of another world for every kind; `world_save` works only on a server; `zdo_audit fix` no longer drops portals from the save.
+- Readers: `bed_check` names `$msg_bedtooexposed`; creatures use level, not star, labels and count random weapon sets; cookers say whether they run; smelters say whether the fuel covers the queue.
+- Walker: `stuckSeconds` works; a goal without y stays without it through `nav`; doors that consume their key are never pressed.
+
 ### 0.9.0 core / 0.12.0 extension (more readers from the ClaudeNJevHeim reviews)
 All on the server and the client; each checked against the decompile first; none has run in the game yet.
 - `plant_check` (biome, cultivated ground, heat, cold, shade, space, in the game's order) and `farm_state` (age, grow range, ready times, verdict).

@@ -824,3 +824,13 @@ public class ChatSecurityReviewTests
         Assert.Null(l.Check(700, null, "line 4"));
     }
 }
+
+public class LogRedactTests
+{
+    [Theory]
+    [InlineData("Peer 203.0.113.7:2456 joined", "Peer <addr> joined")]
+    [InlineData("Got connection SteamID 76561198000000001 now", "Got connection SteamID <addr> now")]
+    [InlineData("from 2001:db8:85a3:0:0:8a2e:370:7334 ok", "from <addr> ok")]
+    [InlineData("no addresses here at 12.5 seconds", "no addresses here at 12.5 seconds")]
+    public void AddressesAndSteamIdsAreRedacted(string line, string expected) => Assert.Equal(expected, LogCollapse.Redact(line));
+}

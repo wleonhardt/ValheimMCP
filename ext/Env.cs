@@ -1,6 +1,7 @@
 // Client-local environment control: time of day and weather for renders. Nothing is written to the world; the override is released by env_release, a timer, or leaving the world.
 #if !SERVER
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
@@ -50,6 +51,7 @@ namespace HubnerExt
         {
             var em = EnvMan.instance; if (em == null) return ToolOutput.Err("no EnvMan (not in a world)");
             var name = McpJson.GetStr(a, "name") ?? "";
+            if (name.Length > 0 && !em.m_environments.Any(e => e.m_name == name)) return ToolOutput.Err("unknown environment '" + name + "' (the game would stop updating the sky until it is released): " + string.Join(", ", em.m_environments.Select(e => e.m_name).ToArray()));
             try { em.SetForceEnvironment(name); } catch (Exception ex) { return ToolOutput.Err("SetForceEnvironment failed: " + ex.Message); }
             _weather = name; if (name.Length > 0) _releaseAt = Time.time + MaxHoldSeconds;
             return State(null);

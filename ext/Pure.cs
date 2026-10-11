@@ -243,6 +243,14 @@ namespace HubnerExt
     /// <summary>Repeated log lines folded to one: the same line with different numbers (a position, a counter) is one line seen N times. A run of 95 identical warnings hides everything else in a tail of 60 lines.</summary>
     internal static class LogCollapse
     {
+        static readonly System.Text.RegularExpressions.Regex Addr = new System.Text.RegularExpressions.Regex(@"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b|\b(?:[0-9A-Fa-f]{1,4}:){4,7}[0-9A-Fa-f]{1,4}\b|\b7656\d{13}\b", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+
+        /// <summary>A log line without the addresses and Steam ids of players in it (the game logs "Peer 1.2.3.4:2456 ..."): those are personal data, shown only when the operator turned hubner.exposePeerHosts on.</summary>
+        public static string Redact(string line)
+        {
+            try { return Addr.Replace(line ?? "", "<addr>"); } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return "<line withheld>"; /* allow: the safe answer */ }
+        }
+
         public static string Key(string line)
         {
             var sb = new System.Text.StringBuilder(line.Length);

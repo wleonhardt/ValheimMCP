@@ -358,10 +358,15 @@ namespace HubnerExt
                         invalid++; if (exInvalid.Count < maxEx) exInvalid.Add(U.Id(z) + " " + name + " " + U.V(p) + " plan=" + z.GetString(Plans.PlanHash, ""));
                         if (fix && !string.IsNullOrEmpty(z.GetString(Plans.PlanHash, ""))) toDestroy.Add(z);
                     }
-                    bool bad = false;
-                    if (ExpectedSector(p) != i) { stale++; bad = true; if (exStale.Count < maxEx) exStale.Add(U.Id(z) + " " + name + " in list " + i + " expected " + ExpectedSector(p)); }
-                    if (!seen.Add(z)) { dupRef++; bad = true; if (exDup.Count < maxEx) exDup.Add(U.Id(z) + " " + name + " listed twice"); }
-                    if (bad && fix) { l.RemoveAt(k); removed++; continue; }
+                    bool wrongSector = false, dup = false;
+                    if (ExpectedSector(p) != i) { stale++; wrongSector = true; if (exStale.Count < maxEx) exStale.Add(U.Id(z) + " " + name + " in list " + i + " expected " + ExpectedSector(p)); }
+                    if (!seen.Add(z)) { dupRef++; dup = true; if (exDup.Count < maxEx) exDup.Add(U.Id(z) + " " + name + " listed twice"); }
+                    if ((wrongSector || dup) && fix)
+                    {
+                        // Dropping the entry alone loses the object from the next save when it is listed nowhere else (portals keep their old list when they move): a wrong-sector entry is MOVED to its sector's list, a repeat is removed.
+                        if (dup) { l.RemoveAt(k); MarkDirty(i); } else { Refile(arr, i, k, z, ExpectedSector(p)); seen.Remove(z); }          // the list it is moved to may still be scanned: do not count that as a repeat
+                        removed++; continue;
+                    }
                     if (string.IsNullOrEmpty(z.GetString(Plans.PlanHash, "")) && z.m_uid.UserID != 1L && hash != 0)
                     {
                         var key = hash + "|" + Math.Round(p.x, 1) + "|" + Math.Round(p.y, 1) + "|" + Math.Round(p.z, 1) + "|" + Math.Round(z.GetRotation().eulerAngles.y);
@@ -467,7 +472,8 @@ namespace HubnerExt
             if (level == "error") q = q.Where(l => l.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 || l.IndexOf("Exception", StringComparison.OrdinalIgnoreCase) >= 0);
             else if (level == "warning") q = q.Where(l => l.IndexOf("Warning", StringComparison.OrdinalIgnoreCase) >= 0 || l.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 || l.IndexOf("Exception", StringComparison.OrdinalIgnoreCase) >= 0);
             if (!string.IsNullOrEmpty(filter)) q = q.Where(l => l.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
-            var res = q.Reverse().Take(n).Reverse().Select(l => l.Length > 300 ? l.Substring(0, 300) : l).ToArray();
+            var expose = Cfg.Bool("hubner.exposePeerHosts", false);
+            var res = q.Reverse().Take(n).Reverse().Select(l => l.Length > 300 ? l.Substring(0, 300) : l).Select(l => expose ? l : LogCollapse.Redact(l)).ToArray();          // addresses and Steam ids of players stay out unless the operator allows them
             if (!McpJson.GetBool(a, "collapse", true)) return U.Json("{\"count\":" + res.Length + ",\"lines\":[" + string.Join(",", res.Select(U.S).ToArray()) + "]}");
             var folded = LogCollapse.Fold(res);
             return U.Json("{\"count\":" + res.Length + ",\"distinct\":" + folded.Count + ",\"lines\":[" + string.Join(",", folded.Select(e => U.S(LogCollapse.Render(e))).ToArray()) + "]}");

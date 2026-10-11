@@ -72,10 +72,14 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 33. `level_check` over a hillside, then really level it with the hoe and compare the fill and cut and the stroke count; a pad 10 m under the base reports `unreachable`. Compare `levelTools` with the prefabs' real radii.
 34. `cookers` with a grill of meat: seconds to done and to burnt against the real timer; `fuel_forecast` with two fires and a chest of wood: the hours of cover against a stopwatch.
 
+35. Containers: `containers` over a base with a chest of known contents; `missing_for` and `fuel_forecast` count it; `container_set` puts an item in a chest and the game shows it in the UI (the old code wrote a key the game never read); `undo_group` of that edit and of a chest delete restores the contents.
+36. Chat identity: from a second account type a line; `chat_tail` has your `id` and no `id_mismatch`. A modified client cannot be tested cheaply: read `Audit.RelayedChat2` once more against a captured RPC if one is available.
+
 ### Next candidates (not done)
 
 - Fix the 78 silent catches over time (`python3 scripts/lint_catch.py --list`), lowering the baseline as you go.
 - From the review but skipped on purpose: the design generator, work fronts and stands, the lease, the Jev judge (see `research/2026-10-clauden-jevheim-review.md`).
+- The offline review's unfixed findings are listed in `research/2026-10-offline-code-review.md` (walker portal avoidance, reroute waypoints, modify-entry identity after restart, adoption of old creator-0 pieces, and others).
 - Tier 1 of `research/2026-10-clauden-jevheim-synthesis.md` is done (decompile check in `decisions/0003-decompile-check-results.md`). Not done from it: A14 (plan_check on edited ground), A16 (mesh colliders), A23 (speaker id check against the connection), A24 (`world_state` positions without a source), A26 (Dvergr wards enabled); Tier 2 not yet built: biome-spawn reader, terrain deltas, `explored_at`, `loot_near`, `situation`; Tier 4 not yet built: walk replay over scenes (held back on purpose: it would encode the walker's assumed numbers, StepUp 0.45 and the hop height, which nobody has measured; measure them first with a slope and step probe), walk bench, chat injection hook (scene capture and the support differential test exist now).
 
 ### Other
