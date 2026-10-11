@@ -74,7 +74,14 @@ namespace HubnerExt
         public object Handle;           // the caller's own reference (the ZDO)
     }
 
-    internal enum Match { Found, NotFound, Ambiguous }
+    internal enum Match { Found, NotFound, Ambiguous, OtherWorld, Unloaded }
+
+    /// <summary>The identity of a world: its name and the uid the game gives it at creation. Ids, plan tags and positions in the journal mean nothing in another world.</summary>
+    internal static class WorldKey
+    {
+        public static string Of(string name, long uid) { return string.IsNullOrEmpty(name) && uid == 0 ? "" : (name ?? "") + "#" + uid.ToString(System.Globalization.CultureInfo.InvariantCulture); }
+        public static bool Differs(string entryWorld, string currentWorld) { return !string.IsNullOrEmpty(entryWorld) && !string.IsNullOrEmpty(currentWorld) && entryWorld != currentWorld; }
+    }
 
     /// <summary>
     ///     Finds the object a journal entry is about. ZDO ids are only valid within one world load: when the game loads a save it renumbers every ZDO
@@ -115,6 +122,17 @@ namespace HubnerExt
             if (same.Count == 0) return Match.NotFound;
             if (same.Count == 1) { found = same[0]; return Match.Found; }
             return Match.Ambiguous;                           // two identical objects at one spot: do not guess which one to destroy
+        }
+
+        /// <summary>
+        ///     What a search result means. An entry of another world is not touched whatever matches. "Not found" proves the object is gone only where the game has the area loaded
+        ///     (a joined client holds the objects of the zones it has been near): elsewhere it is unknown, and the entry stays for a later try.
+        /// </summary>
+        public static Match Judge(Match found, string entryWorld, string currentWorld, bool areaLoaded)
+        {
+            if (WorldKey.Differs(entryWorld, currentWorld)) return Match.OtherWorld;
+            if (found == Match.NotFound && !areaLoaded) return Match.Unloaded;
+            return found;
         }
 
         private static Match Nearest(List<ObjFacts> list, double x, double y, double z, double within, out ObjFacts found)

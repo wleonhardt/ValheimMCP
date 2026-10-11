@@ -907,7 +907,11 @@ namespace HubnerExt
             }
             else foreach (var z in Zdos.InBox(e.Pos.x - 2f, e.Pos.z - 2f, e.Pos.x + 2f, e.Pos.z + 2f)) cands.Add(FactsOf(z));
             var m = Identity.Find(e.Boot, boot, e.Id, e.Prefab, e.IdPlan, e.IdKey, e.Pos.x, e.Pos.y, e.Pos.z, e.Kind == "spawn", cands, out var found);
-            if (m == Match.Ambiguous) problem = "the game renumbered its objects since this entry was written and more than one object matches it: not touched";
+            var loaded = ZNet.instance != null && (ZNet.instance.IsServer() || (ZoneSystem.instance != null && ZoneSystem.instance.IsZoneLoaded(e.Pos)));      // the server knows every object; a client only those of zones it has been near
+            m = Identity.Judge(m, e.World, Journal.CurrentWorld(), loaded);
+            if (m == Match.OtherWorld) problem = "this entry was written in the world " + e.World + " and this is " + Journal.CurrentWorld() + ": not touched";
+            else if (m == Match.Unloaded) problem = "cannot tell whether it is gone: the area at " + U.V(e.Pos) + " is not loaded here (go there and undo again); the entry is kept";
+            else if (m == Match.Ambiguous) problem = "the game renumbered its objects since this entry was written and more than one object matches it: not touched";
             return m == Match.Found ? (ZDO)found.Handle : null;
         }
 

@@ -210,6 +210,7 @@ namespace HubnerExt
         public string Tag, Plan, Key, Group, Time;      // v2: plan identity, journal group, UTC time
         public Dictionary<string, int> Ints; public Dictionary<string, string> Strings; public Dictionary<string, float> Floats;   // v3: extra ZDO fields a modify changed (door state, fuel ...), so undo restores them
         public long Seq;
+        public string World;                   // v5: the world (name#uid) the entry was written in; ids, tags and positions mean nothing in another one
         public string Boot, IdPlan, IdKey;     // v4: the world load the Id belongs to, and the plan identity the object has (ZDO ids are renumbered at every load: the tags are what survives a restart)
     }
 
@@ -222,6 +223,8 @@ namespace HubnerExt
         /// <summary>Counts every change to the journal: lets callers (the pre-save list sanitiser) skip work when nothing was written.</summary>
         public static long Version;
         /// <summary>Id of the current world load (ZDOMan session). Entries from another load cannot be found by id.</summary>
+        /// <summary>The world being played (name#uid); empty before one is loaded.</summary>
+        public static string CurrentWorld() { try { var w = ZNet.World; return w != null ? WorldKey.Of(w.m_name, w.m_uid) : ""; } catch (Exception ex) { U.Once("Journal.CurrentWorld", ex); return ""; } }
         public static string CurrentBoot() { try { return ZDOMan.instance != null ? ZDOMan.GetSessionID().ToString(CultureInfo.InvariantCulture) : ""; } catch { return ""; } }
         /// <summary>Last file error (empty = fine). A journal that cannot be written means writes can no longer be undone after a restart: status and selftest show it.</summary>
         public static string LastError = "";
@@ -248,7 +251,7 @@ namespace HubnerExt
                     {
                         Seq = (long)FlatJson.N(d, "seq"), Time = FlatJson.S(d, "t"), Kind = FlatJson.S(d, "kind"), Id = FlatJson.S(d, "id"), Prefab = FlatJson.S(d, "prefab"),
                         Text = FlatJson.S(d, "text"), Tag = FlatJson.S(d, "tag"), Plan = FlatJson.S(d, "plan"), Key = FlatJson.S(d, "key"), Group = FlatJson.S(d, "group"), Note = FlatJson.S(d, "note"),
-                        Creator = (long)FlatJson.N(d, "creator"), Boot = FlatJson.S(d, "boot"), IdPlan = FlatJson.S(d, "ip"), IdKey = FlatJson.S(d, "ik"), Scale = Vector3.one
+                        Creator = (long)FlatJson.N(d, "creator"), Boot = FlatJson.S(d, "boot"), World = FlatJson.S(d, "world"), IdPlan = FlatJson.S(d, "ip"), IdKey = FlatJson.S(d, "ik"), Scale = Vector3.one
                     };
                     var p = FlatJson.A(d, "pos"); if (p != null && p.Length >= 3) e.Pos = new Vector3(p[0], p[1], p[2]);
                     var sc = FlatJson.A(d, "scale"); if (sc != null && sc.Length >= 3) e.Scale = new Vector3(sc[0], sc[1], sc[2]);
@@ -310,7 +313,7 @@ namespace HubnerExt
             sb.Append("{\"seq\":" + e.Seq + ",\"t\":" + U.S(e.Time) + ",\"kind\":" + U.S(e.Kind) + ",\"id\":" + U.S(e.Id) + ",\"prefab\":" + U.S(e.Prefab) + ",\"pos\":" + U.V(e.Pos)
                 + ",\"rot\":[" + U.N(e.Rot.x) + "," + U.N(e.Rot.y) + "," + U.N(e.Rot.z) + "," + U.N(e.Rot.w) + "],\"text\":" + U.S(e.Text ?? "") + ",\"tag\":" + U.S(e.Tag ?? "") + ",\"plan\":" + U.S(e.Plan ?? "")
                 + ",\"key\":" + U.S(e.Key ?? "") + ",\"creator\":" + e.Creator + ",\"group\":" + U.S(e.Group ?? "") + ",\"note\":" + U.S(e.Note ?? "")
-                + ",\"boot\":" + U.S(e.Boot ?? "") + ",\"ip\":" + U.S(e.IdPlan ?? "") + ",\"ik\":" + U.S(e.IdKey ?? ""));
+                + ",\"boot\":" + U.S(e.Boot ?? "") + ",\"world\":" + U.S(e.World ?? "") + ",\"ip\":" + U.S(e.IdPlan ?? "") + ",\"ik\":" + U.S(e.IdKey ?? ""));
             if (e.Scale != Vector3.one && e.Scale != Vector3.zero) sb.Append(",\"scale\":" + U.V(e.Scale));
             if (e.Ints != null && e.Ints.Count > 0) { sb.Append(",\"ints\":{"); bool f = true; foreach (var kv in e.Ints) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + kv.Value.ToString(CultureInfo.InvariantCulture)); } sb.Append('}'); }
             if (e.Floats != null && e.Floats.Count > 0) { sb.Append(",\"floats\":{"); bool f = true; foreach (var kv in e.Floats) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + U.N(kv.Value)); } sb.Append('}'); }
@@ -329,6 +332,7 @@ namespace HubnerExt
             EnsureLoaded();
             e.Seq = ++_seq; e.Time = DateTime.UtcNow.ToString("o"); Version++;
             if (string.IsNullOrEmpty(e.Boot)) e.Boot = CurrentBoot();
+            if (string.IsNullOrEmpty(e.World)) e.World = CurrentWorld();
             if (e.IdPlan == null && !string.IsNullOrEmpty(e.Id)) { var live = U.FindZdo(e.Id); if (live != null) { e.IdPlan = live.GetString(Plans.PlanHash, ""); e.IdKey = live.GetString(Plans.ItemHash, ""); } }
             Entries.Add(e);
             var line = Line(e);

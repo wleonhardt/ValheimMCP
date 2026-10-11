@@ -125,3 +125,27 @@ public class LogCollapseTests
         Assert.Equal(new[] { "b 1", "a 1", "c" }, f.Select(e => e.Key).ToArray());
     }
 }
+
+public class JournalWorldTests
+{
+    [Fact] public void AWorldIsItsNameAndUid() { Assert.Equal("Hub#42", WorldKey.Of("Hub", 42)); Assert.Equal("", WorldKey.Of("", 0)); }
+    [Fact] public void OnlyTwoKnownDifferentWorldsDiffer()
+    {
+        Assert.True(WorldKey.Differs("A#1", "B#2"));
+        Assert.False(WorldKey.Differs("A#1", "A#1"));
+        Assert.False(WorldKey.Differs("", "B#2"));               // an entry from before the key existed is taken as this world's
+        Assert.False(WorldKey.Differs("A#1", ""));
+    }
+    [Fact] public void AnEntryOfAnotherWorldIsNeverTouchedWhateverMatches()
+    {
+        Assert.Equal(Match.OtherWorld, Identity.Judge(Match.Found, "A#1", "B#2", true));
+        Assert.Equal(Match.OtherWorld, Identity.Judge(Match.NotFound, "A#1", "B#2", true));
+    }
+    [Fact] public void NotFoundInAnUnloadedAreaIsUnknownNotGone()
+    {
+        Assert.Equal(Match.Unloaded, Identity.Judge(Match.NotFound, "A#1", "A#1", false));
+        Assert.Equal(Match.NotFound, Identity.Judge(Match.NotFound, "A#1", "A#1", true));
+        Assert.Equal(Match.Found, Identity.Judge(Match.Found, "A#1", "A#1", false));            // found is found wherever it is
+        Assert.Equal(Match.Ambiguous, Identity.Judge(Match.Ambiguous, "", "", false));
+    }
+}
