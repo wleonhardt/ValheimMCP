@@ -344,3 +344,32 @@ class PlantCaseTests(unittest.TestCase):
     def test_farm_state_fails_when_a_plant_is_ready_before_it_could_be(self):
         self.fake.replies['farm_state'] = {'total': 1, 'plants': [{'prefab': 'x', 'readyFromSeconds': 500, 'readyBySeconds': 100, 'hadTimeToGrow': False}]}
         self.assertEqual(accept.run_case(self.case('farm-state'), self.ctx)['verdict'], accept.FAIL)
+
+
+class ThreatCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (5.0, 5.0)
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self, key): return [c for c in cases.CASES if c.key == key][0]
+
+    def test_threats_fails_when_a_tamed_animal_is_a_threat(self):
+        self.fake.replies['threats_near'] = {'total': 1, 'passiveMobs': False, 'creatures': [{'prefab': 'Boar', 'threat': 'now', 'tamed': True, 'alert': True, 'haveTarget': True, 'distance': 3}]}
+        self.assertEqual(accept.run_case(self.case('threats-near'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_threats_fails_when_the_order_is_wrong(self):
+        self.fake.replies['threats_near'] = {'total': 2, 'passiveMobs': False, 'creatures': [{'prefab': 'a', 'threat': 'watch', 'tamed': False, 'alert': False, 'haveTarget': False, 'distance': 3}, {'prefab': 'b', 'threat': 'now', 'tamed': False, 'alert': True, 'haveTarget': True, 'distance': 5}]}
+        self.assertEqual(accept.run_case(self.case('threats-near'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_threats_passes_on_a_well_formed_answer(self):
+        self.fake.replies['threats_near'] = {'total': 2, 'passiveMobs': True, 'creatures': [{'prefab': 'a', 'threat': 'now', 'tamed': False, 'alert': True, 'haveTarget': True, 'distance': 5}, {'prefab': 'b', 'threat': 'ignore', 'tamed': True, 'alert': False, 'haveTarget': False, 'distance': 8}]}
+        self.assertEqual(accept.run_case(self.case('threats-near'), self.ctx)['verdict'], accept.PASS)
+
+    def test_raid_state_fails_when_the_roll_is_later_than_the_interval(self):
+        self.fake.replies['raid_state'] = {'events': [{'name': 'x'}], 'secondsToNextRoll': 5000, 'rollIntervalSeconds': 2760, 'chancePercent': 20, 'current': None}
+        self.assertEqual(accept.run_case(self.case('raid-state'), self.ctx)['verdict'], accept.FAIL)

@@ -287,6 +287,27 @@ def farm_case(ctx):
         ctx.check(f"{p['prefab']}: hadTimeToGrow agrees with ready-by", p['hadTimeToGrow'] == (p['readyBySeconds'] == 0), p)
 
 
+def raid_case(ctx):
+    r = ctx.client('any').tool('raid_state')
+    ctx.check('events are listed', len(r['events']) > 0, len(r['events']))
+    ctx.check('the next roll is within one interval', 0 <= r['secondsToNextRoll'] <= r['rollIntervalSeconds'], (r['secondsToNextRoll'], r['rollIntervalSeconds']))
+    ctx.check('the chance is a percentage', 0 <= r['chancePercent'] <= 100, r['chancePercent'])
+    if r['current']: ctx.check('the running event has time left within its duration', 0 <= r['current']['secondsLeft'], r['current'])
+
+
+def threats_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('threats_near', x=x, z=z, radius=100, armor=20)
+    if r['total'] == 0: raise Skip(f'no creature within 100 m of {x},{z}')
+    order = {'now': 0, 'watch': 1, 'ignore': 2}
+    ranks = [order[q['threat']] for q in r['creatures']]
+    ctx.check('the worst threats come first', ranks == sorted(ranks), ranks)
+    for q in r['creatures']:
+        if q['tamed']: ctx.check(f"{q['prefab']}: a tamed animal is ignored", q['threat'] == 'ignore', q)
+        if r['passiveMobs']: ctx.check(f"{q['prefab']}: nothing is 'now' in a passive world unless alert and after a target", q['threat'] != 'now' or (q['alert'] and q['haveTarget']), q)
+        ctx.check(f"{q['prefab']}: the distance is within the radius", q['distance'] <= 100, q)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -374,6 +395,8 @@ CASES = [
     Case('scene-capture', 'scene_capture writes a scene that scene_get returns whole', scene_case),
     Case('plant-check', 'plant_check: two carrots 0.2 m apart block each other', plant_case),
     Case('farm-state', 'farm_state: ready times and the grown flag agree', farm_case),
+    Case('raid-state', 'raid_state: roll timer and events agree', raid_case),
+    Case('threats-near', 'threats_near: ranked, tamed ignored, passive worlds respected', threats_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

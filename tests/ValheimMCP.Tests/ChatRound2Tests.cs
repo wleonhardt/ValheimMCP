@@ -611,3 +611,39 @@ public class PlantRulesTests
     }
     [Fact] public void ACropGridFitsOnePlantPerRadiusSquare() => Assert.Equal(8 * 6, PlantRules.FitsOn(4, 3, 0.5));
 }
+
+public class RaidAndThreatRulesTests
+{
+    [Fact] public void TheRollsComeEveryIntervalTimesTheRateAndTheChanceIsScaledByIt()
+    {
+        Assert.Equal(46 * 60.0, RaidRules.RollIntervalSeconds(46, 1)); Assert.Equal(46 * 60.0 * 2, RaidRules.RollIntervalSeconds(46, 2));
+        Assert.Equal(20, RaidRules.ChancePercent(20, 1)); Assert.Equal(10, RaidRules.ChancePercent(20, 2)); Assert.Equal(0, RaidRules.ChancePercent(20, 0));
+        Assert.Equal(60, RaidRules.SecondsToNextRoll(46 * 60 - 60, 46, 1)); Assert.Equal(0, RaidRules.SecondsToNextRoll(1e9, 46, 1));
+    }
+    [Fact] public void AnEventNeedsEveryRequiredKeyAndNoForbiddenOne()
+    {
+        var set = new HashSet<string> { "defeated_eikthyr" };
+        Func<string, bool> isSet = set.Contains;
+        Assert.True(RaidRules.KeysOk(new[] { "defeated_eikthyr" }, new[] { "defeated_gdking" }, isSet));
+        Assert.False(RaidRules.KeysOk(new[] { "defeated_gdking" }, new string[0], isSet));
+        Assert.False(RaidRules.KeysOk(new string[0], new[] { "defeated_eikthyr" }, isSet));
+        Assert.True(RaidRules.KeysOk(new string[0], new string[0], isSet));
+    }
+    [Fact] public void ATamedOrHarmlessCreatureIsIgnored()
+    {
+        Assert.Equal(Threat.Ignore, ThreatRules.Rank(true, true, false, true, true, 1, 2, 5, 30));
+        Assert.Equal(Threat.Ignore, ThreatRules.Rank(false, false, false, true, true, 1, 2, 5, 30));
+        Assert.Equal(Threat.Ignore, ThreatRules.Rank(false, true, false, true, true, 1, 2, 5, 0));
+    }
+    [Fact] public void AwareAndAboutToReachYouIsNowOtherwiseWatch()
+    {
+        Assert.Equal(Threat.Now, ThreatRules.Rank(false, true, false, true, true, 3, 2, 5, 30));              // 1 m to go at 5 m/s
+        Assert.Equal(Threat.Watch, ThreatRules.Rank(false, true, false, true, true, 60, 2, 5, 30));           // 12 s away
+        Assert.Equal(Threat.Watch, ThreatRules.Rank(false, true, false, false, false, 3, 2, 5, 30));          // close but has not noticed
+    }
+    [Fact] public void InAPassiveWorldNothingIsNowUntilItIsAlertAndAfterATarget()
+    {
+        Assert.Equal(Threat.Watch, ThreatRules.Rank(false, true, true, true, false, 1, 2, 5, 30));
+        Assert.Equal(Threat.Now, ThreatRules.Rank(false, true, true, true, true, 1, 2, 5, 30));
+    }
+}

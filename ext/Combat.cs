@@ -89,4 +89,38 @@ namespace HubnerExt
 
         public static bool RaidEligible(int value) { return value >= RaidThreshold; }
     }
+
+    /// <summary>RandEventSystem.UpdateRandomEvent (decompiled): every m_eventIntervalMin x 60 x rate seconds the game rolls m_eventChance / rate percent for a random event; the rate is the world modifier (Game.m_eventRate).</summary>
+    internal static class RaidRules
+    {
+        public static double RollIntervalSeconds(double intervalMin, double rate) { return intervalMin * 60 * rate; }
+        public static double SecondsToNextRoll(double timer, double intervalMin, double rate) { return Math.Max(0, RollIntervalSeconds(intervalMin, rate) - timer); }
+        public static double ChancePercent(double chance, double rate) { return rate <= 0 ? 0 : Math.Min(100, chance / rate); }
+
+        /// <summary>RandEventSystem.HaveGlobalKeys: every required key set and no forbidden key set.</summary>
+        public static bool KeysOk(IEnumerable<string> required, IEnumerable<string> forbidden, Func<string, bool> isSet)
+        {
+            return required.All(isSet) && !forbidden.Any(isSet);
+        }
+    }
+
+    internal enum Threat { Ignore, Watch, Now }
+
+    /// <summary>
+    ///     A ranking of what is round a point, for someone deciding whether to act: ignore what is tamed or cannot hurt, now when it is aware and in reach or a couple of seconds from it,
+    ///     watch otherwise. A creature owned by another client has no target stored but the synced "haveTarget" and "alert" flags, so those are all that is known.
+    /// </summary>
+    internal static class ThreatRules
+    {
+        public const double NowWithinSeconds = 3;
+
+        public static Threat Rank(bool tamed, bool hostile, bool passiveMobsWorld, bool alert, bool haveTarget, double distance, double reach, double runSpeed, double hit)
+        {
+            if (tamed || !hostile || hit <= 0) return Threat.Ignore;
+            var contact = CombatRules.SecondsToContact(distance, reach, runSpeed);
+            if (passiveMobsWorld && !(alert && haveTarget)) return Threat.Watch;                  // PassiveMobs: nothing senses a player until it is hit
+            if ((haveTarget || alert) && contact <= NowWithinSeconds) return Threat.Now;
+            return Threat.Watch;
+        }
+    }
 }
