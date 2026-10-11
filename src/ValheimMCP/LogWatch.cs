@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using BepInEx.Logging;
@@ -30,6 +31,14 @@ namespace ValheimMCP
         private static readonly List<Waiter> Waiters = new();
         private static Listener _listener;
 
+        // Waiter callbacks (user regex, SSE writes) never run on the thread that logged: that can be the game's main thread.
+        // The listener only enqueues; one worker thread feeds the waiters. A full queue drops lines instead of blocking the logger.
+        private const int PendingMax = 5000;
+        private static readonly ConcurrentQueue<string> Pending = new();
+        private static readonly AutoResetEvent PendingSignal = new(false);
+        private static Thread _worker;
+        private static volatile bool _workerStop;
+
         // --- Recent-line ring buffer (history for the get_log tool). Separate from the
         // Waiters list, which only signals blocked wait_for_log callers and keeps no
         // history. Guarded by its own lock so a get_log read never contends with a
@@ -54,6 +63,9 @@ namespace ValheimMCP
                 _ring ??= new Rec[Math.Max(16, ModConfig.LogBufferCapacity)];
             _listener = new Listener();
             Logger.Listeners.Add(_listener);
+            _workerStop = false;
+            _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "ValheimMCP-logwatch" };
+            _worker.Start();
         }
 
         /// <summary>Detach the global log listener and release any blocked waiters.</summary>
@@ -74,6 +86,9 @@ namespace ValheimMCP
                 _listener = null;
             }
 
+            _workerStop = true;
+            PendingSignal.Set();
+
             lock (Gate)
             {
                 foreach (var w in Waiters) w.Done.Set();
@@ -84,8 +99,8 @@ namespace ValheimMCP
         /// <summary>
         ///     Block the calling thread until a log line satisfies <paramref name="match" />
         ///     or <paramref name="timeoutMs" /> elapses. <paramref name="onLine" />, if
-        ///     given, is invoked for every observed line (matching or not) on the log
-        ///     thread — keep it cheap and non-throwing. Returns the matched line, or null
+        ///     given, is invoked for every observed line (matching or not) on the
+        ///     log-watch worker thread — keep it non-throwing. Returns the matched line, or null
         ///     on timeout (in which case <paramref name="timedOut" /> is set true).
         /// </summary>
         public static string Wait(Func<string, bool> match, int timeoutMs, Action<string> onLine, out bool timedOut)
@@ -99,12 +114,24 @@ namespace ValheimMCP
             }
             finally
             {
-                lock (Gate) Waiters.Remove(waiter);
-                waiter.Done.Dispose();
+                lock (Gate) Waiters.Remove(waiter);   // Done is not disposed: the worker may still touch it, and an event nobody waits on holds no OS handle
             }
         }
 
-        // Invoked from the log-emitting thread for each event.
+        private static void WorkerLoop()
+        {
+            while (!_workerStop)
+            {
+                while (Pending.TryDequeue(out var line))
+                {
+                    try { Dispatch(line); }
+                    catch (Exception ex) { Plugin.Log?.LogWarning($"[ValheimMCP] log-watch dispatch threw: {ex.Message}"); }
+                }
+                PendingSignal.WaitOne(500);
+            }
+        }
+
+        // Invoked from the worker thread for each queued line.
         private static void Dispatch(string line)
         {
             Waiter[] snapshot;
@@ -181,6 +208,7 @@ namespace ValheimMCP
             var lines = new List<string>();
             totalMatching = 0;
             dropped = 0;
+            Rec[] snapshot;
             lock (BufGate)
             {
                 cursor = _ringSeq;
@@ -189,21 +217,28 @@ namespace ValheimMCP
                 var oldest = _ringSeq - _ringCount + 1;
                 if (since >= 0 && since + 1 < oldest) dropped = (int)(oldest - 1 - since);
 
+                // copy the lines after the cursor under the lock; the filter (a user regex) runs outside it so it can never stall the loggers
                 var start = (_ringHead - _ringCount + _ring.Length) % _ring.Length;
-                var matched = new List<string>();
+                var copy = new List<Rec>();
                 for (var i = 0; i < _ringCount; i++)
                 {
                     var rec = _ring[(start + i) % _ring.Length];
-                    if (rec.Seq <= since) continue;
-                    if (filter != null && !filter(rec.Line)) continue;
-                    matched.Add(rec.Line);
+                    if (rec.Seq > since) copy.Add(rec);
                 }
-
-                totalMatching = matched.Count;
-                var from = maxLines > 0 && matched.Count > maxLines ? matched.Count - maxLines : 0;
-                for (var i = from; i < matched.Count; i++) lines.Add(matched[i]);
-                return lines;
+                snapshot = copy.ToArray();
             }
+
+            var matched = new List<string>();
+            foreach (var rec in snapshot)
+            {
+                if (filter != null && !filter(rec.Line)) continue;
+                matched.Add(rec.Line);
+            }
+
+            totalMatching = matched.Count;
+            var from = maxLines > 0 && matched.Count > maxLines ? matched.Count - maxLines : 0;
+            for (var i = from; i < matched.Count; i++) lines.Add(matched[i]);
+            return lines;
         }
 
         private sealed class Listener : ILogListener
@@ -214,7 +249,13 @@ namespace ValheimMCP
                 var source = eventArgs.Source?.SourceName ?? "?";
                 var line = $"[{eventArgs.Level}:{source}] {eventArgs.Data}";
                 Buffer(line); // history for get_log (always)
-                Dispatch(line); // signal wait_for_log waiters (if any)
+                bool anyWaiter;
+                lock (Gate) anyWaiter = Waiters.Count > 0;
+                if (anyWaiter && Pending.Count < PendingMax)
+                {
+                    Pending.Enqueue(line); // wait_for_log waiters are fed from the worker thread
+                    PendingSignal.Set();
+                }
             }
 
             public void Dispose()

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading;
 
 namespace ValheimMCP
@@ -14,10 +15,18 @@ namespace ValheimMCP
         private sealed class Item
         {
             public Action Run;
-            public int Cancelled;        // 1 once the caller gave up: the action is dropped at dequeue instead of running late
+            public int State;            // 0 queued, 1 running (claimed by the main thread), 2 cancelled (the caller gave up; dropped at dequeue instead of running late)
         }
 
         private static readonly ConcurrentQueue<Item> Queue = new();
+
+        /// <summary>Main-thread time one <see cref="Pump" /> may spend; the rest of the queue waits for the next frame (at least one item always runs).</summary>
+        private const long PumpBudgetMs = 25;
+
+        public static bool RunBlocking<T>(Func<T> func, int timeoutMs, out T result, out Exception error)
+        {
+            return RunBlocking(func, timeoutMs, out result, out error, out _);
+        }
 
         /// <summary>
         ///     Run <paramref name="func" /> on the main thread and block the calling
@@ -25,9 +34,10 @@ namespace ValheimMCP
         ///     elapses. Returns false on timeout (e.g. game paused / not ticking).
         ///     On timeout the queued action is cancelled: it will NOT run later, so a
         ///     client retry cannot execute a write twice. An action that already started
-        ///     when the timeout fires runs to completion (its result is discarded).
+        ///     when the timeout fires runs to completion (its result is discarded);
+        ///     <paramref name="started" /> tells the caller which of the two happened.
         /// </summary>
-        public static bool RunBlocking<T>(Func<T> func, int timeoutMs, out T result, out Exception error)
+        public static bool RunBlocking<T>(Func<T> func, int timeoutMs, out T result, out Exception error, out bool started)
         {
             T captured = default;
             Exception err = null;
@@ -37,13 +47,13 @@ namespace ValheimMCP
             {
                 try { captured = func(); }
                 catch (Exception ex) { err = ex; }
-                finally { try { done.Set(); } catch (ObjectDisposedException) { } }
+                finally { done.Set(); }
             };
             Queue.Enqueue(item);
 
             var completed = done.Wait(timeoutMs);
-            if (!completed) Interlocked.Exchange(ref item.Cancelled, 1);
-            else done.Dispose();
+            // one atomic step decides: still queued -> cancelled (never runs), otherwise it is already running and finishes on its own
+            started = completed || Interlocked.CompareExchange(ref item.State, 2, 0) != 0;
             result = captured;
             error = err;
             return completed;
@@ -52,9 +62,12 @@ namespace ValheimMCP
         /// <summary>Drain queued actions. MUST be called from the main thread.</summary>
         public static void Pump()
         {
-            while (Queue.TryDequeue(out var item))
+            var clock = Stopwatch.StartNew();
+            var ran = 0;
+            while ((ran == 0 || clock.ElapsedMilliseconds < PumpBudgetMs) && Queue.TryDequeue(out var item))
             {
-                if (Volatile.Read(ref item.Cancelled) == 1) { Plugin.Log?.LogWarning("[ValheimMCP] dropped a queued action whose caller timed out before it ran"); continue; }
+                if (Interlocked.CompareExchange(ref item.State, 1, 0) != 0) { Plugin.Log?.LogWarning("[ValheimMCP] dropped a queued action whose caller timed out before it ran"); continue; }
+                ran++;
                 try { item.Run(); }
                 catch (Exception ex)
                 {
@@ -62,7 +75,5 @@ namespace ValheimMCP
                 }
             }
         }
-
-        public static int Pending => Queue.Count;
     }
 }

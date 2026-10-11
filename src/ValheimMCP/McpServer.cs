@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using static ValheimMCP.JsonRpc;
 
 namespace ValheimMCP
 {
@@ -104,7 +105,12 @@ namespace ValheimMCP
 
             var method = req.TryGetValue("method", out var m) ? m as string : null;
             var hasId = req.TryGetValue("id", out var id);
-            if (method == null) return hasId ? ErrorResponse(id, -32600, "Missing method") : null;
+            if (method == null)
+            {
+                // a client's JSON-RPC response (result or error, no method) is accepted without a reply (202)
+                if (req.ContainsKey("result") || req.ContainsKey("error")) return null;
+                return hasId ? ErrorResponse(id, -32600, "Missing method") : null;
+            }
 
             switch (method)
             {
@@ -120,10 +126,11 @@ namespace ValheimMCP
 
         private static string InitializeResult(Dictionary<string, object> req)
         {
-            var proto = DefaultProtocol;
+            var requested = DefaultProtocol;
             if (req.TryGetValue("params", out var p) && p is Dictionary<string, object> pd &&
                 pd.TryGetValue("protocolVersion", out var pv) && pv is string s && s.Length > 0)
-                proto = s; // echo the client's requested version
+                requested = s;
+            var proto = Negotiate(requested); // the client's version when supported, otherwise our newest
 
             var sb = new StringBuilder();
             sb.Append("{\"protocolVersion\":").Append(Json.Str(proto))
@@ -138,14 +145,17 @@ namespace ValheimMCP
             var sb = new StringBuilder();
             sb.Append("{\"tools\":[");
             var prof = Tools.ProfileCategories(ModConfig.ToolsProfile);
-            if (prof == null || prof.Contains("control")) {
-            AppendTool(sb, "run_command",
-                "Run a Valheim console command (e.g. 'pos' to print the player's position, or any " +
-                "registered command — call list_commands to discover them) " +
-                "and return the lines it printed to the in-game console.",
-                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"," +
-                "\"description\":\"The full console command line to execute.\"}},\"required\":[\"text\"]}");
-            sb.Append(','); }
+            if (prof == null || prof.Contains("control"))
+            {
+                AppendTool(sb, "run_command",
+                    "Run a Valheim console command (e.g. 'pos' to print the player's position, or any " +
+                    "registered command — call list_commands to discover them) " +
+                    "and return the lines it printed to the in-game console." +
+                    (ModConfig.ToolsWrite ? "" : " [write: needs tools.write=true]"),
+                    "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"," +
+                    "\"description\":\"The full console command line to execute.\"}},\"required\":[\"text\"]}");
+                sb.Append(',');
+            }
             AppendTool(sb, "list_commands",
                 "List all registered Valheim console commands with their descriptions.",
                 "{\"type\":\"object\",\"properties\":{}}");
@@ -224,6 +234,11 @@ namespace ValheimMCP
             var args = pd.TryGetValue("arguments", out var a) ? a as Dictionary<string, object> : null;
             if (string.IsNullOrEmpty(name)) return ErrorResponse(id, -32602, "Missing tool name");
 
+            // config gates apply to every tool, built-ins included (the profile only trims tools/list, it is not access control)
+            if (ModConfig.IsToolDenied(name)) return Result(id, ToolText("tool denied by config (tools.deny): " + name, true));
+            if (name == "run_command" && !ModConfig.ToolsWrite)
+                return Result(id, ToolText("run_command needs tools.write=true in valheimmcp.yml (console commands can change the world)", true));
+
             switch (name)
             {
                 case "health":
@@ -288,10 +303,12 @@ namespace ValheimMCP
                 {
                     var tool = Tools.Get(name);
                     if (tool == null) return ErrorResponse(id, -32602, "Unknown tool: " + name);
-                    if (ModConfig.IsToolDenied(name)) return Result(id, ToolText("tool denied by config (tools.deny): " + name, true));
                     if (tool.Write && !ModConfig.ToolsWrite) return Result(id, ToolText("write tools are disabled (tools.write=false in valheimmcp.yml)", true));
-                    var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, out var outp, out var terr);
-                    if (!ok) return Result(id, ToolText("tool timed out after " + ModConfig.ToolTimeoutMs + "ms (game not ticking or zone loading?); the call was cancelled and will not run late", true));
+                    var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, out var outp, out var terr, out var started);
+                    if (!ok)
+                        return Result(id, ToolText(started
+                            ? "tool " + name + " is still running after " + ModConfig.ToolTimeoutMs + "ms and will finish on its own: check the world before retrying, a retry can apply the write twice"
+                            : "tool timed out after " + ModConfig.ToolTimeoutMs + "ms before it started (game not ticking or zone loading?); the call was cancelled and will not run late", true));
                     if (terr != null)
                     {
                         // the stack goes to the log; the caller gets one line (argument mistakes are the usual cause)
@@ -351,14 +368,14 @@ namespace ValheimMCP
                 Regex rx;
                 try
                 {
-                    rx = new Regex(pattern);
+                    rx = SafeRegex.Create(pattern);
                 }
                 catch (Exception ex)
                 {
                     return ToolText("invalid regex: " + ex.Message, true);
                 }
 
-                predicate = line => rx.IsMatch(line);
+                predicate = line => SafeRegex.IsMatch(rx, line);
             }
             else
             {
@@ -389,14 +406,14 @@ namespace ValheimMCP
                     Regex rx;
                     try
                     {
-                        rx = new Regex(contains);
+                        rx = SafeRegex.Create(contains);
                     }
                     catch (Exception ex)
                     {
                         return ToolText("invalid regex: " + ex.Message, true);
                     }
 
-                    filter = line => rx.IsMatch(line);
+                    filter = line => SafeRegex.IsMatch(rx, line);
                 }
                 else
                 {
@@ -484,50 +501,6 @@ namespace ValheimMCP
             if (message != null) sb.Append(",\"message\":").Append(Json.Str(message));
             sb.Append("}}");
             return sb.ToString();
-        }
-
-        // ---- JSON-RPC envelope helpers ----
-
-        private static string ToolText(string text, bool isError)
-        {
-            return "{\"content\":[{\"type\":\"text\",\"text\":" + Json.Str(text) + "}],\"isError\":" +
-                   (isError ? "true" : "false") + "}";
-        }
-
-        private static string ToolImage(string base64, string mimeType, string caption = null)
-        {
-            var cap = string.IsNullOrEmpty(caption) ? "" : "{\"type\":\"text\",\"text\":" + Json.Str(caption) + "},";
-            return "{\"content\":[" + cap + "{\"type\":\"image\",\"data\":" + Json.Str(base64) +
-                   ",\"mimeType\":" + Json.Str(mimeType) + "}],\"isError\":false}";
-        }
-
-        private static string Result(object id, string resultJson)
-        {
-            return "{\"jsonrpc\":\"2.0\",\"id\":" + FormatId(id) + ",\"result\":" + resultJson + "}";
-        }
-
-        private static string ErrorResponse(object id, int code, string message)
-        {
-            return "{\"jsonrpc\":\"2.0\",\"id\":" + FormatId(id) +
-                   ",\"error\":{\"code\":" + code.ToString(CultureInfo.InvariantCulture) +
-                   ",\"message\":" + Json.Str(message) + "}}";
-        }
-
-        // Echo the request id with its original JSON type (int vs string).
-        private static string FormatId(object id)
-        {
-            if (id == null) return "null";
-            if (id is string s) return Json.Str(s);
-            if (id is bool b) return b ? "true" : "false";
-            if (id is double d)
-            {
-                if (!double.IsInfinity(d) && !double.IsNaN(d) && Math.Abs(d - Math.Floor(d)) < double.Epsilon &&
-                    Math.Abs(d) < 9.2e18)
-                    return ((long)d).ToString(CultureInfo.InvariantCulture);
-                return d.ToString("R", CultureInfo.InvariantCulture);
-            }
-
-            return Json.Str(id.ToString());
         }
     }
 }

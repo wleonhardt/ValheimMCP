@@ -14,6 +14,9 @@
     <Compile Include="../../src/ValheimMCP/MiniYaml.cs" Link="src/MiniYaml.cs" />
     <Compile Include="../../src/ValheimMCP/RequestPolicy.cs" Link="src/RequestPolicy.cs" />
     <Compile Include="../../src/ValheimMCP/ToolProfiles.cs" Link="src/ToolProfiles.cs" />
+    <Compile Include="../../src/ValheimMCP/CommandPolicy.cs" Link="src/CommandPolicy.cs" />
+    <Compile Include="../../src/ValheimMCP/JsonRpc.cs" Link="src/JsonRpc.cs" />
+    <Compile Include="../../src/ValheimMCP/SafeRegex.cs" Link="src/SafeRegex.cs" />
     <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
   </ItemGroup>
   <ItemGroup>

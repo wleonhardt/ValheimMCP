@@ -5,7 +5,9 @@ obj/
 .vs/
 
 # Hubner fork: game-reference libs are never committed
-ext/lib/
+ext/lib
+out/
+*.pdb
 ext/obj/
 ext/obj-server/
 ext/bin/

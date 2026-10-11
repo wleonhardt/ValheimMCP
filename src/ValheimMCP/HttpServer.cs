@@ -26,6 +26,12 @@ namespace ValheimMCP
     {
         private readonly HttpListener _listener = new();
         private readonly int _commandTimeoutMs;
+
+        // One thread per request (a wait_for_log can block for minutes, which would starve the small Mono thread pool), capped.
+        private const int MaxConcurrent = 24;
+        private readonly SemaphoreSlim _slots = new(MaxConcurrent, MaxConcurrent);
+
+        private sealed class BodyTooLargeException : Exception { }
         private Thread _thread;
         private volatile bool _running;
 
@@ -69,16 +75,25 @@ namespace ValheimMCP
                 catch
                 {
                     if (!_running) return;
+                    Thread.Sleep(100); // a faulted listener must not turn this loop into a busy spin
                     continue;
                 }
 
-                // Handle each request on a pool thread so the accept loop keeps serving
-                // while a long-blocking request (e.g. wait_for_log) is in flight.
-                ThreadPool.QueueUserWorkItem(_ =>
+                if (!_slots.Wait(0))
+                {
+                    Write(ctx, 503, Json.Error("too many concurrent requests (limit " + MaxConcurrent + ")"));
+                    continue;
+                }
+
+                var t = new Thread(() =>
                 {
                     try
                     {
                         Handle(ctx);
+                    }
+                    catch (BodyTooLargeException)
+                    {
+                        Write(ctx, 413, Json.Error(RequestPolicy.TooLarge));
                     }
                     catch (Exception ex)
                     {
@@ -92,7 +107,12 @@ namespace ValheimMCP
                             /* response may already be partially sent */
                         }
                     }
-                });
+                    finally
+                    {
+                        _slots.Release();
+                    }
+                }) { IsBackground = true, Name = "ValheimMCP-request" };
+                t.Start();
             }
         }
 
@@ -127,6 +147,13 @@ namespace ValheimMCP
             {
                 if (method == "POST")
                 {
+                    var protoHeader = ctx.Request.Headers["MCP-Protocol-Version"];
+                    if (!JsonRpc.HeaderAcceptable(protoHeader))
+                    {
+                        Write(ctx, 400, Json.Error("unsupported MCP-Protocol-Version: " + protoHeader + " (supported: " + string.Join(", ", JsonRpc.SupportedProtocols) + ")"));
+                        return;
+                    }
+
                     // The transport replies with a single application/json body or, for a
                     // wait_for_log call carrying a progressToken, a text/event-stream of
                     // progress notifications followed by the final result.
@@ -183,6 +210,13 @@ namespace ValheimMCP
 
             if (path == "/command" && method == "POST")
             {
+                // same gates as the run_command tool
+                if (ModConfig.IsToolDenied("run_command") || !ModConfig.ToolsWrite)
+                {
+                    Write(ctx, 403, Json.Error("console commands need tools.write=true in valheimmcp.yml and run_command must not be in tools.deny"));
+                    return;
+                }
+
                 var text = ReadCommandText(ctx.Request);
                 if (string.IsNullOrWhiteSpace(text))
                 {
@@ -227,7 +261,7 @@ namespace ValheimMCP
                         Regex rx;
                         try
                         {
-                            rx = new Regex(contains);
+                            rx = SafeRegex.Create(contains);
                         }
                         catch (Exception ex)
                         {
@@ -235,7 +269,7 @@ namespace ValheimMCP
                             return;
                         }
 
-                        filter = line => rx.IsMatch(line);
+                        filter = line => SafeRegex.IsMatch(rx, line);
                     }
                     else
                     {
@@ -262,14 +296,15 @@ namespace ValheimMCP
 
         private static string ReadBody(HttpListenerRequest req)
         {
-            using var reader = new StreamReader(req.InputStream, req.ContentEncoding ?? Encoding.UTF8);
-            var buf = new char[8192]; var sb = new StringBuilder(); int n;
-            while ((n = reader.Read(buf, 0, buf.Length)) > 0)
+            // counted in bytes, before decoding, so the cap means what it says
+            using var ms = new MemoryStream();
+            var buf = new byte[8192]; int n;
+            while ((n = req.InputStream.Read(buf, 0, buf.Length)) > 0)
             {
-                sb.Append(buf, 0, n);
-                if (sb.Length > MaxBodyBytes) throw new InvalidOperationException("request body too large (limit 8 MB)");
+                ms.Write(buf, 0, n);
+                if (ms.Length > MaxBodyBytes) throw new BodyTooLargeException();
             }
-            return sb.ToString();
+            return (req.ContentEncoding ?? Encoding.UTF8).GetString(ms.ToArray());
         }
 
         private static void WriteEmpty(HttpListenerContext ctx, int status)

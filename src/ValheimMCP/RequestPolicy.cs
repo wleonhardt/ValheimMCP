@@ -15,15 +15,15 @@ namespace ValheimMCP
         {
             if (!string.IsNullOrEmpty(origin)) return "cross-origin request refused (Origin header present)";
             var h = HostName(host ?? "");
-            if (!(h == "127.0.0.1" || h == "localhost" || h == "[::1]" || string.Equals(h, configHost ?? "", StringComparison.OrdinalIgnoreCase)))
+            if (!(IsLoopbackName(h) || (!string.IsNullOrEmpty(configHost) && string.Equals(h, configHost, StringComparison.OrdinalIgnoreCase))))
                 return "Host header refused (not a loopback name): " + h;
             if (!string.IsNullOrEmpty(configToken))
             {
                 var auth = authorization ?? "";
                 var tok = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth.Substring(7).Trim() : (tokenHeader ?? "");
-                if (!string.Equals(tok, configToken, StringComparison.Ordinal)) return "missing or wrong token";
+                if (!FixedTimeEquals(tok, configToken)) return "missing or wrong token";
             }
-            if (contentLength > MaxBodyBytes) return "request body too large (limit 8 MB)";
+            if (contentLength > MaxBodyBytes) return TooLarge;
             return null;
         }
 
@@ -39,6 +39,35 @@ namespace ValheimMCP
             return colon >= 0 ? host.Substring(0, colon) : host;
         }
 
-        public static int StatusFor(string reason) { return reason != null && reason.StartsWith("missing") ? 401 : 403; }
+        public static bool IsLoopbackName(string h)
+        {
+            return string.Equals(h, "127.0.0.1", StringComparison.Ordinal) || string.Equals(h, "localhost", StringComparison.OrdinalIgnoreCase) || string.Equals(h, "[::1]", StringComparison.Ordinal);
+        }
+
+        /// <summary>True for a bind address that only this machine can reach (127.0.0.0/8, localhost, ::1).</summary>
+        public static bool IsLoopbackBind(string host)
+        {
+            var h = (host ?? "").Trim();
+            return h.StartsWith("127.", StringComparison.Ordinal) || string.Equals(h, "localhost", StringComparison.OrdinalIgnoreCase) || h == "::1" || h == "[::1]";
+        }
+
+        /// <summary>Compares in time that depends only on the length, not on where the strings differ.</summary>
+        public static bool FixedTimeEquals(string a, string b)
+        {
+            a = a ?? ""; b = b ?? "";
+            var diff = a.Length ^ b.Length;
+            for (var i = 0; i < a.Length && i < b.Length; i++) diff |= a[i] ^ b[i];
+            return diff == 0;
+        }
+
+        public const string TooLarge = "request body too large (limit 8 MB)";
+
+        public static int StatusFor(string reason)
+        {
+            if (reason == null) return 403;
+            if (reason.StartsWith("missing", StringComparison.Ordinal)) return 401;
+            if (reason.StartsWith("request body too large", StringComparison.Ordinal)) return 413;
+            return 403;
+        }
     }
 }

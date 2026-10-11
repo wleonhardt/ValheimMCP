@@ -16,6 +16,9 @@ namespace ValheimMCP
         private readonly Dictionary<string, string> _scalars = new();
         private readonly Dictionary<string, List<string>> _lists = new();
 
+        /// <summary>Values that were present but not understood (a bool that is not true/false ...): the caller logs them instead of silently taking the default.</summary>
+        public readonly List<string> Warnings = new();
+
         public static MiniYaml Parse(string text)
         {
             var y = new MiniYaml();
@@ -105,6 +108,20 @@ namespace ValheimMCP
                 : dflt;
         }
 
+        /// <summary>true/false in any case (also yes/no, on/off); a missing key gives the default, an unrecognised value gives the default plus a warning.</summary>
+        public bool GetBool(string path, bool dflt)
+        {
+            if (!_scalars.TryGetValue(path, out var v)) return dflt;
+            switch (v.Trim().ToLowerInvariant())
+            {
+                case "true": case "yes": case "on": return true;
+                case "false": case "no": case "off": return false;
+                default:
+                    Warnings.Add(path + ": '" + v + "' is not a boolean (true/false), using " + (dflt ? "true" : "false"));
+                    return dflt;
+            }
+        }
+
         public List<string> GetList(string path)
         {
             return _lists.TryGetValue(path, out var l) ? l : new List<string>();
@@ -115,9 +132,16 @@ namespace ValheimMCP
             // Full-line comment.
             var t = line.TrimStart();
             if (t.Length > 0 && t[0] == '#') return "";
-            // Trailing " #..." comment (our config values never contain '#').
-            var h = line.IndexOf(" #", System.StringComparison.Ordinal);
-            return h >= 0 ? line.Substring(0, h) : line;
+            // Trailing comment: a '#' that follows whitespace and is not inside quotes ("tok #1" and 'tok #1' keep their '#').
+            char quote = '\0';
+            for (var i = 0; i < line.Length; i++)
+            {
+                var c = line[i];
+                if (quote != '\0') { if (c == quote) quote = '\0'; continue; }
+                if (c == '"' || c == '\'') { quote = c; continue; }
+                if (c == '#' && i > 0 && char.IsWhiteSpace(line[i - 1])) return line.Substring(0, i);
+            }
+            return line;
         }
 
         private static string Unquote(string s)

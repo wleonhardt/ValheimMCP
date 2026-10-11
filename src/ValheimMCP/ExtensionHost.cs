@@ -17,7 +17,7 @@ namespace ValheimMCP
         private static Thread _thread;
         private static volatile bool _stop;
         private static readonly Dictionary<string, DateTime> Seen = new Dictionary<string, DateTime>();
-        private static readonly Dictionary<string, IMcpExtension> Loaded = new Dictionary<string, IMcpExtension>();
+        private static readonly Dictionary<string, List<IMcpExtension>> Loaded = new Dictionary<string, List<IMcpExtension>>();
         public static string Dir { get { return Path.Combine(Paths.BepInExRootPath, "hubner-ext"); } }
 
         public static void Start()
@@ -29,6 +29,18 @@ namespace ValheimMCP
         }
 
         public static void Stop() { _stop = true; }
+
+        /// <summary>Plugin shutdown (main thread): give every extension its Unload so Harmony patches and cameras do not outlive the plugin.</summary>
+        public static void UnloadAll()
+        {
+            foreach (var list in Loaded.Values)
+                foreach (var ext in list)
+                {
+                    try { ext.Unload(); } catch (Exception ex) { Plugin.Log?.LogWarning("[ValheimMCP] extension Unload threw: " + ex.Message); }
+                    Tools.RemoveOwner(ext.Name);
+                }
+            Loaded.Clear();
+        }
 
         private static void Poll()
         {
@@ -56,24 +68,38 @@ namespace ValheimMCP
 
         private static void Load(string path)
         {
-            if (Loaded.TryGetValue(path, out var old))
+            if (Loaded.TryGetValue(path, out var olds))
             {
-                try { old.Unload(); } catch (Exception ex) { Plugin.Log?.LogWarning("[ValheimMCP] extension Unload threw: " + ex.Message); }
-                Tools.RemoveOwner(old.Name);
+                foreach (var old in olds)
+                {
+                    try { old.Unload(); } catch (Exception ex) { Plugin.Log?.LogWarning("[ValheimMCP] extension Unload threw: " + ex.Message); }
+                    Tools.RemoveOwner(old.Name);
+                }
                 Loaded.Remove(path);
             }
             var asm = Assembly.Load(File.ReadAllBytes(path));
-            var n = 0;
+            var mine = new List<IMcpExtension>();
+            Loaded[path] = mine;
             foreach (var type in asm.GetTypes())
             {
                 if (type.IsAbstract || !typeof(IMcpExtension).IsAssignableFrom(type)) continue;
                 var ext = (IMcpExtension)Activator.CreateInstance(type);
-                ext.Register(new ToolRegistry(ext.Name));
-                Loaded[path] = ext;
-                n++;
+                mine.Add(ext);
+                try
+                {
+                    ext.Register(new ToolRegistry(ext.Name));
+                }
+                catch
+                {
+                    // a half-registered extension must not leave tools or patches behind
+                    try { ext.Unload(); } catch (Exception ex) { Plugin.Log?.LogWarning("[ValheimMCP] extension Unload threw: " + ex.Message); }
+                    Tools.RemoveOwner(ext.Name);
+                    mine.Remove(ext);
+                    throw;
+                }
                 Plugin.Log?.LogInfo("[ValheimMCP] extension loaded: " + ext.Name + " (" + Path.GetFileName(path) + ")");
             }
-            if (n == 0) Plugin.Log?.LogWarning("[ValheimMCP] no IMcpExtension in " + path);
+            if (mine.Count == 0) Plugin.Log?.LogWarning("[ValheimMCP] no IMcpExtension in " + path);
         }
     }
 }

@@ -29,6 +29,17 @@ namespace ValheimMCP
             // Settings come from BepInEx/config/valheimmcp.yml (written with defaults
             // on first run). See ModConfig / MiniYaml.
             ModConfig.Load();
+            if (ModConfig.LoadFailed)
+            {
+                Log.LogError($"{PluginInfo.Name}: config could not be read, listener not started");
+                return;
+            }
+
+            if (!RequestPolicy.IsLoopbackBind(ModConfig.Host) && string.IsNullOrEmpty(ModConfig.Token))
+            {
+                Log.LogError($"{PluginInfo.Name}: server.host '{ModConfig.Host}' is not loopback and server.token is empty, listener not started (set a token or bind 127.0.0.1)");
+                return;
+            }
 
             // Harmony postfix on Terminal.AddString tees console output into the
             // capture buffer while a command runs (see ConsoleOutputCapture).
@@ -62,6 +73,7 @@ namespace ValheimMCP
         private void OnDestroy()
         {
             ExtensionHost.Stop();
+            ExtensionHost.UnloadAll();
             _server?.Stop();
             LogWatch.Uninstall();
             _harmony?.UnpatchSelf();

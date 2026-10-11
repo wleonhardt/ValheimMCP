@@ -14,6 +14,9 @@ namespace ValheimMCP
     {
         public const string FileName = "valheimmcp.yml";
 
+        /// <summary>True when the config file could not be read: the plugin then stays fail-closed (no listener) instead of running with open defaults.</summary>
+        public static bool LoadFailed;
+
         public static string Host = "127.0.0.1";
         public static string Token = "";                      // optional bearer token (server.token); empty = no token check
         public static int Port = 8731;
@@ -72,21 +75,26 @@ namespace ValheimMCP
                 LogBufferCapacity = y.GetInt("log.bufferCapacity", LogBufferCapacity);
                 LogDefaultLines = y.GetInt("log.defaultLines", LogDefaultLines);
                 LogMaxLines = y.GetInt("log.maxLines", LogMaxLines);
-                ToolsWrite = y.Get("tools.write", "false") == "true";
+                ToolsWrite = y.GetBool("tools.write", false);
                 ToolTimeoutMs = y.GetInt("tools.timeoutMs", ToolTimeoutMs);
                 _toolDeny = y.GetList("tools.deny");
                 ToolsProfile = y.Get("tools.profile", ToolsProfile);
-                ToolsTerse = y.Get("tools.terse", "false") == "true";
+                ToolsTerse = y.GetBool("tools.terse", false);
                 _allow = y.GetList("commands.allow");
                 _deny = y.GetList("commands.deny");
 
+                foreach (var w in y.Warnings) Plugin.Log?.LogWarning($"[ValheimMCP] config: {w}");
                 Plugin.Log?.LogInfo(
                     $"[ValheimMCP] config: {Host}:{Port}, render {RenderMinSize}-{RenderMaxSize} " +
                     $"(default {RenderDefaultSize}), allow={_allow.Count} deny={_deny.Count}");
             }
             catch (Exception ex)
             {
-                Plugin.Log?.LogError($"[ValheimMCP] failed to load config, using defaults: {ex.Message}");
+                LoadFailed = true;
+                ToolsWrite = false;
+                _allow = new List<string>();
+                _deny = new List<string> { "*" };
+                Plugin.Log?.LogError($"[ValheimMCP] failed to load config, staying closed (no listener, writes off, all commands denied): {ex.Message}");
             }
         }
 
@@ -114,57 +122,18 @@ namespace ValheimMCP
             return Math.Min(max, Math.Max(1, requested));
         }
 
-        /// <summary>
-        ///     Gate a console command line against the allow/deny lists. Matches the
-        ///     command name (first token, case-insensitive); a trailing <c>*</c> is a
-        ///     prefix wildcard. Deny wins; a non-empty allow list is exclusive.
-        /// </summary>
+        /// <summary>Gate a console command line against the allow/deny lists (rules in <see cref="CommandPolicy" />).</summary>
         public static bool IsCommandAllowed(string commandLine, out string reason)
         {
-            reason = null;
-            var name = (commandLine ?? "").Trim();
-            var sp = name.IndexOfAny(new[] { ' ', '\t' });
-            if (sp >= 0) name = name.Substring(0, sp);
-            name = name.ToLowerInvariant();
-
-            if (Matches(_deny, name))
-            {
-                reason = $"command '{name}' is denied by config (commands.deny)";
-                return false;
-            }
-
-            if (_allow.Count > 0 && !Matches(_allow, name))
-            {
-                reason = $"command '{name}' is not in the config allowlist (commands.allow)";
-                return false;
-            }
-
-            return true;
-        }
-
-        private static bool Matches(List<string> patterns, string name)
-        {
-            foreach (var raw in patterns)
-            {
-                var p = raw.ToLowerInvariant();
-                if (p.EndsWith("*"))
-                {
-                    if (name.StartsWith(p.Substring(0, p.Length - 1))) return true;
-                }
-                else if (name == p)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return CommandPolicy.IsAllowed(commandLine, _allow, _deny, out reason);
         }
 
         private const string DefaultYaml =
             @"# ValheimMCP configuration (YAML). Full-line comments (#) only.
 
 server:
-  host: 127.0.0.1          # loopback only — endpoint is unauthenticated, keep it local
+  host: 127.0.0.1          # loopback only. A non-loopback host is refused unless token is set
+  token: ''                # optional shared secret; clients send 'Authorization: Bearer <token>'. Quote it if it contains ' #'
   port: 8731
   commandTimeoutMs: 15000  # max wait for a command to run on the main thread
 
@@ -190,8 +159,8 @@ commands:
   allow: []
   deny: []
 
-# Extension tools (BepInEx/hubner-ext/*.dll, hot-reloaded). 'write' enables tools that change the world.
-# 'deny' blocks individual tools by name.
+# 'write' enables tools that change the world, including run_command (console commands).
+# 'deny' blocks individual tools by name (built-in tools too). 'profile' only trims tools/list, it is not access control.
 tools:
   write: false
   timeoutMs: 30000
@@ -200,11 +169,15 @@ tools:
   terse: false             # true = first sentence of each description only (smaller tool list for the model; the README has the details)
 
 # Hubner extension settings (read by BepInEx/hubner-ext/HubnerExt.dll).
-#   sandboxNames: character names that count as the sandbox (players tool, restart checks)
+#   sandboxNames: character names that count as the sandbox; only they get god mode from teleport/walk. Empty = nobody
+#   exposePeerHosts: true lets the players tool return each peer's IP / Steam id (default false)
+#   captureWhispers: true lets chat_tail record whispers (default false)
 #   writeFlagMinutes: how long the server's ALLOW_SERVER_WRITES flag file stays valid after it was touched
 #   jobBudgetMs: main-thread time a queued job may use per frame (plan_apply and friends are sliced)
 hubner:
-  sandboxNames: [Odev, MaRkO, ClaudeEyes]
+  sandboxNames: []
+  exposePeerHosts: false
+  captureWhispers: false
   writeFlagMinutes: 30
   jobBudgetMs: 8
 ";

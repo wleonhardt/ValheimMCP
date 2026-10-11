@@ -12,22 +12,27 @@ namespace ValheimMCP
     /// </summary>
     internal static class MiniJson
     {
+        /// <summary>Nesting limit: the parser is recursive and a stack overflow cannot be caught, it ends the game process.</summary>
+        public const int MaxDepth = 64;
+
         public static object Parse(string text)
         {
             var i = 0;
-            var value = ParseValue(text, ref i);
+            var value = ParseValue(text, ref i, 0);
             SkipWs(text, ref i);
+            if (i < text.Length) throw new FormatException("Unexpected characters after the JSON value");
             return value;
         }
 
-        private static object ParseValue(string s, ref int i)
+        private static object ParseValue(string s, ref int i, int depth)
         {
+            if (depth > MaxDepth) throw new FormatException("JSON nested deeper than " + MaxDepth);
             SkipWs(s, ref i);
             if (i >= s.Length) throw new FormatException("Unexpected end of JSON");
             switch (s[i])
             {
-                case '{': return ParseObject(s, ref i);
-                case '[': return ParseArray(s, ref i);
+                case '{': return ParseObject(s, ref i, depth);
+                case '[': return ParseArray(s, ref i, depth);
                 case '"': return ParseString(s, ref i);
                 case 't': Expect(s, ref i, "true"); return true;
                 case 'f': Expect(s, ref i, "false"); return false;
@@ -36,7 +41,7 @@ namespace ValheimMCP
             }
         }
 
-        private static Dictionary<string, object> ParseObject(string s, ref int i)
+        private static Dictionary<string, object> ParseObject(string s, ref int i, int depth)
         {
             var obj = new Dictionary<string, object>();
             i++; // {
@@ -50,7 +55,7 @@ namespace ValheimMCP
                 SkipWs(s, ref i);
                 if (i >= s.Length || s[i] != ':') throw new FormatException("Expected ':'");
                 i++;
-                obj[key] = ParseValue(s, ref i);
+                obj[key] = ParseValue(s, ref i, depth + 1);
                 SkipWs(s, ref i);
                 if (i >= s.Length) throw new FormatException("Unterminated object");
                 if (s[i] == ',') { i++; continue; }
@@ -61,7 +66,7 @@ namespace ValheimMCP
             return obj;
         }
 
-        private static List<object> ParseArray(string s, ref int i)
+        private static List<object> ParseArray(string s, ref int i, int depth)
         {
             var arr = new List<object>();
             i++; // [
@@ -69,7 +74,7 @@ namespace ValheimMCP
             if (i < s.Length && s[i] == ']') { i++; return arr; }
             while (true)
             {
-                arr.Add(ParseValue(s, ref i));
+                arr.Add(ParseValue(s, ref i, depth + 1));
                 SkipWs(s, ref i);
                 if (i >= s.Length) throw new FormatException("Unterminated array");
                 if (s[i] == ',') { i++; continue; }
@@ -125,7 +130,7 @@ namespace ValheimMCP
             var start = i;
             while (i < s.Length && "+-0123456789.eE".IndexOf(s[i]) >= 0) i++;
             var token = s.Substring(start, i - start);
-            if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+            if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || double.IsInfinity(d) || double.IsNaN(d))
                 throw new FormatException("Bad number: " + token);
             return d;
         }

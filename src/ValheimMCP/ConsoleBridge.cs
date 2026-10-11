@@ -65,7 +65,7 @@ namespace ValheimMCP
             ConsoleOutputCapture.Begin();
             try
             {
-                // skipAllowedCheck: true so non-cheat-gated mod commands always run.
+                // skipAllowedCheck: true skips only the session's allowed-command check (admin rights on a server); cheat commands still need devcommands (ConsoleCommand.IsValid).
                 console.TryRunCommand(commandLine, false, true);
             }
             catch (Exception ex)
