@@ -140,6 +140,7 @@ namespace HubnerExt
         public bool Supports;                       // WearNTear.m_supports
         public V3 ComOffset;
         public bool NoClipping, NotOnTilting, NotOnWood, NotOnFloor, NoInWater, GroundOnly, IsFire, IsWall, IsStation, Occupies = true;
+        public bool ForceCorrectCom;                // WearNTear.m_forceCorrectCOMCalculation: the support distance may not use the nearer pivot distance
         public bool WearsWithoutSupport = true;    // WearNTear.m_noSupportWear (the name is the opposite of what it says): false = the piece never takes damage from lack of support
         public bool IsFireplace;                    // has a Fireplace component (torches and sconces too, not only the big fires IsFire names)
         public bool DisableCoverCheck;              // Fireplace.m_disableCoverCheck
@@ -151,6 +152,8 @@ namespace HubnerExt
         public string ProvidesStation = "";         // CraftingStation.m_name when this piece is a station
         public double StationRangeBuild = 10, StationExtraRange = 0;      // CraftingStation.m_rangeBuild / m_extraRangePerLevel
 
+        public List<V3> SnapPoints = new List<V3>();    // direct children of the prefab tagged "snappoint" (Piece.GetSnapPoints), in the piece's own space
+
         public bool IsWood { get { return Material == "Wood" || Material == "HardWood"; } }
     }
 
@@ -161,6 +164,7 @@ namespace HubnerExt
         public V3 Pos;
         public Quat Rot = Quat.Identity;
         public bool Planned = true;                 // false = already in the world (a supporter and an obstacle, never reported on)
+        public V3 Scale = new V3(1, 1, 1);          // the ZDO's scale vector (trees, rocks and logs are placed scaled)
 
         public List<Obb> Boxes() { return Boxes(null); }
 
@@ -168,7 +172,9 @@ namespace HubnerExt
         public List<Obb> Boxes(Func<string, bool> layer)
         {
             var res = new List<Obb>();
-            foreach (var c in Geo.Colliders) if (layer == null || layer(c.Layer)) res.Add(Obb.Make(Pos + Rot.Rotate(c.Centre), c.Half, Rot * c.Rot));
+            foreach (var c in Geo.Colliders)
+                if (layer == null || layer(c.Layer))
+                    res.Add(Obb.Make(Pos + Rot.Rotate(new V3(c.Centre.X * Scale.X, c.Centre.Y * Scale.Y, c.Centre.Z * Scale.Z)), new V3(c.Half.X * Math.Abs(Scale.X), c.Half.Y * Math.Abs(Scale.Y), c.Half.Z * Math.Abs(Scale.Z)), Rot * c.Rot));
             return res;
         }
         public V3 Com { get { return Pos + Rot.Rotate(Geo.ComOffset); } }
@@ -251,6 +257,8 @@ namespace HubnerExt
                     if (!Apart(pa, aabbs[q])) foreach (var g in grown[p]) foreach (var qb in plain[q]) if (Obb.Overlaps(g, qb)) { touching[p].Add(new KeyValuePair<PlacedPiece, Obb>(q, qb)); }
                 }
             }
+            // WearNTear sets m_support to the maximum in Awake and calls UpdateSupport only when m_noSupportWear is set: a piece without it keeps full support and carries others like an anchor
+            foreach (var p in res.Keys) if (res[p].NeverFalls) onSolid.Add(p);
             foreach (var p in res.Keys) { res[p].Grounded = onGround.Contains(p) || onSolid.Contains(p); res[p].Support = res[p].Grounded ? res[p].Max : 0; }
 
             for (var round = 0; round < maxRounds; round++)
@@ -263,7 +271,7 @@ namespace HubnerExt
                     foreach (var kv in touching[p])
                     {
                         var q = kv.Key; var s = res[q].Support;
-                        var d1 = V3.Dist(com, q.Com) + 0.1; var d2 = V3.Dist(com, q.Pos) + 0.1; var d = d2 < d1 ? d2 : d1;
+                        var d1 = V3.Dist(com, q.Com) + 0.1; var d2 = V3.Dist(com, q.Pos) + 0.1; var d = d2 < d1 && !p.Geo.ForceCorrectCom ? d2 : d1;
                         best = Math.Max(best, s - m.Horizontal * d * s);
                         var sp = kv.Value.ClosestPoint(com);
                         if (sp.Y < com.Y + 0.05)
@@ -304,18 +312,22 @@ namespace HubnerExt
         }
         private static bool Apart(double[] a, double[] b) { return a[1] < b[0] || b[1] < a[0] || a[3] < b[2] || b[3] < a[2] || a[5] < b[4] || b[5] < a[4]; }
 
-        /// <summary>Does the terrain surface pass through this box? Sampled over the box's footprint.</summary>
+        /// <summary>
+        ///     Does the terrain surface pass through this box (WearNTear overlaps the box with the terrain collider)? The surface is continuous, so it does when the lowest ground under
+        ///     the box's footprint is not above the box and the highest is not below it. The footprint is sampled in the box's own axes, so a rotated box is not sampled outside itself.
+        /// </summary>
         public static bool TouchesGround(Obb b, Func<double, double, double> ground)
         {
-            var ex = b.Extent(new V3(1, 0, 0)); var ez = b.Extent(new V3(0, 0, 1));
-            for (var i = 0; i <= 4; i++)
-                for (var j = 0; j <= 4; j++)
-                {
-                    var x = b.C.X - ex + 2 * ex * i / 4.0; var z = b.C.Z - ez + 2 * ez * j / 4.0;
-                    var g = ground(x, z);
-                    if (g >= b.MinY && g <= b.MaxY) return true;
-                }
-            return false;
+            double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
+            for (var s = -1; s <= 1; s += 2)
+                for (var i = 0; i <= 4; i++)
+                    for (var j = 0; j <= 4; j++)
+                    {
+                        var u = -1 + 2 * i / 4.0; var w = -1 + 2 * j / 4.0;
+                        var p = b.C + b.Axes[0] * (u * b.Half.X) + b.Axes[2] * (w * b.Half.Z) + b.Axes[1] * (s * b.Half.Y);
+                        var g = ground(p.X, p.Z); if (g < lo) lo = g; if (g > hi) hi = g;
+                    }
+            return lo <= b.MaxY && hi >= b.MinY;
         }
 
         private static double AngleDeg(V3 a, V3 b)
@@ -361,11 +373,12 @@ namespace HubnerExt
 
         public static readonly IList<PlanRule> Rules = new List<PlanRule>
         {
-            new PlanRule { Id = "overlap", Origin = Ghost, Code = "Invalid", Source = "Player.TestGhostClipping(ghost, 0.2): only pieces with m_noClipping, penetration over 0.2 m. Smaller overlaps are warnings" },
+            new PlanRule { Id = "overlap", Origin = Ghost, Code = "Invalid", Source = "Player.TestGhostClipping(ghost, 0.2): checked only for the piece being placed, and only when that piece has m_noClipping; penetration over 0.2 m. Everything else is a warning" },
             new PlanRule { Id = "unsupported", Origin = Hard, Code = "", Source = "WearNTear.UpdateSupport: a piece under its material minimum is destroyed by its owner" },
             new PlanRule { Id = "weak", Origin = Hard, Code = "", Source = "derived from the same loss table: one more 2 m module (sideways where the material spans, else up) would break it" },
             new PlanRule { Id = "tilt", Origin = Ghost, Code = "Invalid", Source = "Piece.m_notOnTiltingSurface: surface normal y under 0.8" },
             new PlanRule { Id = "water", Origin = Ghost, Code = "Invalid", Source = "Piece.m_noInWater" },
+            new PlanRule { Id = "snap-seam", Origin = Ghost, Code = "", Source = "Player.FindClosestSnapPoints: the hammer moves a ghost until its nearest snap point meets the nearest snap point of a piece within 10 m, when they are under 0.5 m apart. A ZDO spawn never snaps, so a plan that leaves them 0.02 to 0.5 m apart has a seam or an overlap the hammer would have closed" },
             new PlanRule { Id = "yaw-grid", Origin = Ghost, Code = "", Source = "the hammer rotates in steps of 22.5 degrees; a ZDO spawn can be anything" },
             new PlanRule { Id = "fire-clearance", Origin = Taste, Code = "", Source = "our preference: a metre of free ground round a fire (vanilla has no such placement rule; the real failures are fire-blocked and smoke)" },
             new PlanRule { Id = "fire-blocked", Origin = Hard, Code = "", Source = "Fireplace.CheckUnderTerrain: terrain above y + m_checkTerrainOffset, or a solid within 0.5 m straight up from y + m_coverCheckOffset, and the fire does not burn" },
@@ -386,6 +399,52 @@ namespace HubnerExt
             var r = Get(p.Rule);
             if (r != null) { p.Origin = r.Origin; p.Code = r.Code; if (r.Origin == Taste && p.Severity == "error") p.Severity = "warning"; }
             return p;
+        }
+    }
+
+    /// <summary>The hammer's snapping, as a check: where a planned piece's snap point is near, but not at, another piece's.</summary>
+    internal static class SnapSeams
+    {
+        public const double Reach = 0.5, Exact = 0.02;
+
+        public static List<PlanProblem> Find(IList<PlacedPiece> pieces)
+        {
+            var res = new List<PlanProblem>();
+            var cells = new Dictionary<long, List<KeyValuePair<int, V3>>>();
+            var pts = new List<List<V3>>();
+            for (var i = 0; i < pieces.Count; i++)
+            {
+                var p = pieces[i]; var l = new List<V3>();
+                foreach (var s in p.Geo.SnapPoints) l.Add(p.Pos + p.Rot.Rotate(new V3(s.X * p.Scale.X, s.Y * p.Scale.Y, s.Z * p.Scale.Z)));
+                pts.Add(l);
+            }
+            // 0.5 m cells keyed by their integer index; neighbours come from the 27 cells round a point and the real distance decides
+            var grid = new Dictionary<string, List<KeyValuePair<int, V3>>>();
+            Func<long, long, long, string> ck = (a, b, c) => a + "," + b + "," + c;
+            for (var i = 0; i < pts.Count; i++)
+                foreach (var w in pts[i])
+                {
+                    var k = ck((long)Math.Floor(w.X / Reach), (long)Math.Floor(w.Y / Reach), (long)Math.Floor(w.Z / Reach));
+                    List<KeyValuePair<int, V3>> l; if (!grid.TryGetValue(k, out l)) grid[k] = l = new List<KeyValuePair<int, V3>>();
+                    l.Add(new KeyValuePair<int, V3>(i, w));
+                }
+            for (var i = 0; i < pieces.Count; i++)
+            {
+                if (!pieces[i].Planned || pts[i].Count == 0) continue;
+                var best = double.PositiveInfinity; var bestJ = -1;
+                foreach (var w in pts[i])
+                {
+                    long cx = (long)Math.Floor(w.X / Reach), cy = (long)Math.Floor(w.Y / Reach), cz = (long)Math.Floor(w.Z / Reach);
+                    for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++)
+                    {
+                        List<KeyValuePair<int, V3>> l; if (!grid.TryGetValue(ck(cx + dx, cy + dy, cz + dz), out l)) continue;
+                        foreach (var kv in l) { if (kv.Key == i) continue; var d = V3.Dist(w, kv.Value); if (d <= Reach && d < best) { best = d; bestJ = kv.Key; } }
+                    }
+                }
+                if (bestJ < 0 || best <= Exact) continue;
+                res.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "snap-seam", Severity = "warning", Piece = pieces[i].Id, Detail = pieces[i].Geo.Prefab + " has a snap point " + Math.Round(best, 2) + " m from one of " + pieces[bestJ].Geo.Prefab + " (" + pieces[bestJ].Id + "): the hammer would have moved it to meet, a spawn leaves the seam" }));
+            }
+            return res;
         }
     }
 
@@ -412,7 +471,7 @@ namespace HubnerExt
                     var worst = 0.0;
                     foreach (var x in boxes[i]) foreach (var y in boxes[j]) worst = Math.Max(worst, Obb.Depth(x, y));
                     if (worst <= PenetrationTolerance) continue;
-                    var cannotClip = pieces[i].Geo.NoClipping || pieces[j].Geo.NoClipping;
+                    var cannotClip = (pieces[i].Planned && pieces[i].Geo.NoClipping) || (pieces[j].Planned && pieces[j].Geo.NoClipping);       // the game tests only the piece being placed (Player.UpdatePlacementGhost: component.m_noClipping)
                     var hard = cannotClip && worst > ClipError;
                     res.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "overlap", Severity = hard ? "error" : "warning", Piece = pieces[i].Id, Detail = pieces[i].Geo.Prefab + " goes " + Math.Round(worst, 2) + " m into " + pieces[j].Geo.Prefab + " (" + pieces[j].Id + ")" + (hard ? ": a piece that cannot clip (the game allows " + ClipError + " m)" : "") }));
                 }

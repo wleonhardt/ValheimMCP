@@ -360,7 +360,82 @@ public class NoSupportWearTests
         var g = new PieceGeo { Prefab = "ornament", Material = "Wood", Supports = true, WearsWithoutSupport = false, Colliders = { new ColliderBox { Centre = new V3(0, 1, 0), Half = new V3(0.2, 1, 0.2), Layer = "piece" } } };
         var p = new PlacedPiece { Id = "o", Geo = g, Pos = new V3(0, 50, 0) };                      // floating
         var r = SupportModel.Run(new[] { p }, (x, z) => 0.0, null)[p];
-        Assert.Equal(0, r.Support, 6); Assert.True(r.Holds);
+        Assert.Equal(100, r.Support, 6); Assert.True(r.Holds);                                      // WearNTear.Awake: m_support = max, and nothing updates it
         g.WearsWithoutSupport = true; Assert.False(SupportModel.Run(new[] { p }, (x, z) => 0.0, null)[p].Holds);
+    }
+}
+
+public class PlacementFixTests
+{
+    static PieceGeo Box(string name, double hx, double hy, double hz, bool noClip = false, string material = "Wood")
+        => new PieceGeo { Prefab = name, Material = material, Supports = true, NoClipping = noClip, Colliders = { new ColliderBox { Centre = new V3(0, hy, 0), Half = new V3(hx, hy, hz), Layer = "piece" } } };
+
+    [Fact] public void ANeverWearingPieceCarriesAFloatingNeighbour()
+    {
+        var anchor = new PlacedPiece { Id = "a", Geo = new PieceGeo { Prefab = "ornament", Material = "Wood", Supports = true, WearsWithoutSupport = false, Colliders = { new ColliderBox { Centre = new V3(0, 1, 0), Half = new V3(0.5, 1, 0.5), Layer = "piece" } } }, Pos = new V3(0, 50, 0) };
+        var beam = new PlacedPiece { Id = "b", Geo = Box("beam", 0.5, 0.1, 0.5), Pos = new V3(0, 52, 0) };         // sits on top of the anchor
+        var r = SupportModel.Run(new[] { anchor, beam }, (x, z) => 0.0, null);
+        Assert.True(r[beam].Holds);
+    }
+
+    [Fact] public void OnlyThePieceBeingPlacedCanBeRefusedForClipping()
+    {
+        var old = new PlacedPiece { Id = "chair", Geo = Box("chair", 0.5, 0.5, 0.5, noClip: true), Pos = new V3(0, 0, 0), Planned = false };
+        var wall = new PlacedPiece { Id = "wall", Geo = Box("wall", 1, 1, 0.1), Pos = new V3(0.3, 0, 0) };
+        Assert.Equal("warning", PlanChecks.Overlaps(new[] { old, wall }).Single().Severity);                     // the wall may go through a chair that stands there
+        var chair = new PlacedPiece { Id = "chair2", Geo = Box("chair", 0.5, 0.5, 0.5, noClip: true), Pos = new V3(0, 0, 0) };
+        var existingWall = new PlacedPiece { Id = "w", Geo = Box("wall", 1, 1, 0.1), Pos = new V3(0.3, 0, 0), Planned = false };
+        Assert.Equal("error", PlanChecks.Overlaps(new[] { chair, existingWall }).Single().Severity);              // a chair placed into a wall is refused
+    }
+
+    [Fact] public void ABoxOnASlopeTouchesTheGroundBetweenTheOldSamples()
+    {
+        var b = Obb.Make(new V3(0, 0.05, 0), new V3(2, 0.05, 2), Quat.Identity);                                  // a thin floor slab
+        Assert.True(SupportModel.TouchesGround(b, (x, z) => 0.05 + 0.4 * x));                                    // the ground crosses it along the slope
+        Assert.False(SupportModel.TouchesGround(b, (x, z) => 1.0 + 0.1 * x));                                    // all of it is above the slab
+        Assert.False(SupportModel.TouchesGround(b, (x, z) => -1.0 + 0.1 * x));                                   // all of it is below
+    }
+
+    [Fact] public void ARotatedBoxIsSampledInsideItself()
+    {
+        var b = Obb.Make(new V3(0, 0.5, 0), new V3(0.1, 0.5, 3), Quat.Yaw(45));                                  // a long thin beam on the diagonal
+        Assert.False(SupportModel.TouchesGround(b, (x, z) => (x > 1.5 && z < -1.5) || (x < -1.5 && z > 1.5) ? 0.5 : 10.0));      // ground meets the AABB corners, not the beam
+    }
+
+    [Fact] public void AScaledWorldPieceHasScaledColliders()
+    {
+        var tree = new PlacedPiece { Id = "t", Geo = Box("tree", 1, 1, 1), Pos = new V3(0, 0, 0), Scale = new V3(2, 2, 2) };
+        var b = tree.Boxes().Single();
+        Assert.Equal(2, b.Half.X, 6); Assert.Equal(2, b.C.Y, 6);
+    }
+}
+
+public class SnapSeamTests
+{
+    static PieceGeo Floor() { var g = new PieceGeo { Prefab = "floor_2x2", Material = "Wood", Supports = true }; foreach (var x in new[] { -1.0, 1.0 }) foreach (var z in new[] { -1.0, 1.0 }) g.SnapPoints.Add(new V3(x, 0, z)); return g; }
+
+    [Fact] public void AnExactNeighbourIsNotASeam()
+    {
+        var a = new PlacedPiece { Id = "a", Geo = Floor(), Pos = new V3(0, 0, 0) }; var b = new PlacedPiece { Id = "b", Geo = Floor(), Pos = new V3(2, 0, 0) };
+        Assert.Empty(SnapSeams.Find(new[] { a, b }));
+    }
+
+    [Fact] public void AFloorLeftTenCentimetresOffIsASeam()
+    {
+        var a = new PlacedPiece { Id = "a", Geo = Floor(), Pos = new V3(0, 0, 0), Planned = false }; var b = new PlacedPiece { Id = "b", Geo = Floor(), Pos = new V3(2.1, 0, 0) };
+        var r = SnapSeams.Find(new[] { a, b }).Single();
+        Assert.Equal("b", r.Piece); Assert.Equal("warning", r.Severity); Assert.Equal("snap-seam", r.Rule);
+    }
+
+    [Fact] public void FarApartIsNothing()
+    {
+        var a = new PlacedPiece { Id = "a", Geo = Floor(), Pos = new V3(0, 0, 0) }; var b = new PlacedPiece { Id = "b", Geo = Floor(), Pos = new V3(5, 0, 0) };
+        Assert.Empty(SnapSeams.Find(new[] { a, b }));
+    }
+
+    [Fact] public void ARotatedPieceUsesItsRotatedSnapPoints()
+    {
+        var a = new PlacedPiece { Id = "a", Geo = Floor(), Pos = new V3(0, 0, 0), Planned = false }; var b = new PlacedPiece { Id = "b", Geo = Floor(), Pos = new V3(2, 0, 0), Rot = Quat.Yaw(90) };
+        Assert.Empty(SnapSeams.Find(new[] { a, b }));
     }
 }

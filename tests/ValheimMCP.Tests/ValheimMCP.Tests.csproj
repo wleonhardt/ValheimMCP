@@ -29,6 +29,7 @@
     <Compile Include="../../ext/PlanRules.cs" Link="ext/PlanRules.cs" />
     <Compile Include="../../ext/Bill.cs" Link="ext/Bill.cs" />
     <Compile Include="../../ext/Combat.cs" Link="ext/Combat.cs" />
+    <Compile Include="../../ext/WorldRules.cs" Link="ext/WorldRules.cs" />
     <Compile Include="../../ext/TerrainRules.cs" Link="ext/TerrainRules.cs" />
     <Compile Include="../../ext/Scene.cs" Link="ext/Scene.cs" />
     <Compile Include="../../ext/PlantRules.cs" Link="ext/PlantRules.cs" />

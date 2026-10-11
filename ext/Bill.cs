@@ -75,7 +75,9 @@ namespace HubnerExt
             IEnumerable<KeyValuePair<string, int>> use = rec.Ingredients;
             if (rec.OnlyOne && rec.Ingredients.Count > 0)
             {
-                var pick = rec.Ingredients.OrderByDescending(i => have.ContainsKey(i.Key) ? Math.Min(have[i.Key], i.Value * crafts) : 0).First();
+                // Player.GetFirstRequiredItem: the first ingredient, in recipe order, that the inventory covers for the whole run; when none does, the one the stock covers best
+                var pick = rec.Ingredients.FirstOrDefault(i => have.ContainsKey(i.Key) && have[i.Key] >= i.Value * crafts);
+                if (pick.Key == null) pick = rec.Ingredients.OrderByDescending(i => have.ContainsKey(i.Key) ? Math.Min(have[i.Key], i.Value * crafts) : 0).First();
                 use = new[] { pick };
             }
             path.Add(item);
@@ -168,6 +170,10 @@ namespace HubnerExt
     /// <summary>Smelter.UpdateSmelter (decompiled): each second with ore queued, fuel (unless it burns none) and a clear flue, the bake timer grows by the power (1, or the windmill's) and fuel drops by power x fuelPerProduct / secPerProduct; at secPerProduct one ore becomes one product.</summary>
     internal static class SmelterMath
     {
+        /// <summary>Smelter.UpdateSmelter keeps at most 3600 s of unprocessed time: whoever is away longer than an hour finds only one hour of smelting done.</summary>
+        public const double CatchUpCapSeconds = 3600;
+        public static double WorkDoneWhileAway(double secondsAway, double secondsToEmpty, double secondsOfFuel) { return Math.Max(0, Math.Min(Math.Min(secondsAway, CatchUpCapSeconds), Math.Min(secondsToEmpty, secondsOfFuel))); }
+
         public static int QueueRoom(SmelterSpec s, int queued) { return Math.Max(0, s.MaxOre - queued); }
 
         /// <summary>OnAddFuel refuses above max - 1, so a press adds one unit while fuel is at most max - 1.</summary>

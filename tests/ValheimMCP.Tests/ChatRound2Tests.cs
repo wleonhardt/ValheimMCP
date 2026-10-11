@@ -304,6 +304,12 @@ public class BillTests
         var none = Bill.Run("Stew", 1, new Dictionary<string, int>(), Book(any));
         Assert.Equal(2, none.Missing["Meat"]); Assert.False(none.Missing.ContainsKey("Fish"));         // nothing in stock: the first one
     }
+    [Fact] public void AnyOneIngredientTakesTheFirstInRecipeOrderThatCoversTheRun()
+    {
+        var any = R("Stew", 1, "", 1, ("Meat", 2), ("Fish", 2)); any.OnlyOne = true;
+        var b = Bill.Run("Stew", 1, new Dictionary<string, int> { { "Meat", 2 }, { "Fish", 9 } }, Book(any));      // the game takes the first one it can pay in full, not the one with most stock
+        Assert.Equal(2, b.FromStock["Meat"]); Assert.False(b.FromStock.ContainsKey("Fish"));
+    }
     [Fact] public void ARunningTextCanBeRead()
     {
         var b = Bill.Run("Bronze", 5, new Dictionary<string, int>(), Bronze);
@@ -833,4 +839,15 @@ public class LogRedactTests
     [InlineData("from 2001:db8:85a3:0:0:8a2e:370:7334 ok", "from <addr> ok")]
     [InlineData("no addresses here at 12.5 seconds", "no addresses here at 12.5 seconds")]
     public void AddressesAndSteamIdsAreRedacted(string line, string expected) => Assert.Equal(expected, LogCollapse.Redact(line));
+}
+
+public class SmelterCatchUpTests
+{
+    [Fact] public void AnAbsenceCountsAtMostAnHourOfWork()
+    {
+        Assert.Equal(3600, SmelterMath.WorkDoneWhileAway(36000, 9000, 9000), 6);          // ten hours away, an hour of smelting
+        Assert.Equal(600, SmelterMath.WorkDoneWhileAway(36000, 600, 9000), 6);            // the queue ran out first
+        Assert.Equal(300, SmelterMath.WorkDoneWhileAway(36000, 9000, 300), 6);            // the fuel ran out first
+        Assert.Equal(120, SmelterMath.WorkDoneWhileAway(120, 9000, 9000), 6);             // away for two minutes
+    }
 }

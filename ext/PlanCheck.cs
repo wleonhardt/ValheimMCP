@@ -31,6 +31,7 @@ namespace HubnerExt
 
         // ------------------------------------------------------------------ prefab geometry
         static Quat Q(Quaternion q) { return new Quat(q.x, q.y, q.z, q.w); }
+        static V3 ScaleOf(ZDO z) { var s = z.GetVec3("scale", Vector3.one); return new V3(s.x, s.y, s.z); }
 
         internal static PieceGeo GeoOf(string name) { return Geo(name); }
 
@@ -60,9 +61,10 @@ namespace HubnerExt
                     else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity, Layer = layer });       // a bounds box for anything else (the game uses the real shape)
                 }
                 var wnt = go.GetComponent<WearNTear>();
-                if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); g.WearsWithoutSupport = wnt.m_noSupportWear; }
+                if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); g.WearsWithoutSupport = wnt.m_noSupportWear; g.ForceCorrectCom = wnt.m_forceCorrectCOMCalculation; }
                 var piece = go.GetComponent<Piece>();
                 if (piece != null) { g.NoClipping = piece.m_noClipping; g.NotOnTilting = piece.m_notOnTiltingSurface; g.NotOnWood = piece.m_notOnWood; g.NotOnFloor = piece.m_notOnFloor; g.NoInWater = piece.m_noInWater; g.GroundOnly = piece.m_groundOnly; }
+                foreach (Transform child in go.transform) { try { if (child.CompareTag("snappoint")) g.SnapPoints.Add(V(child.position - root)); } catch (Exception ex) { U.Once("Geo.snap", ex); } }
                 var n = name.ToLowerInvariant();
                 var cs = go.GetComponent<CraftingStation>(); var fp = go.GetComponent<Fireplace>(); var ext = go.GetComponent<StationExtension>();
                 g.IsStation = cs != null;
@@ -101,7 +103,7 @@ namespace HubnerExt
                 var name = Zdos.NameOf(z.GetPrefab()); if (name.StartsWith("_", StringComparison.Ordinal)) continue;
                 var geo = Geo(name); if (geo == null || geo.Colliders.Count == 0) continue;
                 var p = z.GetPosition();
-                all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false });
+                all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false, Scale = ScaleOf(z) });
                 if (all.Count > 4000) { note = "collapse check skipped: more than 4000 pieces around"; return null; }
             }
             if (!all.Any(p => removed.Contains(p.Id) && Material.Of(p.Geo.Material) != null)) return new List<string>();
@@ -174,24 +176,32 @@ namespace HubnerExt
                     var name = Zdos.NameOf(z.GetPrefab()); if (name.StartsWith("_", StringComparison.Ordinal)) continue;
                     var geo = Geo(name); if (geo == null || geo.Colliders.Count == 0) continue;
                     var p = z.GetPosition();
-                    all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false }); world++;
+                    all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false, Scale = ScaleOf(z) }); world++;
                 }
 
             var problems = new List<PlanProblem>();
             problems.AddRange(PlanChecks.Overlaps(all));
+            problems.AddRange(SnapSeams.Find(all));
             foreach (var p in planned)
             {
                 var gy = ground != null ? ground(p.Pos.X, p.Pos.Z) : double.NaN;
                 if (ground != null)
                 {
-                    var normalY = normalYAt(p.Pos.X, p.Pos.Z);
-                    var t = PlanChecks.Tilt(p, normalY); if (t != null) problems.Add(t);
-                    var w = PlanChecks.Water(p, gy); if (w != null) problems.Add(w);
+                    // the game takes the surface normal and the water from the first thing under the piece (Player.UpdatePlacementGhost): a piece standing on another piece is judged by that, not by the terrain
+                    var bottoms = p.Boxes(Layers.InPlace); var lifted = bottoms.Count > 0 && bottoms.Min(b => b.MinY) > gy + 0.25;
+                    if (!lifted)
+                    {
+                        var normalY = normalYAt(p.Pos.X, p.Pos.Z);
+                        var t = PlanChecks.Tilt(p, normalY); if (t != null) problems.Add(t);
+                        var w = PlanChecks.Water(p, gy); if (w != null) problems.Add(w);
+                    }
                 }
                 var yawDeg = p.Rot.Rotate(new V3(0, 0, 1)); var g = PlanChecks.Grid(p, Math.Atan2(yawDeg.X, yawDeg.Z) * 180 / Math.PI); if (g != null) problems.Add(g);
             }
             problems.AddRange(PlanChecks.FireClearance(all));
-            problems.AddRange(PlanChecks.FireBlocked(all, ground));
+            // Heightmap.GetHeight reads the nearest vertex, not the triangle surface (WorldToVertex: floor(v + 0.5))
+            Func<double, double, double> vertexGround = ground == null ? null : (Func<double, double, double>)((x, z) => ground(TerrainRules.NearestVertex(x), TerrainRules.NearestVertex(z)));
+            problems.AddRange(PlanChecks.FireBlocked(all, vertexGround));
             problems.AddRange(PlanChecks.Extensions(all));
             problems.AddRange(PlanChecks.StationsNeeded(all));
             problems.AddRange(PlanChecks.NotOnWood(all));
@@ -200,16 +210,17 @@ namespace HubnerExt
                 var pos = new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z);
                 var loc = Neighbours.LocationNoBuildAt(pos);
                 if (loc != null) problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "no-build-zone", Severity = "warning", Piece = p.Id, Detail = p.Geo.Prefab + " is inside " + loc + " (the hammer refuses to build there; a spawn does not)" }));
-                if (Neighbours.InWard(pos, 0)) problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "private-zone", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " is inside an enabled guard stone's area; plan_apply refuses it unless forced" }));
+                if (Neighbours.InWard(pos, Neighbours.WardMargin(p.Geo.Prefab))) problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "private-zone", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " is inside an enabled guard stone's area; plan_apply refuses it unless forced" + (Neighbours.WardMargin(p.Geo.Prefab) > 0 ? " (a new ward also may not reach into another ward: its own radius counts too)" : "") }));
             }
 
             var support = SupportModel.Run(all, ground, null);
+            var noFall = ZoneSystem.instance != null && ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall);      // WearNTear skips the damage of a missing support when this world option is set
             int unsupported = 0, weak = 0; double minSupport = double.PositiveInfinity;
             foreach (var p in planned)
             {
                 SupportResult s; if (!support.TryGetValue(p, out s)) continue;
                 minSupport = Math.Min(minSupport, s.Support);
-                if (!s.Holds) { unsupported++; problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "unsupported", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " at " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z)) + ": support " + U.N(Math.Round(s.Support, 1)) + " is under the " + p.Geo.Material + " minimum of " + U.N(s.Min) + ": it collapses" })); }
+                if (!s.Holds) { unsupported++; problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "unsupported", Severity = noFall ? "warning" : "error", Piece = p.Id, Detail = p.Geo.Prefab + " at " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z)) + ": support " + U.N(Math.Round(s.Support, 1)) + " is under the " + p.Geo.Material + " minimum of " + U.N(s.Min) + (noFall ? ": it would collapse, but this world has NoBuildingFall" : ": it collapses") })); }
                 else if (!s.Grounded)
                 {
                     var weakBelow = s.Min * Material.Of(p.Geo.Material).WeakRatio;
@@ -219,7 +230,7 @@ namespace HubnerExt
 
             var byRule = problems.GroupBy(p => p.Rule + "|" + p.Severity).OrderBy(g => g.Key).ToList();
             var sb = new StringBuilder("{\"planned\":" + planned.Count + ",\"skipped\":" + (items.Count - planned.Count) + ",\"worldPiecesConsidered\":" + world + ",\"ground\":" + U.S(groundNote()) + ",\"errors\":" + problems.Count(p => p.Severity == "error") + ",\"warnings\":" + problems.Count(p => p.Severity == "warning") +
-                ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"unknownKeys\":{" + string.Join(",", unknownKeys.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "},\"missingY\":" + missingY + ",\"problems\":[");
+                ",\"noBuildingFall\":" + (noFall ? "true" : "false") + ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"unknownKeys\":{" + string.Join(",", unknownKeys.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "},\"missingY\":" + missingY + ",\"problems\":[");
             sb.Append(string.Join(",", byRule.Select(g => "{\"rule\":" + U.S(g.First().Rule) + ",\"severity\":" + U.S(g.First().Severity) + ",\"origin\":" + U.S(g.First().Origin) + ",\"code\":" + U.S(g.First().Code) + ",\"count\":" + g.Count() + ",\"examples\":[" + string.Join(",", g.Take(maxEx).Select(p => "{\"piece\":" + U.S(p.Piece) + ",\"detail\":" + U.S(p.Detail) + "}").ToArray()) + "]}").ToArray()));
             sb.Append("]}");
             return U.Json(sb.ToString());

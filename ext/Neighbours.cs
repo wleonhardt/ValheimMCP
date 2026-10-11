@@ -66,6 +66,16 @@ namespace HubnerExt
             return _wards;
         }
 
+        /// <summary>Placing a ward is refused when it would reach into another ward: the check adds the new ward's own radius (Player.UpdatePlacementGhost: CheckAccess(point, m_radius, wardCheck)). 0 for any other prefab.</summary>
+        public static double WardMargin(string prefab)
+        {
+            EnsurePrefabSets();
+            if (_wardH == null || string.IsNullOrEmpty(prefab)) return 0;
+            var h = prefab.GetStableHashCode(); if (!_wardH.Contains(h)) return 0;
+            var go = Prefab(h); var pa = go != null ? go.GetComponent<PrivateArea>() : null;
+            return pa != null ? pa.m_radius : 32.0;
+        }
+
         public static bool InWard(Vector3 p, double margin) { return Ownership.WardCovers(Wards(), p.x, p.z, margin); }
 
         // ------------------------------------------------------------------ locations (no-build advice)

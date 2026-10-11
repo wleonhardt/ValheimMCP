@@ -18,7 +18,6 @@ namespace HubnerExt
         static Harmony _h;
         static AutoJoin _auto;
         static Walker _walker;
-        internal static string Mode = "data";
         /// <summary>Who has the controls: the walker yields to the human for 1.5 s after any input and stops its clocks meanwhile.</summary>
         internal static readonly UserOverride User = new UserOverride();
         internal static string PendingPw;      // answered by AutoJoin when the server asks for it
@@ -33,10 +32,10 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"trace\":{\"type\":\"boolean\"}}}", WalkStatus);
             r.Add("walk_stop", "Cancel the running walk.", "{\"type\":\"object\",\"properties\":{}}", WalkStop, true);
             r.Add("menu_join", "Main-menu only: pick a character profile and join a dedicated server by host:port. {profile, host, port}. Uses the game's own FejdStartup join path, so no clicks are needed. The server password is never a tool argument (it would end up in the model's context): set the environment variable HUBNER_AUTOJOIN_PASSWORD before starting the game. Also runs at startup when the game is launched with -hubner-autojoin host:port,profile.",
-                "{\"type\":\"object\",\"properties\":{\"profile\":{\"type\":\"string\"},\"host\":{\"type\":\"string\"},\"port\":{\"type\":\"number\"},\"mode\":{\"type\":\"string\",\"description\":\"data (default, builds the join itself) | auto (the game's AutoJoinServer)\"}},\"required\":[\"profile\",\"host\"]}", MenuJoin, true);
+                "{\"type\":\"object\",\"properties\":{\"profile\":{\"type\":\"string\"},\"host\":{\"type\":\"string\"},\"port\":{\"type\":\"number\"}},\"required\":[\"profile\",\"host\"]}", MenuJoin, true);
             r.Add("ready_state", "One-call readiness of the character at (x,z): teleporting, grounded, godMode, position, zone loaded, terrain ground known, instance count within radius. Poll after teleport instead of combining zone_state and player_state.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}}}", Ready);
-            r.Add("nav_path", "Ask the game's own pathfinder for a walkable route: fromX,fromZ,toX,toZ (y = TERRAIN height unless fromY/toY are given: pass the floor height for targets inside buildings, towers and on decks, otherwise the goal lies under the floor and the route detours or fails), agent (default Humanoid). Returns found + waypoints; found=false means no route exists on the navmesh (doors count as passable). Use before walking, and via walk_to nav:true.",
+            r.Add("nav_path", "Ask the game's own pathfinder for a walkable route: fromX,fromZ,toX,toZ (y = TERRAIN height unless fromY/toY are given: pass the floor height for targets inside buildings, towers and on decks, otherwise the goal lies under the floor and the route detours or fails), agent (default HumanoidNoSwim, so a route does not cross deep water; Humanoid swims). Returns found + waypoints; found=false means no route exists on the navmesh (doors count as passable). Use before walking, and via walk_to nav:true.",
                 "{\"type\":\"object\",\"properties\":{\"fromX\":{\"type\":\"number\"},\"fromZ\":{\"type\":\"number\"},\"fromY\":{\"type\":\"number\"},\"toY\":{\"type\":\"number\"},\"toX\":{\"type\":\"number\"},\"toZ\":{\"type\":\"number\"},\"agent\":{\"type\":\"string\"}},\"required\":[\"toX\",\"toZ\"]}", NavPath);
             r.Add("menu_password", "Answer the server password dialog of a join that is waiting for it (menu_state shows connecting:true, passwordDialog:true) with the password from the environment variable HUBNER_AUTOJOIN_PASSWORD. The password is not a tool argument. The extension types it on the next tick.",
                 "{\"type\":\"object\",\"properties\":{}}", MenuPassword, true);
@@ -164,7 +163,7 @@ namespace HubnerExt
             }
             try { if (U.IsSandbox(Player.m_localPlayer)) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
             try { if (Flying(Player.m_localPlayer)) Player.m_localPlayer.ToggleDebugFly(); } catch (Exception ex) { U.Once("ToggleDebugFly", ex); }          // ToggleDebugFly sets the field AND the ZDO value other clients read
-            _walker.ThroughPortals = McpJson.GetBool(a, "throughPortals", false); _walker.GoalHasY = goalHasY; _walker.AutoRun = McpJson.GetBool(a, "autoRun", false); _walker.Agent = McpJson.GetStr(a, "agent") ?? "Humanoid"; _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true), userWps);
+            _walker.ThroughPortals = McpJson.GetBool(a, "throughPortals", false); _walker.GoalHasY = goalHasY; _walker.AutoRun = McpJson.GetBool(a, "autoRun", false); _walker.Agent = McpJson.GetStr(a, "agent") ?? "HumanoidNoSwim"; _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true), userWps);
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
         }
 
@@ -199,7 +198,7 @@ namespace HubnerExt
             err = null; var res = new List<Vector3>();
             if (Pathfinding.instance == null) { err = "no Pathfinding instance"; return null; }
             Pathfinding.AgentType at;
-            try { at = (Pathfinding.AgentType)Enum.Parse(typeof(Pathfinding.AgentType), agent ?? "Humanoid", true); } catch { err = "unknown agent " + agent; return null; }
+            try { at = (Pathfinding.AgentType)Enum.Parse(typeof(Pathfinding.AgentType), agent ?? "HumanoidNoSwim", true); } catch { err = "unknown agent " + agent; return null; }
             float h;
             if (float.IsNaN(from.y) && ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(from.x, 5000f, from.z), out h)) from.y = h;
             if (float.IsNaN(to.y) && ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(to.x, 5000f, to.z), out h)) to.y = h;
@@ -257,14 +256,6 @@ namespace HubnerExt
                 if (sp == null) return "join failed: SetSelectedProfile not found";
                 sp.Invoke(f, new object[] { profile });
                 PendingPw = string.IsNullOrEmpty(password) ? null : password;              // the game asks for the password after the join starts; AutoJoin.Tick answers the dialog
-                if (Mode == "auto")
-                {
-                    // the game's own entry point (host:port); at the menu it may only queue the join
-                    var aj = typeof(FejdStartup).GetMethod("AutoJoinServer", any, null, new[] { typeof(string) }, null);
-                    if (aj == null) return "join failed: AutoJoinServer not found";
-                    aj.Invoke(f, new object[] { host + ":" + port.ToString(CultureInfo.InvariantCulture) });
-                    return "join requested (auto)";
-                }
                 // default: build the join data ourselves and call the private JoinServer()
                 var data = new ServerJoinData(new ServerJoinDataDedicated(host, (ushort)port));
                 typeof(FejdStartup).GetMethod("SetServerToJoin", any).Invoke(f, new object[] { data });
@@ -276,7 +267,6 @@ namespace HubnerExt
 
         static ToolOutput MenuJoin(Dictionary<string, object> a)
         {
-            Mode = McpJson.GetStr(a, "mode") == "auto" ? "auto" : "data";
             var port = McpJson.Get(a, "port", 2456);
             var msg = DoJoin(McpJson.GetStr(a, "profile"), McpJson.GetStr(a, "host"), port >= 1 && port <= 65535 ? (int)port : 0, Environment.GetEnvironmentVariable("HUBNER_AUTOJOIN_PASSWORD"));
             return msg.StartsWith("join requested", StringComparison.Ordinal) ? U.Json("{\"result\":" + U.S(msg) + "}") : ToolOutput.Err(msg);
@@ -299,7 +289,7 @@ namespace HubnerExt
             int _doorPresses, _doorOpens; string _lockedDoor = "";
             readonly Dictionary<int, float> _pressedAt = new Dictionary<int, float>(); readonly Dictionary<int, float> _pending = new Dictionary<int, float>(); float _nextDoorLook;
             float _yielded, _stallSecs = WalkFacts.StallSeconds;
-            public float ArriveHeight = WalkFacts.StandReach; public bool GoalHasY = true, AutoRun, ThroughPortals; float _nextPortalLook; public string Agent = "Humanoid"; List<Vector3> _userWps = new List<Vector3>(); int _wpDone; float _wrongStoreySince = -1f;
+            public float ArriveHeight = WalkFacts.StandReach; public bool GoalHasY = true, AutoRun, ThroughPortals; float _nextPortalLook; public string Agent = "HumanoidNoSwim"; List<Vector3> _userWps = new List<Vector3>(); int _wpDone; float _wrongStoreySince = -1f;
 
             public void Start(List<Vector3> pts, bool run, float timeout, float arrive, float stuck, bool doors, List<Vector3> userWaypoints = null)
             {
@@ -388,7 +378,7 @@ namespace HubnerExt
                 var stam = p.GetMaxStamina() > 0.01f ? p.GetStamina() / p.GetMaxStamina() : 1f;
                 var slope = Vector3.Angle(p.GetLastGroundNormal(), Vector3.up);
                 var goesUp = RouteGoesUp(pos, new Vector3((float)ax, pos.y, (float)az));
-                Run = now < _runUntil || RunRules.WantRun(Run, Remaining(), stam, slope, goesUp, _userRun, AutoRun);          // the same rule the tests cover
+                Run = now < _runUntil || RunRules.WantRun(Run, Remaining(), stam, slope, goesUp, _userRun, AutoRun, p.IsEncumbered());          // the same rule the tests cover
 
                 if (!ThroughPortals && now >= _nextPortalLook)
                 {
@@ -416,7 +406,7 @@ namespace HubnerExt
                 if ((pos - _spotPos).magnitude > WalkFacts.SameSpotRadius) { _spotPos = pos; _spotStalls = 0; }
                 _spotStalls++; _stallsTotal++;
                 var rise = NoJump ? float.NaN : RiseAhead(p, dir);
-                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes, !p.IsEncumbered());
+                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes, !p.IsEncumbered() && !(p.IsSwimming() && !p.IsOnGround()), p.IsEncumbered());           // Player.UpdateStamina: no regeneration while encumbered or swimming off the ground
                 _lastStall = act + " (rise " + (float.IsNaN(rise) ? "none" : U.N(Math.Round(rise, 2))) + ", slope " + U.N(Math.Round(slope)) + ")";
                 _lastProgT = now;
                 switch (act)
@@ -620,7 +610,6 @@ namespace HubnerExt
                 int port = 2456;
                 if (hasPort && !int.TryParse(hostPort.Substring(colon + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out port)) { Debug.LogWarning("[hubner autojoin] bad port in '" + hostPort + "'"); _done = true; return; }
                 _tries++;
-                Mode = "data";                                                       // AutoJoinServer only queues at the menu; the data path builds the join itself
                 if (parts.Length < 2 || string.IsNullOrEmpty(parts[1])) { Debug.LogWarning("[hubner autojoin] -hubner-autojoin needs host:port,profile"); _done = true; return; }
                 var res = DoJoin(parts[1], host, port, _pw);
                 Debug.Log("[hubner autojoin] attempt " + _tries + ": " + res);

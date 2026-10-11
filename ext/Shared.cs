@@ -35,6 +35,7 @@ namespace HubnerExt
             VirtualPeers.Register(r);
             Neighbours.Register(r);
             ClockTools.Register(r);
+            WorldTools.Register(r);
             RecipeTools.Register(r);
             CreatureTools.Register(r);
             SceneTools.Register(r);

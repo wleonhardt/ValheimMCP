@@ -1,6 +1,6 @@
 <Project>
     <!-- Single place for the extension version: imported by HubnerExt.csproj and HubnerExtServer.csproj; ext_info reports it. -->
     <PropertyGroup>
-        <Version>0.12.2</Version>
+        <Version>0.13.0</Version>
     </PropertyGroup>
 </Project>

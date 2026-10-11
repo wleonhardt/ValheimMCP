@@ -131,7 +131,7 @@ namespace HubnerExt
         public static double FuelToFull(double fuel, double maxFuel, bool infinite) { return infinite ? 0 : Math.Max(0, Math.Floor(maxFuel - fuel)); }
     }
 
-    /// <summary>The order a plan is built in. A spawned piece that stands on nothing is destroyed by its owner's support sweep a few seconds after it appears, so a sliced job that builds the roof before the walls loses the roof. Lowest first keeps every piece's supporter ahead of it (stable: equal heights keep the plan's order).</summary>
+    /// <summary>The order a plan is built in. A piece the game instantiates (a ZDO spawn, or a zone loading) is not swept for support during its first 30 seconds (WearNTear.ShouldUpdate); one that still stands on nothing after that is destroyed by its owner. A sliced job that builds the roof before the walls, and takes longer than that, loses the roof. Lowest first keeps every piece's supporter ahead of it (stable: equal heights keep the plan's order).</summary>
     internal static class PlanOrder
     {
         /// <summary>Items that stand on the ground (seat:"ground") go first; others by y.</summary>

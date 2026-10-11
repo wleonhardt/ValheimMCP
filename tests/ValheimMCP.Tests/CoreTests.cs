@@ -859,3 +859,69 @@ public class WalkerReviewTests
         u.Touch(5000.2); Assert.Equal(0.2, u.Yielded(5000.3), 6);                       // measured from the previous check (5000.1)
     }
 }
+
+public class WorldRulesTests
+{
+    [Theory]
+    [InlineData("150", 1.5)] [InlineData("100", 1.0)] [InlineData("25", 0.25)] [InlineData(null, 1.0)] [InlineData("", 1.0)] [InlineData("abc", 1.0)] [InlineData("NaN", 1.0)]
+    public void RateIsAPercentage(string raw, double want) { Assert.Equal(want, WorldRules.Rate(raw), 6); }
+
+    [Fact]
+    public void DefaultDeathGravesEverything()
+    {
+        var d = WorldRules.Death(false, false, false, false, false);
+        Assert.True(d.Tombstone); Assert.Equal("goes into the tombstone", d.Equipped); Assert.Equal("goes into the tombstone", d.Unequipped);
+    }
+
+    [Fact]
+    public void KeepInventoryMakesNoGrave()
+    {
+        var d = WorldRules.Death(true, false, true, true, false);
+        Assert.False(d.Tombstone); Assert.Equal("stays on the player", d.Equipped); Assert.Equal("stays on the player", d.Unequipped);
+    }
+
+    [Fact]
+    public void DeleteItemsAloneDeletesEverything()
+    {
+        var d = WorldRules.Death(false, false, true, false, false);                 // everything is unequipped first, then every unequipped item is removed
+        Assert.Equal("deleted", d.Equipped); Assert.Equal("deleted", d.Unequipped); Assert.False(d.Tombstone);
+    }
+
+    [Fact]
+    public void DeleteUnequippedKeepsTheWornGearInTheGrave()
+    {
+        var d = WorldRules.Death(false, false, false, true, false);
+        Assert.Equal("deleted", d.Unequipped); Assert.Equal("goes into the tombstone", d.Equipped); Assert.True(d.Tombstone);
+    }
+
+    [Fact]
+    public void KeepEquipLeavesTheWornGearOnThePlayer()
+    {
+        var d = WorldRules.Death(false, true, true, false, false);
+        Assert.Equal("stays on the player", d.Equipped); Assert.Equal("deleted", d.Unequipped);
+        var e = WorldRules.Death(false, true, false, false, false);
+        Assert.Equal("goes into the tombstone", e.Unequipped);
+    }
+
+    [Theory]
+    [InlineData(false, false, false, false)] [InlineData(true, false, false, true)] [InlineData(false, true, true, true)] [InlineData(false, true, false, false)] [InlineData(true, true, true, true)]
+    public void PortalsBlock(bool noPortals, bool noBoss, bool bossRunning, bool want) { Assert.Equal(want, WorldRules.PortalBlocked(noPortals, noBoss, bossRunning)); }
+}
+
+public class EncumberedWalkerTests
+{
+    [Fact] public void AnEncumberedCharacterNeitherHopsNorRunsUp()
+    {
+        // a 0.8 m ledge ahead and a steep bank: a free character hops or runs, an encumbered one cannot do either (Character.Jump / CheckRun return at once)
+        Assert.Equal(StallAction.Hop, StallLadder.Pick(1, 1, 0.8f, 10, false, false, false, 0.9f, false, 0, 0, true, false));
+        Assert.NotEqual(StallAction.Hop, StallLadder.Pick(1, 1, 0.8f, 10, false, false, false, 0.9f, false, 0, 0, true, true));
+        Assert.Equal(StallAction.RunUp, StallLadder.Pick(1, 1, float.NaN, 45, true, false, false, 0.9f, false, 0, 0, true, false));
+        Assert.NotEqual(StallAction.RunUp, StallLadder.Pick(1, 1, float.NaN, 45, true, false, false, 0.9f, false, 0, 0, true, true));
+    }
+
+    [Fact] public void AnEncumberedCharacterDoesNotRun()
+    {
+        Assert.True(RunRules.WantRun(false, 50, 0.9, 0, false, true));
+        Assert.False(RunRules.WantRun(false, 50, 0.9, 0, false, true, true, true));
+    }
+}

@@ -40,9 +40,15 @@ namespace HubnerExt
         /// <param name="regenerates">false while the body cannot get stamina back (an encumbered player regenerates none): resting would wait for ever, so the walk gives up</param>
         public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates)
         {
+            return Pick(stallsAtSpot, stallsTotal, riseAhead, slopeDeg, routeGoesUp, inWater, hazardAhead, staminaFrac, running, sideSteps, reroutes, regenerates, false);
+        }
+
+        /// <param name="encumbered">Character.Jump and CheckRun do nothing while encumbered: a hop or a run-up would only burn stalls</param>
+        public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates, bool encumbered)
+        {
             if (stallsAtSpot >= WalkFacts.GiveUpStallsAtOneSpot || stallsTotal >= WalkFacts.GiveUpStallsTotal) return StallAction.GiveUp;
-            if (!inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= WalkFacts.HopMax && staminaFrac > 0.15f) return StallAction.Hop;
-            if (routeGoesUp && slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && staminaFrac > WalkFacts.RunMinStamina && !running) return StallAction.RunUp;
+            if (!encumbered && !inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= WalkFacts.HopMax && staminaFrac > 0.15f) return StallAction.Hop;
+            if (!encumbered && routeGoesUp && slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && staminaFrac > WalkFacts.RunMinStamina && !running) return StallAction.RunUp;
             if (staminaFrac < 0.3f) return regenerates ? StallAction.Rest : StallAction.GiveUp;
             if (sideSteps < 2) return StallAction.SideStep;
             if (reroutes < 2) return StallAction.Reroute;
@@ -194,8 +200,9 @@ namespace HubnerExt
         ///     The walker's run decision. Always run a steep bank the route climbs; never run under half stamina (it comes back by walking); run when the caller asked for it; with autoRun also when
         ///     the end is far (start above 20 m, hold it down to 8 m left).
         /// </summary>
-        public static bool WantRun(bool wasRunning, double metresLeft, double staminaFrac, double slopeDeg, bool routeGoesUp, bool userAskedRun, bool autoRun = true)
+        public static bool WantRun(bool wasRunning, double metresLeft, double staminaFrac, double slopeDeg, bool routeGoesUp, bool userAskedRun, bool autoRun = true, bool encumbered = false)
         {
+            if (encumbered) return false;                                  // Character.CheckRun: an encumbered character cannot run
             if (slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && routeGoesUp && staminaFrac > WalkFacts.RunMinStamina) return true;
             if (staminaFrac < WalkFacts.RunMinStamina) return false;
             if (userAskedRun) return true;

@@ -353,7 +353,7 @@ namespace HubnerExt
                             claimed.Add(z);
                             if (z.GetPrefab() != Hash(prefab))                                           // wrong/zero prefab (made by an older version): recreate, an in-place fix never reaches connected clients
                             {
-                                if (!forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": recreating it would put it inside an enabled guard stone's area (force:true + forceConfirm overrides)"); continue; }
+                                if (!forcedPlace && Neighbours.InWard(pos, Neighbours.WardMargin(prefab))) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": recreating it would put it inside an enabled guard stone's area (force:true + forceConfirm overrides)"); continue; }
                                 updated++; if (exMoved.Count < maxEx) exMoved.Add(prefab + " recreated (bad prefab) " + U.V(z.GetPosition()));
                                 if (!dry)
                                 {
@@ -367,7 +367,7 @@ namespace HubnerExt
                             }
                             var cur = z.GetPosition(); var cr = z.GetRotation();
                             bool needMove = Vector3.Distance(cur, pos) > movedTol || Quaternion.Angle(cr, rot) > 2f;
-                            if (needMove && !forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": the new place is inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
+                            if (needMove && !forcedPlace && Neighbours.InWard(pos, Neighbours.WardMargin(prefab))) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": the new place is inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
                             bool needText = text != null && z.GetString("text", "") != text;
                             bool needTag = tag != null && z.GetString("tag", "") != tag;
                             bool needTagKey = wasAdopted || z.GetString(PlanHash, "") != plan || z.GetString(ItemHash, "") != key;
@@ -388,7 +388,7 @@ namespace HubnerExt
                             continue;
                         }
                         // spawn
-                        if (!forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
+                        if (!forcedPlace && Neighbours.InWard(pos, Neighbours.WardMargin(prefab))) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
                         var locHere = Neighbours.LocationNoBuildAt(pos); if (locHere != null) { noBuildAdvice++; if (exNoBuild.Count < maxEx) exNoBuild.Add(prefab + " " + U.V(pos) + " in " + locHere); }
                         if (dry && ZNetScene.instance != null && ZNetScene.instance.GetPrefab(prefab) == null) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": unknown prefab"); continue; }      // a dry run reports what the real run would
                         spawned++; if (exSpawn.Count < maxEx) exSpawn.Add(prefab + " " + U.V(pos));

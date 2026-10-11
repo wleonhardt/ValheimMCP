@@ -161,6 +161,15 @@ def world_clock(ctx):
     ctx.check('the client sees the same time of day (within 0.03)', abs(client_f - w['dayFraction']) < 0.03 or abs(abs(client_f - w['dayFraction']) - 1) < 0.03, (client_f, w['dayFraction']))
 
 
+def world_rules_case(ctx):
+    c = ctx.client('any'); w = c.tool('world_rules'); cm = c.tool('cost_mode')
+    keys = {k['key'] for k in w['set']}
+    ctx.check('a rate is listed only when it differs from 1', all(abs(v - 1) > 1e-9 for v in w['rates'].values()), w['rates'])
+    ctx.check('the death rule follows the keys', w['death']['tombstone'] == ('DeathKeepInventory' not in keys) or 'DeathDeleteItems' in keys, (w['death'], sorted(keys)))
+    ctx.check('portals are blocked exactly when NoPortals is set (or a boss runs under NoBossPortals)', w['portals']['blocked'] == (w['portals']['noPortals'] or (w['portals']['noBossPortals'] and w['portals']['bossRunning'])), w['portals'])
+    ctx.check('cost_mode and world_rules agree about NoBuildCost', cm['NoBuildCost'] == ('NoBuildCost' in keys), (cm['NoBuildCost'], sorted(keys)))
+
+
 def recipes_case(ctx):
     c = ctx.client('any')
     r = c.tool('recipe_info', item='Bronze')
@@ -437,6 +446,7 @@ CASES = [
     Case('log-collapse', 'log_tail folds repeats and says how many are distinct', log_collapse),
     Case('objects-digest', 'objects digest:true adds up', objects_digest),
     Case('world-clock', 'world_clock agrees with itself and with the client', world_clock),
+    Case('world-rules', 'world_rules agrees with cost_mode and itself', world_rules_case),
     Case('recipes', 'recipe_info and item_info agree about Bronze', recipes_case),
     Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
     Case('stations', 'stations: level is 1 + the extensions that count', stations_case),

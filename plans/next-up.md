@@ -78,6 +78,10 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 38. Journal: `modify` an untagged piece, restart the game, `undo`: the piece goes back (no "gone"). Undo a `delete`, restart, undo an older entry of the same piece: still found.
 39. Env: `time_set` then `env_state` in the same call chain reports the asked time with `pending`; `weather_set` released after ten minutes leaves a time you set stays until its own timer; leave the world: both are released.
 40. `clear_overlaps` with a footprint `r` 12 over a tree stand: the dry count matches what stands there.
+41. `world_rules` on the server: compare with the server's world modifiers; kill a character under `DeathKeepInventory` and under the default rule and check the tombstone against `death` in the answer.
+42. `plan_check` on a real base: `snap-seam` warnings appear for pieces left 0.1-0.4 m off a neighbour and not for a base built with the hammer; thin floors on a slope are no longer "unsupported"; a hearth on a raised floor on a slope has no tilt error.
+43. `menu_join` (no `mode` argument) still joins by host and port.
+44. `walk_to` with a heavy inventory: the walker gives up with the encumbered message instead of hopping; a route across a lake goes round it.
 
 ### Next candidates (not done)
 

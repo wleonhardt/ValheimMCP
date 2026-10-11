@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### Decompile review (0.13.0 extension)
+Three reviewers read the decompiled game against our rules (record: `plans/research/2026-10-decompile-review.md`). Compile-checked and unit-tested only.
+- New tool `world_rules`: the server options (global keys), rates as multipliers, what a death costs (tombstone, gear, bag, skills), whether portals are blocked now.
+- `plan_check`: overlap is an error only when the piece being placed cannot clip (not when an existing chair is in the way); a fire's cover test reads the nearest terrain vertex; tilt and water are not judged for a piece standing on another piece; world trees and rocks use their stored scale; pieces that never wear from missing support (`m_noSupportWear` false) keep full support; `NoBuildingFall` worlds get a warning, not an error; a new guard stone is checked with its own radius (also in `plan_apply`); new `snap-seam` warning where the hammer would have snapped a piece to its neighbour.
+- Ground contact of a piece is tested over its real footprint, so thin pieces on slopes are no longer reported as floating.
+- `menu_join`: the `auto` mode is removed. The game's `AutoJoinServer` takes a join code and quits the game when it cannot resolve one.
+- Walker: the default agent is `HumanoidNoSwim`; an encumbered character no longer tries to hop or run up; no resting while swimming off the ground.
+- `plan_materials` / `missing_for`: an "any one ingredient" recipe takes the first ingredient in recipe order that the stock covers. `smelters` reports the 3600 s catch-up cap.
+
 ### Second batch of review fixes (0.12.2 extension)
 Compile-checked and unit-tested only; none of it has run in the game.
 - `walk_to`: `autoRun:false` keeps the walk on foot unless `run:true` or a steep bank; a tired caller's `run` drops to a walk under half stamina; a re-route after a stall keeps the remaining waypoints and the agent you chose; a portal trigger on the route stops the walk with `blocked` (`throughPortals:true` walks through on purpose); debug fly is cleared through the game's own toggle.
