@@ -20,6 +20,13 @@ namespace HubnerExt
         {
             r.Add("plan_check", "Check a plan BEFORE placing it, from the prefabs' real collider boxes and the game's own structure rules (works on the dedicated server): items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz]}] (max 1500). Reports overlap (a piece that cannot clip is an error, building pieces a warning), unsupported (the structure model of WearNTear: contact by colliders grown 0.15 m, per-material loss, ground = full support; a piece under its material's minimum collapses), weak, tilt, water (sea level 30), yaw-grid (22.5 degrees), fire-clearance (1 m round a fire). Existing pieces in the area count as supporters and obstacles (those of plan:<name> are ignored: the plan replaces them). Ground: groundY (a flat pad) or, by default, the world generator's height, which does not know terrain edits. Read-only. Arguments: plan, items, groundY, margin (default 8), examples (default 10).",
                 "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"groundY\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Check);
+            r.Add("plan_rules", "The rule book of plan_check: every rule with its origin (hard = the world enforces it after a spawn, ghost = only the hammer's placement check does, taste = our preference, never an error), the game's status code and the decompiled source it comes from. Read-only.", "{\"type\":\"object\",\"properties\":{}}", Rules);
+        }
+
+        static ToolOutput Rules(Dictionary<string, object> a)
+        {
+            return U.Json("{\"origins\":{\"hard\":\"the world enforces it after a ZDO spawn\",\"ghost\":\"only the hammer's placement ghost enforces it: a spawn skips it, a player cannot rebuild or repair it by hand\",\"taste\":\"our preference, never an error\"},\"rules\":[" +
+                string.Join(",", PlanRuleBook.Rules.Select(r => "{\"id\":" + U.S(r.Id) + ",\"origin\":" + U.S(r.Origin) + ",\"code\":" + U.S(r.Code) + ",\"source\":" + U.S(r.Source) + "}").ToArray()) + "]}");
         }
 
         // ------------------------------------------------------------------ prefab geometry
@@ -39,24 +46,33 @@ namespace HubnerExt
                 foreach (var col in go.GetComponentsInChildren<Collider>())
                 {
                     if (col == null || col.isTrigger || col.attachedRigidbody != null) continue;
+                    var layer = LayerMask.LayerToName(col.gameObject.layer);
+                    if (!Layers.InPlace(layer)) continue;           // nav blockers, characters, ghosts: the game's checks never look at them
                     var box = col as BoxCollider;
                     if (box != null)
                     {
                         var ls = box.transform.lossyScale;
-                        g.Colliders.Add(new ColliderBox { Centre = V(box.transform.TransformPoint(box.center) - root), Half = new V3(Math.Abs(box.size.x * ls.x) / 2, Math.Abs(box.size.y * ls.y) / 2, Math.Abs(box.size.z * ls.z) / 2), Rot = Q(box.transform.rotation) });
+                        g.Colliders.Add(new ColliderBox { Centre = V(box.transform.TransformPoint(box.center) - root), Half = new V3(Math.Abs(box.size.x * ls.x) / 2, Math.Abs(box.size.y * ls.y) / 2, Math.Abs(box.size.z * ls.z) / 2), Rot = Q(box.transform.rotation), Layer = layer });
                     }
-                    else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity });       // like the game: a bounds box for anything else
+                    else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity, Layer = layer });       // a bounds box for anything else (the game uses the real shape)
                 }
                 var wnt = go.GetComponent<WearNTear>();
                 if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); }
                 var piece = go.GetComponent<Piece>();
                 if (piece != null) { g.NoClipping = piece.m_noClipping; g.NotOnTilting = piece.m_notOnTiltingSurface; g.NotOnWood = piece.m_notOnWood; g.NotOnFloor = piece.m_notOnFloor; g.NoInWater = piece.m_noInWater; g.GroundOnly = piece.m_groundOnly; }
                 var n = name.ToLowerInvariant();
-                g.IsStation = go.GetComponent<CraftingStation>() != null;
-                g.IsFire = go.GetComponent<Fireplace>() != null && (n.Contains("fire") || n.Contains("hearth")) && !n.Contains("torch");
+                var cs = go.GetComponent<CraftingStation>(); var fp = go.GetComponent<Fireplace>(); var ext = go.GetComponent<StationExtension>();
+                g.IsStation = cs != null;
+                g.IsFireplace = fp != null;
+                if (fp != null) { g.DisableCoverCheck = fp.m_disableCoverCheck; g.CoverCheckOffset = fp.m_coverCheckOffset; g.CheckTerrainOffset = fp.m_checkTerrainOffset; }
+                if (cs != null) { g.ProvidesStation = cs.m_name; g.StationRangeBuild = cs.m_rangeBuild; g.StationExtraRange = cs.m_extraRangePerLevel; }
+                if (ext != null && ext.m_craftingStation != null) { g.ExtensionOf = ext.m_craftingStation.m_name; g.ExtensionMaxDistance = ext.m_maxStationDistance; g.ExtensionStack = ext.m_stack; if (piece != null) g.ExtensionSpace = piece.m_spaceRequirement; }
+                if (piece != null && piece.m_craftingStation != null) g.StationName = piece.m_craftingStation.m_name;
+                g.IsFire = fp != null && (n.Contains("fire") || n.Contains("hearth")) && !n.Contains("torch");
                 g.IsWall = wnt != null && (n.Contains("wall") || n.Contains("fence") || n.Contains("palisade"));
                 var top = g.Colliders.Count == 0 ? 0 : g.Colliders.Max(b => b.Centre.Y + b.Half.Y);
-                g.Occupies = top >= 0.5 && !(n.Contains("floor") || n.Contains("rug") || n.Contains("carpet") || n.Contains("door") || n.Contains("roof"));
+                var flatName = n.Contains("floor") || n.Contains("rug") || n.Contains("carpet") || n.Contains("door") || n.Contains("roof");
+                g.Occupies = top >= 0.5 && (fp != null || cs != null || !flatName);       // a brazier on a floor stand is not a floor
                 Cache[name] = g; return g;
             }
             finally { UnityEngine.Object.Destroy(go); }
@@ -121,6 +137,17 @@ namespace HubnerExt
                 var yawDeg = p.Rot.Rotate(new V3(0, 0, 1)); var g = PlanChecks.Grid(p, Math.Atan2(yawDeg.X, yawDeg.Z) * 180 / Math.PI); if (g != null) problems.Add(g);
             }
             problems.AddRange(PlanChecks.FireClearance(all));
+            problems.AddRange(PlanChecks.FireBlocked(all, ground));
+            problems.AddRange(PlanChecks.Extensions(all));
+            problems.AddRange(PlanChecks.StationsNeeded(all));
+            problems.AddRange(PlanChecks.NotOnWood(all));
+            foreach (var p in planned)
+            {
+                var pos = new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z);
+                var loc = Neighbours.LocationNoBuildAt(pos);
+                if (loc != null) problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "no-build-zone", Severity = "warning", Piece = p.Id, Detail = p.Geo.Prefab + " is inside " + loc + " (the hammer refuses to build there; a spawn does not)" }));
+                if (Neighbours.InWard(pos, 0)) problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "private-zone", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " is inside an enabled guard stone's area; plan_apply refuses it unless forced" }));
+            }
 
             var support = SupportModel.Run(all, ground, null);
             int unsupported = 0, weak = 0; double minSupport = double.PositiveInfinity;
@@ -128,14 +155,18 @@ namespace HubnerExt
             {
                 SupportResult s; if (!support.TryGetValue(p, out s)) continue;
                 minSupport = Math.Min(minSupport, s.Support);
-                if (!s.Holds) { unsupported++; problems.Add(new PlanProblem { Rule = "unsupported", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " at " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z)) + ": support " + U.N(Math.Round(s.Support, 1)) + " is under the " + p.Geo.Material + " minimum of " + U.N(s.Min) + ": it collapses" }); }
-                else if (s.Support < s.Min * 1.5 && !s.Grounded) { weak++; problems.Add(new PlanProblem { Rule = "weak", Severity = "warning", Piece = p.Id, Detail = p.Geo.Prefab + ": support " + U.N(Math.Round(s.Support, 1)) + " is close to the minimum of " + U.N(s.Min) }); }
+                if (!s.Holds) { unsupported++; problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "unsupported", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " at " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z)) + ": support " + U.N(Math.Round(s.Support, 1)) + " is under the " + p.Geo.Material + " minimum of " + U.N(s.Min) + ": it collapses" })); }
+                else if (!s.Grounded)
+                {
+                    var weakBelow = s.Min * Material.Of(p.Geo.Material).WeakRatio;
+                    if (s.Support < weakBelow) { weak++; problems.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "weak", Severity = "warning", Piece = p.Id, Detail = p.Geo.Prefab + ": support " + U.N(Math.Round(s.Support, 1)) + " is under " + U.N(Math.Round(weakBelow, 1)) + ", what one more 2 m module out would need (minimum " + U.N(s.Min) + ")" })); }
+                }
             }
 
             var byRule = problems.GroupBy(p => p.Rule + "|" + p.Severity).OrderBy(g => g.Key).ToList();
             var sb = new StringBuilder("{\"planned\":" + planned.Count + ",\"skipped\":" + (items.Count - planned.Count) + ",\"worldPiecesConsidered\":" + world + ",\"ground\":" + U.S(groundNote) + ",\"errors\":" + problems.Count(p => p.Severity == "error") + ",\"warnings\":" + problems.Count(p => p.Severity == "warning") +
                 ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"problems\":[");
-            sb.Append(string.Join(",", byRule.Select(g => "{\"rule\":" + U.S(g.First().Rule) + ",\"severity\":" + U.S(g.First().Severity) + ",\"count\":" + g.Count() + ",\"examples\":[" + string.Join(",", g.Take(maxEx).Select(p => "{\"piece\":" + U.S(p.Piece) + ",\"detail\":" + U.S(p.Detail) + "}").ToArray()) + "]}").ToArray()));
+            sb.Append(string.Join(",", byRule.Select(g => "{\"rule\":" + U.S(g.First().Rule) + ",\"severity\":" + U.S(g.First().Severity) + ",\"origin\":" + U.S(g.First().Origin) + ",\"code\":" + U.S(g.First().Code) + ",\"count\":" + g.Count() + ",\"examples\":[" + string.Join(",", g.Take(maxEx).Select(p => "{\"piece\":" + U.S(p.Piece) + ",\"detail\":" + U.S(p.Detail) + "}").ToArray()) + "]}").ToArray()));
             sb.Append("]}");
             return U.Json(sb.ToString());
         }

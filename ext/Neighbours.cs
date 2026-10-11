@@ -67,7 +67,30 @@ namespace HubnerExt
         public static bool InWard(Vector3 p, double margin) { return Ownership.WardCovers(Wards(), p.x, p.z, margin); }
 
         // ------------------------------------------------------------------ locations (no-build advice)
-        /// <summary>The location (if any) whose largest radius covers the point. The server knows every location; whether it forbids building is the Location component of its prefab, which a headless server may not have loaded, so this is advice.</summary>
+        static readonly Dictionary<string, LocationRules.Facts> _locFacts = new Dictionary<string, LocationRules.Facts>();
+
+        /// <summary>Whether building is refused near a location is a field of the Location component on its prefab (m_noBuild, m_noBuildRadiusOverride): most locations do not forbid it. Read once per prefab; if the prefab cannot be loaded the location is assumed to forbid it.</summary>
+        static LocationRules.Facts FactsOf(ZoneSystem.ZoneLocation z)
+        {
+            LocationRules.Facts f;
+            if (_locFacts.TryGetValue(z.m_prefabName, out f)) return f;
+            f = new LocationRules.Facts { Exterior = z.m_exteriorRadius, Interior = z.m_interiorRadius };
+            try
+            {
+                z.m_prefab.Load();
+                try
+                {
+                    var go = z.m_prefab.Asset; var loc = go != null ? go.GetComponent<Location>() : null;
+                    if (loc != null) f = new LocationRules.Facts { Known = true, NoBuild = loc.m_noBuild, HasInterior = loc.m_hasInterior, Exterior = loc.m_exteriorRadius, Interior = loc.m_interiorRadius, Override = loc.m_noBuildRadiusOverride };
+                }
+                finally { z.m_prefab.Release(); }
+            }
+            catch (Exception e) { U.Once("Neighbours.LocationFacts " + z.m_prefabName, e); }
+            _locFacts[z.m_prefabName] = f;
+            return f;
+        }
+
+        /// <summary>The location (if any) whose radius covers the point, whether or not it forbids building. For information.</summary>
         public static string LocationAt(Vector3 p)
         {
             var zs = ZoneSystem.instance; if (zs == null) return null;
@@ -76,8 +99,23 @@ namespace HubnerExt
                 var loc = inst.m_location; if (loc == null) continue;
                 var dx = inst.m_position.x - p.x; var dz = inst.m_position.z - p.z;
                 if (dx * dx + dz * dz > 400f * 400f) continue;
-                var r = LocationRules.MaxRadius(loc.m_interiorRadius > 0f, loc.m_exteriorRadius, loc.m_interiorRadius);
-                if (LocationRules.NoBuildInside(Math.Sqrt(dx * dx + dz * dz), r, 0, true)) return loc.m_prefabName;
+                var f = FactsOf(loc);
+                if (Math.Sqrt(dx * dx + dz * dz) < LocationRules.MaxRadius(f.Known ? f.HasInterior : f.Interior > 0, f.Exterior, f.Interior)) return loc.m_prefabName;
+            }
+            return null;
+        }
+
+        /// <summary>The location (if any) that forbids building at the point, by the game's own rule (Location.IsInsideNoBuildLocation). The name carries a question mark when the prefab could not be read and the answer is an assumption.</summary>
+        public static string LocationNoBuildAt(Vector3 p)
+        {
+            var zs = ZoneSystem.instance; if (zs == null) return null;
+            foreach (var inst in zs.m_locationInstances.Values)
+            {
+                var loc = inst.m_location; if (loc == null) continue;
+                var dx = inst.m_position.x - p.x; var dz = inst.m_position.z - p.z;
+                if (dx * dx + dz * dz > 400f * 400f) continue;
+                var f = FactsOf(loc);
+                if (LocationRules.NoBuildHere(f, Math.Sqrt(dx * dx + dz * dz))) return f.Known ? loc.m_prefabName : loc.m_prefabName + "?";
             }
             return null;
         }

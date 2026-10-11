@@ -20,6 +20,7 @@
         <Reference Include="BepInEx"><HintPath>$(LibDir)/core/BepInEx.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="assembly_valheim"><HintPath>$(LibDir)/Managed/assembly_valheim.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="assembly_utils"><HintPath>$(LibDir)/Managed/assembly_utils.dll</HintPath><Private>false</Private></Reference>
+        <Reference Include="SoftReferenceableAssets"><HintPath>$(LibDir)/Managed/SoftReferenceableAssets.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="UnityEngine"><HintPath>$(LibDir)/Managed/UnityEngine.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="UnityEngine.CoreModule"><HintPath>$(LibDir)/Managed/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(LibDir)/Managed/UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>

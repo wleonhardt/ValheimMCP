@@ -137,15 +137,161 @@ public class PlanChecksTests
     }
 
     [Fact]
-    public void AFireNeedsAMetreAllRound()
+    public void AFireWantsAMetreAllRoundAsAWarning()
     {
         var fire = Box("fire_pit", 0.5, 0.3, 0.5); fire.IsFire = true;
         var wall = Box("stone_wall", 1, 1, 0.1); wall.IsWall = true;
         var chest = Box("chest", 0.5, 0.4, 0.4);
         var near = PlanChecks.FireClearance(new[] { At(fire, 0, 0, 0, "f"), At(wall, 0, 0, 1.0, "w") });                      // gap 0.4 m
-        Assert.Equal("error", near.Single().Severity);
+        Assert.Equal("warning", near.Single().Severity);                                                                       // our preference, not a game rule
         var soft = PlanChecks.FireClearance(new[] { At(fire, 0, 0, 0, "f"), At(chest, 1.5, 0, 0, "c") });                      // gap 0.5 m, a chest: warning
         Assert.Equal("warning", soft.Single().Severity);
         Assert.Empty(PlanChecks.FireClearance(new[] { At(fire, 0, 0, 0, "f"), At(chest, 3, 0, 0, "c") }));
+    }
+}
+
+public class PlanRuleBookTests
+{
+    static PieceGeo Slab(string name, double hx, double hy, double hz, double y, Action<PieceGeo> more = null)
+    {
+        var g = new PieceGeo { Prefab = name, Colliders = { new ColliderBox { Centre = new V3(0, y, 0), Half = new V3(hx, hy, hz), Layer = "piece" } } };
+        if (more != null) more(g);
+        return g;
+    }
+    static PlacedPiece At(PieceGeo g, double x, double y, double z, string id) => new PlacedPiece { Id = id, Geo = g, Pos = new V3(x, y, z) };
+
+    [Fact] public void ATasteRuleIsNeverAnError()
+    {
+        var p = PlanRuleBook.Stamp(new PlanProblem { Rule = "fire-clearance", Severity = "error" });
+        Assert.Equal("warning", p.Severity); Assert.Equal("taste", p.Origin);
+    }
+    [Fact] public void EveryRuleHasAnOriginAndASource()
+    {
+        Assert.All(PlanRuleBook.Rules, r => { Assert.Contains(r.Origin, new[] { "hard", "ghost", "taste" }); Assert.False(string.IsNullOrWhiteSpace(r.Source)); });
+        Assert.Equal(PlanRuleBook.Rules.Count, PlanRuleBook.Rules.Select(r => r.Id).Distinct().Count());
+    }
+    [Fact] public void TheCodesAreTheGamesOwnStatusNames()
+    {
+        Assert.Equal("MoreSpace", PlanRuleBook.Get("extension-spacing").Code);
+        Assert.Equal("ExtensionMissingStation", PlanRuleBook.Get("extension-no-station").Code);
+        Assert.Equal("NoBuildZone", PlanRuleBook.Get("no-build-zone").Code);
+        Assert.Equal("PrivateZone", PlanRuleBook.Get("private-zone").Code);
+    }
+
+    [Fact] public void ANoClippingPieceIsAnErrorOnlyPastTheGamesTwoTenths()
+    {
+        var a = Slab("a", 1, 1, 1, 0, g => g.NoClipping = true); var b = Slab("b", 1, 1, 1, 0);
+        var small = PlanChecks.Overlaps(new[] { At(a, 0, 0, 0, "a"), At(b, 1.9, 0, 0, "b") });      // 0.1 m deep
+        Assert.Single(small); Assert.Equal("warning", small[0].Severity);
+        var deep = PlanChecks.Overlaps(new[] { At(a, 0, 0, 0, "a"), At(b, 1.5, 0, 0, "b") });       // 0.5 m deep
+        Assert.Single(deep); Assert.Equal("error", deep[0].Severity); Assert.Equal("ghost", deep[0].Origin);
+    }
+    [Fact] public void ARoundingErrorIsNotReported() => Assert.Empty(PlanChecks.Overlaps(new[] { At(Slab("a", 1, 1, 1, 0), 0, 0, 0, "a"), At(Slab("b", 1, 1, 1, 0), 1.97, 0, 0, "b") }));
+
+    [Theory]
+    [InlineData("Wood", 1.667)] [InlineData("HardWood", 1.5)] [InlineData("Iron", 1.182)] [InlineData("Ashstone", 3.0)] [InlineData("Stone", 1.333)] [InlineData("Marble", 1.333)]
+    public void TheWeakRatioIsWhatOneMoreModuleNeeds(string material, double ratio) => Assert.Equal(ratio, Material.Of(material).WeakRatio, 2);
+
+    [Fact] public void ARockUnderAPieceGivesItFullSupport()
+    {
+        var post = new PieceGeo { Prefab = "post", Material = "Wood", Supports = true, Colliders = { new ColliderBox { Centre = new V3(0, 1, 0), Half = new V3(0.2, 1, 0.2), Layer = "piece" } } };
+        var rock = new PieceGeo { Prefab = "rock", Colliders = { new ColliderBox { Centre = new V3(0, 0, 0), Half = new V3(1, 0.5, 1), Layer = "static_solid" } } };      // no WearNTear
+        var p = At(post, 0, 4, 0, "p"); var r = At(rock, 0, 3.5, 0, "r");        // the post stands on a rock four metres up, away from the ground
+        var res = SupportModel.Run(new[] { p, r }, (x, z) => 0.0, null);
+        Assert.True(res[p].Grounded); Assert.Equal(100, res[p].Support, 6);
+    }
+    [Fact] public void AColliderOnANonSupportLayerCarriesNothing()
+    {
+        var post = new PieceGeo { Prefab = "post", Material = "Wood", Supports = true, Colliders = { new ColliderBox { Centre = new V3(0, 1, 0), Half = new V3(0.2, 1, 0.2), Layer = "piece" } } };
+        var sapling = new PieceGeo { Prefab = "sapling", Colliders = { new ColliderBox { Centre = new V3(0, 0, 0), Half = new V3(1, 0.5, 1), Layer = "piece_nonsolid" } } };
+        var p = At(post, 0, 4, 0, "p");
+        Assert.False(SupportModel.Run(new[] { p, At(sapling, 0, 3.5, 0, "s") }, (x, z) => 0.0, null)[p].Grounded);
+    }
+
+    [Fact] public void AFireWithABeamHalfAMetreAboveItIsBlocked()
+    {
+        var fire = Slab("brazier", 0.3, 0.3, 0.3, 0.3, g => { g.IsFireplace = true; g.CoverCheckOffset = 0.5; });
+        var beam = Slab("beam", 1, 0.1, 0.1, 0, null);
+        var blocked = PlanChecks.FireBlocked(new[] { At(fire, 0, 0, 0, "f"), At(beam, 0, 0.9, 0, "b") }, null);        // beam bottom 0.8 m: inside the 0.5 m ray that starts at 0.5
+        Assert.Single(blocked); Assert.Equal("hard", blocked[0].Origin); Assert.Equal("error", blocked[0].Severity);
+        Assert.Empty(PlanChecks.FireBlocked(new[] { At(fire, 0, 0, 0, "f"), At(beam, 0, 1.6, 0, "b") }, null));        // beam bottom 1.5: out of reach
+    }
+    [Fact] public void AFireUnderTheTerrainIsBlocked() => Assert.Single(PlanChecks.FireBlocked(new[] { At(Slab("fire", 0.3, 0.3, 0.3, 0.3, g => g.IsFireplace = true), 0, 0, 0, "f") }, (x, z) => 0.5));
+    [Fact] public void AFireWithTheCoverCheckOffIsNeverBlocked() => Assert.Empty(PlanChecks.FireBlocked(new[] { At(Slab("fire", 0.3, 0.3, 0.3, 0.3, g => { g.IsFireplace = true; g.DisableCoverCheck = true; }), 0, 0, 0, "f") }, (x, z) => 5));
+    [Fact] public void ARayThatStartsInsideABoxDoesNotHitIt() => Assert.False(Obb.Make(new V3(0, 0, 0), new V3(1, 1, 1), Quat.Identity).RayHits(new V3(0, 0, 0), new V3(0, 1, 0), 5));
+
+    [Fact] public void ACauldronOnAHearthIsNotInTheHearthsWay()
+    {
+        var hearth = Slab("hearth", 1, 0.3, 1, 0.3, g => { g.IsFire = true; g.IsFireplace = true; });
+        var cauldron = Slab("cauldron", 0.5, 0.4, 0.5, 0.4, g => { g.IsStation = true; });
+        var res = PlanChecks.FireClearance(new[] { At(hearth, 0, 0, 0, "h"), At(cauldron, 0, 0.6, 0, "c") });      // the cauldron stands on the hearth's top
+        Assert.Empty(res);
+        Assert.Single(PlanChecks.FireClearance(new[] { At(hearth, 0, 0, 0, "h"), At(cauldron, 1.7, 0, 0, "c") }));  // beside it, 0.2 m apart: a warning
+        Assert.All(PlanChecks.FireClearance(new[] { At(hearth, 0, 0, 0, "h"), At(cauldron, 1.7, 0, 0, "c") }), p => Assert.Equal("warning", p.Severity));
+    }
+
+    static PieceGeo Station(string name) => Slab(name, 0.5, 0.5, 0.5, 0.5, g => { g.ProvidesStation = "$piece_workbench"; g.StationRangeBuild = 20; g.StationExtraRange = 4; });
+    static PieceGeo Extension(double max = 5, double space = 2) => Slab("ext", 0.3, 0.3, 0.3, 0.3, g => { g.ExtensionOf = "$piece_workbench"; g.ExtensionMaxDistance = max; g.ExtensionSpace = space; });
+
+    [Fact] public void AnExtensionWithoutAStationInRangeDoesNothing()
+    {
+        var far = PlanChecks.Extensions(new[] { At(Station("wb"), 0, 0, 0, "s"), At(Extension(), 6, 0, 0, "e") });
+        Assert.Single(far); Assert.Equal("extension-no-station", far[0].Rule); Assert.Equal("error", far[0].Severity);
+        Assert.Empty(PlanChecks.Extensions(new[] { At(Station("wb"), 0, 0, 0, "s"), At(Extension(), 4, 0, 0, "e") }));
+    }
+    [Fact] public void TwoExtensionsTooCloseAreReportedOnce()
+    {
+        var res = PlanChecks.Extensions(new[] { At(Station("wb"), 0, 0, 0, "s"), At(Extension(), 3, 0, 0, "e1"), At(Extension(), 3.5, 0, 0, "e2") });
+        Assert.Single(res, p => p.Rule == "extension-spacing");
+    }
+    [Fact] public void TheBuildRangeGrowsWithLinkedExtensionsMeasuredFlat()
+    {
+        var s = At(Station("wb"), 0, 0, 0, "s");
+        var e1 = At(Extension(), 3, 0, 0, "e1"); var e2 = At(Extension(), 0, 0, 3, "e2");            // same prefab name "ext": one counts unless it stacks
+        Assert.Equal(24, PlanChecks.StationBuildRange(s, new[] { s, e1, e2 }), 6);
+        var stack = Slab("ext", 0.3, 0.3, 0.3, 0.3, g => { g.ExtensionOf = "$piece_workbench"; g.ExtensionMaxDistance = 5; g.ExtensionStack = true; });
+        Assert.Equal(28, PlanChecks.StationBuildRange(s, new[] { s, At(stack, 3, 0, 0, "a"), At(stack, 0, 0, 3, "b") }), 6);
+    }
+    [Fact] public void APieceThatNeedsAStationNeedsOneNearEnoughToStandBetween()
+    {
+        var bench = Slab("bench_piece", 1, 0.5, 1, 0.5, g => g.StationName = "$piece_workbench");
+        Assert.Single(PlanChecks.StationsNeeded(new[] { At(bench, 0, 0, 0, "p") }));                  // no station in the plan
+        Assert.Empty(PlanChecks.StationsNeeded(new[] { At(Station("wb"), 25, 0, 0, "s"), At(bench, 0, 0, 0, "p") }));      // 25 m: build range 20 plus the 8 m the builder can stand away
+        Assert.Single(PlanChecks.StationsNeeded(new[] { At(Station("wb"), 40, 0, 0, "s"), At(bench, 0, 0, 0, "p") }));
+    }
+
+    [Fact] public void AKilnOnAWoodFloorIsRefused()
+    {
+        var floor = new PieceGeo { Prefab = "wood_floor", Material = "Wood", Supports = true, Colliders = { new ColliderBox { Centre = new V3(0, 0.1, 0), Half = new V3(1, 0.1, 1), Layer = "piece" } } };
+        var kiln = Slab("charcoal_kiln", 0.5, 0.5, 0.5, 0.5, g => g.NotOnWood = true);
+        Assert.Single(PlanChecks.NotOnWood(new[] { At(floor, 0, 0, 0, "f"), At(kiln, 0, 0.2, 0, "k") }));
+        Assert.Empty(PlanChecks.NotOnWood(new[] { At(floor, 0, 0, 0, "f"), At(kiln, 0, 3, 0, "k") }));
+    }
+
+    [Fact] public void ALocationWhosePrefabAllowsBuildingNeverBlocks() => Assert.False(LocationRules.NoBuildHere(new LocationRules.Facts { Known = true, NoBuild = false, Exterior = 50 }, 10));
+    [Fact] public void ALocationUsesItsExteriorRadiusUnlessItHasAnInterior()
+    {
+        var plain = new LocationRules.Facts { Known = true, NoBuild = true, Exterior = 30, Interior = 80 };
+        Assert.False(LocationRules.NoBuildHere(plain, 50));                      // interior radius is ignored without m_hasInterior
+        plain.HasInterior = true; Assert.True(LocationRules.NoBuildHere(plain, 50));
+    }
+    [Fact] public void AnUnreadablePrefabIsAssumedToBlockInsideItsLargerRadius()
+    {
+        var f = new LocationRules.Facts { Known = false, Exterior = 30, Interior = 80 };
+        Assert.True(LocationRules.NoBuildHere(f, 60)); Assert.False(LocationRules.NoBuildHere(f, 90));
+    }
+}
+
+public class SleepRulesTests
+{
+    [Fact] public void ExposureNeedsARoofAndEightyPercentCover() { Assert.True(SleepRules.Exposure(0.8, true)); Assert.False(SleepRules.Exposure(0.79, true)); Assert.False(SleepRules.Exposure(1.0, false)); }
+    [Fact] public void TheGamesMessageOfTheFirstFailingRuleComesInTheGamesOrder()
+    {
+        Assert.Equal("$msg_cantsleep", SleepRules.FirstFailure(false, true, false, false, true));
+        Assert.Equal("$msg_bedenemiesnearby", SleepRules.FirstFailure(true, true, false, false, true));
+        Assert.Equal("$msg_bedneedroof", SleepRules.FirstFailure(true, false, false, false, true));
+        Assert.Equal("$msg_bednofire", SleepRules.FirstFailure(true, false, true, false, true));
+        Assert.Equal("$msg_bedwet", SleepRules.FirstFailure(true, false, true, true, true));
+        Assert.Null(SleepRules.FirstFailure(true, false, true, true, false));
     }
 }

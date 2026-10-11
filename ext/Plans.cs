@@ -368,7 +368,7 @@ namespace HubnerExt
                         }
                         // spawn
                         if (!forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
-                        var locHere = Neighbours.LocationAt(pos); if (locHere != null) { noBuildAdvice++; if (exNoBuild.Count < maxEx) exNoBuild.Add(prefab + " " + U.V(pos) + " in " + locHere); }
+                        var locHere = Neighbours.LocationNoBuildAt(pos); if (locHere != null) { noBuildAdvice++; if (exNoBuild.Count < maxEx) exNoBuild.Add(prefab + " " + U.V(pos) + " in " + locHere); }
                         if (dry && ZNetScene.instance != null && ZNetScene.instance.GetPrefab(prefab) == null) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": unknown prefab"); continue; }      // a dry run reports what the real run would
                         spawned++; if (exSpawn.Count < maxEx) exSpawn.Add(prefab + " " + U.V(pos));
                         if (dry) continue;

@@ -71,6 +71,39 @@ namespace HubnerExt
         }
 
         public static double MaxRadius(bool hasInterior, double exterior, double interior) { return hasInterior ? Math.Max(exterior, interior) : exterior; }
+
+        /// <summary>The numbers of a Location prefab that decide whether building is refused. Known = they were read from the prefab's Location component.</summary>
+        public struct Facts
+        {
+            public bool Known, NoBuild, HasInterior;
+            public double Exterior, Interior, Override;
+        }
+
+        /// <summary>Location.IsInsideNoBuildLocation for one location: m_noBuild and DistanceXZ under the override radius (when above 0) or GetMaxRadius (the exterior radius, the larger of both only with an interior). A location whose prefab could not be read is assumed to forbid building within its larger radius (advice, not a fact).</summary>
+        public static bool NoBuildHere(Facts f, double distanceXZ)
+        {
+            if (!f.Known) return distanceXZ < Math.Max(f.Exterior, f.Interior);
+            return NoBuildInside(distanceXZ, MaxRadius(f.HasInterior, f.Exterior, f.Interior), f.Override, f.NoBuild);
+        }
+    }
+
+    /// <summary>The rules of Bed.Interact (decompiled). Claiming an unowned bed needs only the exposure check; sleeping in the current bed also needs the time, no enemy sensed, a Heat area at the bed and no Wet status, in that order.</summary>
+    internal static class SleepRules
+    {
+        public const double CoverMin = 0.8;
+
+        public static bool Exposure(double cover, bool underRoof) { return underRoof && cover >= CoverMin; }
+
+        /// <summary>The message token of the first rule that stops sleeping, in the game's order; null when nothing does.</summary>
+        public static string FirstFailure(bool timeOk, bool enemySensed, bool exposureOk, bool heatOk, bool wet)
+        {
+            if (!timeOk) return "$msg_cantsleep";
+            if (enemySensed) return "$msg_bedenemiesnearby";
+            if (!exposureOk) return "$msg_bedneedroof";
+            if (!heatOk) return "$msg_bednofire";
+            if (wet) return "$msg_bedwet";
+            return null;
+        }
     }
 
     /// <summary>The rows of the ownership summary.</summary>
