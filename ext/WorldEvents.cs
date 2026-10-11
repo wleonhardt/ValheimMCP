@@ -79,7 +79,7 @@ namespace HubnerExt
                 {
                     if (!SeenTombstones.Add(z.m_uid)) continue;
                     var p = z.GetPosition();
-                    Log.Add(now, "player_died", "{\"owner\":" + U.S(z.GetString("ownerName", "")) + ",\"pos\":" + U.V(p) + ",\"tombstone\":" + U.S(U.Id(z)) + "}");
+                    Log.Add(now, "player_died", "{\"owner\":" + U.S(ChatRules.ForReading(z.GetString("ownerName", ""), 40)) + ",\"pos\":" + U.V(p) + ",\"tombstone\":" + U.S(U.Id(z)) + "}");
                     continue;
                 }
                 if (_pieceH == null || !_pieceH.Contains(h)) continue;
@@ -103,7 +103,7 @@ namespace HubnerExt
             string who = "a session that has left";
             if (ZDOMan.instance != null && e.Session == ZDOMan.GetSessionID()) who = "the server's own tools";
             else if (ZNet.instance != null)
-                foreach (var p in ZNet.instance.GetPeers()) if (p.m_uid == e.Session) { who = "player " + (p.m_playerName ?? "?"); break; }
+                foreach (var p in ZNet.instance.GetPeers()) if (p.m_uid == e.Session) { who = "player " + ChatRules.ForReading(p.m_playerName ?? "?", 40); break; }
             Log.Add(now, "structure_appeared", "{\"centre\":[" + U.N(Math.Round(e.CentreX, 1)) + "," + U.N(Math.Round(e.CentreZ, 1)) + "],\"box\":[" + U.N(Math.Round(e.MinX, 1)) + "," + U.N(Math.Round(e.MinZ, 1)) + "," + U.N(Math.Round(e.MaxX, 1)) + "," + U.N(Math.Round(e.MaxZ, 1)) + "],\"pieces\":" + e.Count +
                 ",\"top\":[" + string.Join(",", e.Top.Select(kv => "{\"prefab\":" + U.S(kv.Key) + ",\"count\":" + kv.Value + "}").ToArray()) + "],\"spawnedAtOnce\":" + (e.SpawnedAtOnce ? "true" : "false") + ",\"by\":" + U.S(who) + ",\"session\":" + e.Session.ToString(CultureInfo.InvariantCulture) + "}");
         }
@@ -111,7 +111,7 @@ namespace HubnerExt
         static void Peers(float now)
         {
             if (ZNet.instance == null) return;
-            var names = new HashSet<string>(ZNet.instance.GetPeers().Select(p => p.m_playerName ?? "?"));
+            var names = new HashSet<string>(ZNet.instance.GetPeers().Where(p => p.IsReady()).Select(p => ChatRules.ForReading(p.m_playerName ?? "?", 40)));
             if (_peers != null)
             {
                 Presence.Diff(_peers, names, out var arrived, out var left);

@@ -93,6 +93,9 @@ namespace HubnerExt
         private double _lastCheck = double.NaN;
 
         public void Touch(double now) { _lastTouch = now; }
+
+        /// <summary>A new walk starts with no memory of the last check: otherwise the whole idle time between walks would count as time the human drove.</summary>
+        public void Reset() { _lastCheck = double.NaN; }
         public bool Active(double now) { return now - _lastTouch < ResumeSeconds; }
 
         /// <summary>Call once per walker tick. While the user is active it returns the time since the previous call (to be added to every walker clock), else 0.</summary>

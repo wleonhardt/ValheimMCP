@@ -68,7 +68,12 @@ namespace HubnerExt
                 }
                 if (_walker == null) { _walker = new Walker(); _auto = new AutoJoin(); }
             }
-            catch (Exception ex) { LastError = ex.GetType().Name + ": " + ex.Message; }
+            catch (Exception ex)
+            {
+                LastError = ex.GetType().Name + ": " + ex.Message;
+                try { if (_h != null) _h.UnpatchSelf(); } catch (Exception ux) { U.Once("Control.Install.unpatch", ux); }
+                _h = null; _walker = null;                                    // all or nothing: a half-patched controller would start walks that nothing moves
+            }
         }
         internal static string LastError = "";
         internal static bool Healthy(out string detail)
@@ -144,6 +149,7 @@ namespace HubnerExt
                 list.Add(v);
             }
             if (list.Count == 0) return ToolOutput.Err("no valid points");
+            var goalHasY = !float.IsNaN(list[list.Count - 1].y);                     // whether the caller gave the goal a height: a navmesh route has a y everywhere, which must not turn into 'the caller asked for this storey'
             if (McpJson.GetBool(a, "nav", false))                                   // replace the straight legs by the game's own navmesh route
             {
                 var nav = new List<Vector3>(); var cur = Player.m_localPlayer.transform.position;
@@ -157,7 +163,7 @@ namespace HubnerExt
             }
             try { if (U.IsSandbox(Player.m_localPlayer)) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
             try { if (FDebugFly != null) FDebugFly.SetValue(Player.m_localPlayer, false); } catch (Exception ex) { U.Once("m_debugFly.set", ex); }
-            _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
+            _walker.GoalHasY = goalHasY; _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
         }
 
@@ -291,15 +297,15 @@ namespace HubnerExt
             // doors
             int _doorPresses, _doorOpens; string _lockedDoor = "";
             readonly Dictionary<int, float> _pressedAt = new Dictionary<int, float>(); readonly Dictionary<int, float> _pending = new Dictionary<int, float>(); float _nextDoorLook;
-            float _yielded;
-            public float ArriveHeight = WalkFacts.StandReach; float _wrongStoreySince = -1f;
+            float _yielded, _stallSecs = WalkFacts.StallSeconds;
+            public float ArriveHeight = WalkFacts.StandReach; public bool GoalHasY = true; float _wrongStoreySince = -1f;
 
             public void Start(List<Vector3> pts, bool run, float timeout, float arrive, float stuck, bool doors)
             {
                 _pts = pts; _i = 0; _userRun = run; Run = run; _timeout = timeout; _arrive = arrive; _stuckSecs = stuck; _doors = doors;
                 _t0 = Time.time; _result = "walking"; _blocker = ""; _doorPresses = 0; _doorOpens = 0; _lockedDoor = ""; _trace.Clear(); _nextTrace = 0f;
                 _stallsTotal = 0; _spotStalls = 0; _sideSteps = 0; _reroutes = 0; _lastStall = ""; _strafeUntil = 0; _restUntil = 0; _runUntil = 0; _yielded = 0;
-                _pressedAt.Clear(); _pending.Clear(); _wrongStoreySince = -1f;
+                _pressedAt.Clear(); _pending.Clear(); _wrongStoreySince = -1f; User.Reset(); _stallSecs = Mathf.Max(1f, _stuckSecs / 2f);
                 var p = Player.m_localPlayer; _lastProg = p.transform.position; _prevPos = _lastProg; _spotPos = _lastProg; _lastProgT = Time.time; _lastTick = Time.time; Active = true;
                 BuildLine(_lastProg);
             }
@@ -350,7 +356,7 @@ namespace HubnerExt
                 var tgt = _pts[_i];
                 var flat = new Vector3(tgt.x - pos.x, 0f, tgt.z - pos.z);
                 var last = _i >= _pts.Count - 1;
-                var arrival = Pursuit.Arrival(flat.magnitude, last ? tgt.y - pos.y : double.NaN, _arrive, ArriveHeight);          // the height of the goal counts only at the end, and only when the caller gave a y
+                var arrival = Pursuit.Arrival(flat.magnitude, last && GoalHasY ? tgt.y - pos.y : double.NaN, _arrive, ArriveHeight);          // the height of the goal counts only at the end, and only when the caller gave a y
                 if (arrival == ArriveState.WrongStorey)
                 {
                     MoveDir = Vector3.zero;
@@ -386,8 +392,8 @@ namespace HubnerExt
 
                 // progress = the route ahead shrank AND the feet moved; a body pressing a wall (or sliding down a bank) has neither
                 var remain = Remaining();
-                if (StallLadder.Progressed(_lastRemain - remain, (pos - _lastProg).magnitude)) { _lastProg = pos; _lastProgT = now; _lastRemain = remain; }
-                else if (now - _lastProgT > WalkFacts.StallSeconds && now >= _restUntil) OnStall(p, pos, dir, now, stam, slope, goesUp);
+                if (StallLadder.Progressed(_lastRemain - remain, (pos - _lastProg).magnitude)) { _lastProg = pos; _lastProgT = now; _lastRemain = remain; if ((pos - _spotPos).magnitude > 10f) { _stallsTotal = 0; _spotStalls = 0; } }          // real progress away from where it stalled: the earlier stalls were cleared
+                else if (now - _lastProgT > _stallSecs && now >= _restUntil) OnStall(p, pos, dir, now, stam, slope, goesUp);
             }
 
             bool RouteGoesUp(Vector3 pos, Vector3 ahead)
@@ -493,7 +499,7 @@ namespace HubnerExt
                         var dp = d.transform.position;
                         var wardDenies = d.m_checkGuardStone && !PrivateArea.CheckAccess(dp, 0f, false);
                         var needsKey = d.m_keyItem != null; var haveKey = !needsKey || p.GetInventory().HaveItem(d.m_keyItem.m_itemData.m_shared.m_name);
-                        var locked = DoorRules.Locked(wardDenies, needsKey, haveKey);
+                        var locked = DoorRules.Locked(wardDenies, needsKey, haveKey) || (needsKey && d.m_consumeKey);          // a door that eats its key is never opened by a walk
                         var rest = CanInteractM == null || (bool)CanInteractM.Invoke(d, null);
                         var id = d.GetInstanceID(); float last; var since = _pressedAt.TryGetValue(id, out last) ? now - last : 999f;
                         var decision = DoorRules.Decide(locked, rest, DoorRules.OnLineAhead(pos.x, pos.z, dir.x, dir.z, dp.x, dp.z), z.GetInt("state", 0) != 0, since);

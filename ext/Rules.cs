@@ -338,6 +338,16 @@ namespace HubnerExt
             return c < 0x20 || (c >= 0x7F && c <= 0x9F) || (c >= 0x200B && c <= 0x200F) || (c >= 0x2028 && c <= 0x202E) || (c >= 0x2060 && c <= 0x2064) || c == 0xFEFF || c == 0x00AD;
         }
 
+        /// <summary>
+        ///     A code point that shows nothing but a reader of the raw text still sees: any format, control, private-use or unassigned character (this takes in the Unicode Tag block U+E0000..E007F that can
+        ///     spell a whole instruction invisibly, and the bidi isolates), the variation selectors and the fillers that render as blanks.
+        /// </summary>
+        public static bool InvisibleCodePoint(int cp, System.Globalization.UnicodeCategory cat)
+        {
+            if (cat == System.Globalization.UnicodeCategory.Format || cat == System.Globalization.UnicodeCategory.Control || cat == System.Globalization.UnicodeCategory.PrivateUse || cat == System.Globalization.UnicodeCategory.OtherNotAssigned) return true;
+            return cp == 0x034F || cp == 0x061C || cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0 || (cp >= 0x180B && cp <= 0x180E) || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF);
+        }
+
         /// <summary>The text a person would read: compatibility-normalised, no invisible characters, no markup tags, no links, no leading console prefix, one line, at most maxLen characters.</summary>
         public static string Clean(string text, int maxLen) { return Clean(text, maxLen, true); }
 
@@ -345,9 +355,22 @@ namespace HubnerExt
         {
             var s = text ?? "";
             try { s = s.Normalize(System.Text.NormalizationForm.FormKC); } catch (ArgumentException) { /* allow: text with lone surrogates cannot be normalised; it is used as it is */ }
+            if (s.Length > 4000) s = s.Substring(0, char.IsHighSurrogate(s[3999]) ? 3999 : 4000);          // nothing past this is read: do not spend regexes on a megabyte
             var sb = new System.Text.StringBuilder(s.Length);
-            foreach (var c in s) sb.Append(c == '\n' || c == '\r' || c == '\t' ? ' ' : (Invisible(c) ? '\0' : c));
-            s = sb.ToString().Replace("\0", "");
+            for (var i = 0; i < s.Length; i++)
+            {
+                var c = s[i];
+                if (c == '\n' || c == '\r' || c == '\t') { sb.Append(' '); continue; }
+                if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+                {
+                    var cp = char.ConvertToUtf32(c, s[i + 1]);
+                    if (!InvisibleCodePoint(cp, System.Globalization.CharUnicodeInfo.GetUnicodeCategory(s, i))) { sb.Append(c); sb.Append(s[i + 1]); }
+                    i++; continue;
+                }
+                if (char.IsSurrogate(c)) continue;                                                    // a lone surrogate is not text
+                if (!Invisible(c) && !InvisibleCodePoint(c, System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c))) sb.Append(c);
+            }
+            s = sb.ToString();
             try { s = Tags.Replace(s, ""); s = Urls.Replace(s, ""); } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { s = ""; /* allow: a line that makes the cleaner time out is dropped, which is the safe answer */ }
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
             while (stripPrefix && s.Length > 0 && "/\\!#".IndexOf(s[0]) >= 0) s = s.Substring(1).TrimStart();      // a leading / \ ! # would make the game (or a bot) treat the line as a command
@@ -434,14 +457,25 @@ namespace HubnerExt
             var s = Clean(text ?? "", 300, false);
             try { if (Manipulation.IsMatch(s)) return "the line repeats a manipulation phrase"; } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return "the line stalls the matcher"; /* allow: the refusal is the answer */ }
             if (!listenerTrusted && Coordinates.IsMatch(s)) return "the line gives a position to someone who is not trusted";
-            var mine = Words(s);
-            if (untrustedLines != null) foreach (var u in untrustedLines) if (SharesRun(mine, Words(Clean(u, 300, false)), 4)) return "the line repeats part of an untrusted line";
+            var mine = Words(s); var mineNorm = Norm(s);
+            if (untrustedLines != null) foreach (var u in untrustedLines)
+            {
+                if (SharesRun(mine, Words(Clean(u, 300, false)), 4) || SharesWindow(mineNorm, Norm(u), 12)) return "the line repeats part of an untrusted line";          // words for spaced languages, a character window for the rest
+            }
             return null;
         }
 
-        private static readonly System.Text.RegularExpressions.Regex Coordinates = new System.Text.RegularExpressions.Regex(@"-?\d{2,5}(?:\.\d+)?\s*[,;]\s*-?\d{2,5}(?:\.\d+)?|-?\d{3,5}(?:\.\d+)?\s+-?\d{3,5}(?:\.\d+)?", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+        // A position, however it is written: any number of three digits or more (a coordinate is hundreds or thousands), x= / z= labels, or two numbers split by a comma, semicolon or slash.
+        private static readonly System.Text.RegularExpressions.Regex Coordinates = new System.Text.RegularExpressions.Regex(@"\d{3,}|\b[xyz]\s*[=:]\s*-?\d|-?\d{2}\s*[,;/]\s*-?\d{2}", System.Text.RegularExpressions.RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
 
         private static string[] Words(string s) { return System.Text.RegularExpressions.Regex.Split(s.ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(w => w.Length > 0).ToArray(); }
+
+        private static bool SharesWindow(string a, string b, int len)
+        {
+            if (a.Length < len || b.Length < len) return false;
+            for (var i = 0; i + len <= a.Length; i++) if (b.IndexOf(a.Substring(i, len), StringComparison.Ordinal) >= 0) return true;
+            return false;
+        }
 
         private static bool SharesRun(string[] a, string[] b, int run)
         {
@@ -461,6 +495,20 @@ namespace HubnerExt
         private static int CountDigits(string s) { var n = 0; foreach (var c in s) if (char.IsDigit(c)) n++; return n; }
         private static int Letters(string s) { var n = 0; foreach (var c in s) if (char.IsLetter(c)) n++; return n; }
 
+        private static readonly System.Text.RegularExpressions.Regex IdShape = new System.Text.RegularExpressions.Regex(@"^[A-Za-z]{2,16}_[A-Za-z0-9]{1,40}$", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(50));
+
+        /// <summary>A platform id as the game writes it (Steam_7656..., PlayFab_...). The payload of a chat message is text a client chose: anything else is dropped, so it can neither carry instructions to a reader nor flood it.</summary>
+        public static string CleanId(string id) { try { return id != null && IdShape.IsMatch(id) ? id : ""; } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return ""; /* allow: unmatched is the safe answer */ } }
+
+        /// <summary>Does the id a chat payload claims belong to the connection it arrived on? The host name of a Steam connection is the bare Steam id; the payload has the platform prefix.</summary>
+        public static bool IdMatches(string payloadId, string hostName)
+        {
+            if (string.IsNullOrEmpty(payloadId) || string.IsNullOrEmpty(hostName)) return false;
+            var tail = payloadId.IndexOf('_') >= 0 ? payloadId.Substring(payloadId.IndexOf('_') + 1) : payloadId;
+            var host = hostName.IndexOf('_') >= 0 ? hostName.Substring(hostName.LastIndexOf('_') + 1) : hostName;
+            return string.Equals(tail, host, StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Trust by platform id, never by name: a name can be copied, an id cannot. "trusted" = an id on the list. "name_only" = only the name is on the list and exactly one player online carries it; that is a hint, not trust.</summary>
         public static string Trust(string name, string platformId, ICollection<string> trusted, int playersWithThatName)
         {
@@ -475,7 +523,9 @@ namespace HubnerExt
     internal sealed class ChatLimiter
     {
         public double GlobalGap = 6, SpeakerGap = 15, RepeatWindow = 300, BudgetWindow = 600;
-        public int SpeakerBudget = 6;                       // lines to one speaker per BudgetWindow: two bots answering each other stop here
+        public int SpeakerBudget = 6, GlobalBudget = 20;          // GlobalBudget: lines per BudgetWindow whoever they are for, so a varying or missing 'to' cannot get round the speaker budget
+        private readonly List<double> _all = new List<double>();
+        static string Key(string speaker) { return speaker == null ? null : ChatRules.Clean(speaker, 40).ToLowerInvariant(); }                       // lines to one speaker per BudgetWindow: two bots answering each other stop here
         private readonly Dictionary<string, List<double>> _budget = new Dictionary<string, List<double>>();
         private double _lastAny = double.NegativeInfinity;
         private readonly Dictionary<string, double> _lastBy = new Dictionary<string, double>();
@@ -485,6 +535,9 @@ namespace HubnerExt
         public string Check(double now, string speaker, string text)
         {
             if (now - _lastAny < GlobalGap) return "too soon after the last line (" + GlobalGap + " s between lines)";
+            speaker = Key(speaker);
+            _all.RemoveAll(u => now - u > BudgetWindow);
+            if (_all.Count >= GlobalBudget) return "already " + _all.Count + " lines in " + BudgetWindow + " s; let the chat be";
             double t;
             if (speaker != null && _lastBy.TryGetValue(speaker, out t) && now - t < SpeakerGap) return "too soon after the last line to " + speaker + " (" + SpeakerGap + " s)";
             if (_seen.TryGetValue(text, out t) && now - t < RepeatWindow) return "the same line was sent less than " + RepeatWindow + " s ago";
@@ -495,7 +548,7 @@ namespace HubnerExt
                 if (used.Count >= SpeakerBudget) return "already " + used.Count + " lines to " + speaker + " in " + BudgetWindow + " s; let them be (two bots can answer each other for ever)";
                 used.Add(now);
             }
-            _lastAny = now; if (speaker != null) _lastBy[speaker] = now; _seen[text] = now;
+            _lastAny = now; _all.Add(now); if (speaker != null) _lastBy[speaker] = now; _seen[text] = now;
             if (_seen.Count > 200) foreach (var k in _seen.Where(kv => now - kv.Value > RepeatWindow).Select(kv => kv.Key).ToList()) _seen.Remove(k);
             return null;
         }

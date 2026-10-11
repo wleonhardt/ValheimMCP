@@ -166,7 +166,11 @@ namespace HubnerExt
                     int type = inner.ReadInt();
                     var ui = new UserInfo(); ui.Deserialize(ref inner);
                     string text = inner.ReadString();
-                    AddChat(((Talker.Type)type).ToString(), UiName(ui), text, UiId(ui));
+                    // The id in the payload was written by the sender's client, the server relays it untouched: a modified client could claim a trusted player's id. The id of the CONNECTION the message came in on is the real one.
+                    var claimed = UiId(ui); string hint = null; string connection = null;
+                    try { var rpc = __0 as ZRpc; if (rpc != null && ZNet.instance != null) foreach (var peer in ZNet.instance.GetPeers()) if (peer.m_rpc == rpc && peer.m_socket != null) { connection = peer.m_socket.GetHostName(); break; } } catch (Exception ex) { U.Once("RelayedChat2.peer", ex); }
+                    if (connection != null && !ChatRules.IdMatches(claimed, connection)) { hint = "id_mismatch"; claimed = ""; }
+                    AddChat(((Talker.Type)type).ToString(), UiName(ui), text, claimed, hint);
                 }
                 finally { pkg.SetPos(pos); }
             }
@@ -190,6 +194,14 @@ namespace HubnerExt
         /// <summary>Was the last line from this player name trusted (by platform id)? Unknown names are not.</summary>
         internal static bool IsTrusted(string name) { lock (ChatRows) { string t; return name != null && TrustByName.TryGetValue(name, out t) && t == "trusted"; } }
 
+        /// <summary>The canonical name of an online player (case and edge spaces ignored), or null.</summary>
+        internal static string OnlineName(string name)
+        {
+            var want = ChatRules.Clean(name ?? "", 40);
+            foreach (var n in OnlineNames()) if (string.Equals(ChatRules.Clean(n ?? "", 40), want, StringComparison.OrdinalIgnoreCase)) return n;
+            return null;
+        }
+
         static List<string> OnlineNames()
         {
             var l = new List<string>();
@@ -197,16 +209,24 @@ namespace HubnerExt
             return l;
         }
 
-        static void AddChat(string type, string name, string text, string id = "")
+        static readonly Dictionary<string, double> RecentCopies = new Dictionary<string, double>();
+
+        static void AddChat(string type, string name, string text, string id = "", string extraHint = null)
         {
             if (type == "Whisper" && !Cfg.Bool("hubner.captureWhispers", false)) return;       // private by default: a whisper is not meant for whoever drives this tool
+            var cleanId = ChatRules.CleanId(id); var badId = id != null && id.Length > 0 && cleanId.Length == 0 && extraHint == null; id = cleanId;
             lock (ChatRows)
             {
+                // the server may relay one line once per recipient: the same speaker, type and text within a second is one line
+                var copyKey = (string.IsNullOrEmpty(id) ? name : id) + "|" + type + "|" + ChatRules.Norm(text); double seenAt; var nowT = Time.realtimeSinceStartup;
+                if (RecentCopies.TryGetValue(copyKey, out seenAt) && nowT - seenAt < 1.0) return;
+                RecentCopies[copyKey] = nowT; if (RecentCopies.Count > 200) RecentCopies.Clear();
                 // what people type is data for whoever reads this (often a model): cleaned for reading, tagged with how far to trust the speaker (by platform id, never by name alone) and with hints
                 var now = Time.realtimeSinceStartup; var who = string.IsNullOrEmpty(id) ? name : id;
                 var trust = ChatRules.Trust(name, id, Cfg.List("hubner.trustedPlayers"), CountNamed(name));
                 var hints = ChatRules.Hints(text, Reg.Category.Keys);
                 if (ChatRules.NameLooksOff(name)) hints.Add("name_suspicious");
+                if (extraHint != null) hints.Add(extraHint); if (badId) hints.Add("bad_id");
                 KeyValuePair<double, string> prev;
                 if (LastLine.TryGetValue(who ?? "", out prev) && now - prev.Key <= 2.0) hints.AddRange(ChatRules.AcrossLines(prev.Value, text));
                 LastLine[who ?? ""] = new KeyValuePair<double, string>(now, text); if (LastLine.Count > 300) LastLine.Clear();
@@ -404,7 +424,7 @@ namespace HubnerExt
             bool showHosts = Cfg.Bool("hubner.exposePeerHosts", false);                  // an IP address or Steam id is personal data about a real player: off unless the operator turns it on
             foreach (var p in ZNet.instance.GetPeers())
             {
-                string name = p.m_playerName ?? ""; bool sb = names.Contains(name); if (sb) sandbox++;
+                string rawName = p.m_playerName ?? ""; bool sb = names.Contains(rawName); if (sb) sandbox++; string name = ChatRules.ForReading(rawName, 40);          // a name is text the player chose: cleaned like chat text
                 string host = ""; if (showHosts) { try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch { } }
                 // the character's own ZDO says more than the peer record: in bed, dead, and where it really is (the peer's reference position can lag a zone behind)
                 ZDO cz = null; try { cz = p.m_characterID != ZDOID.None && ZDOMan.instance != null ? ZDOMan.instance.GetZDO(p.m_characterID) : null; } catch (Exception ex) { U.Once("players.zdo", ex); }

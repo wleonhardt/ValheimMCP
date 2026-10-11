@@ -845,3 +845,14 @@ public class ToolStatsTests
     [Fact] public void ANastyToolNameCannotBreakTheJson() => Assert.DoesNotContain("\"x", new ValheimMCP.ToolStats().Json() + RecordAndJson("a\"b\\"));
     static string RecordAndJson(string name) { var t = new ValheimMCP.ToolStats(); t.Record(name, 1, ValheimMCP.CallOutcome.Ok); return t.Json(); }
 }
+
+public class WalkerReviewTests
+{
+    [Fact] public void ANewWalkDoesNotCountTheIdleTimeBeforeItAsTimeTheHumanDrove()
+    {
+        var u = new UserOverride(); u.Yielded(10); u.Touch(5000);
+        u.Reset();
+        Assert.Equal(0, u.Yielded(5000.1), 6);                                                    // the first check of a walk has nothing to measure from
+        u.Touch(5000.2); Assert.Equal(0.2, u.Yielded(5000.3), 6);                       // measured from the previous check (5000.1)
+    }
+}

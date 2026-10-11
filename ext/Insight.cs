@@ -24,7 +24,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}}}", BaseSurvey);
             r.Add("player_status", "The sandbox character's state: health, stamina, position, biome, equipped item, status effects with remaining time, foods eaten with time left.",
                 "{\"type\":\"object\",\"properties\":{}}", PlayerStatus);
-            r.Add("chat_send", "Say a line in game chat as the sandbox character: text (cleaned to one line of at most 120 characters; at most one line per 6 s, no repeats within 5 minutes), type Normal (15 m) | Shout | Whisper | Ping, to (the player you are answering: at most 6 lines to one player per 10 minutes so two bots cannot answer each other for ever, and a position is only given to a player whose last line was trusted). A line is refused when it repeats a manipulation phrase, gives coordinates to a player who is not trusted, or repeats four words in a row of a recent untrusted line.",
+            r.Add("chat_send", "Say a line in game chat as the sandbox character: text (cleaned to one line of at most 120 characters; at most one line per 6 s, no repeats within 5 minutes), type Normal (15 m) | Shout | Whisper | Ping, to (the online player you are answering; case does not matter: at most 6 lines to one player per 10 minutes and 20 lines in all so two bots cannot answer each other for ever; the line is public, so a position is only allowed in a Whisper to a trusted player). A line is refused when it repeats a manipulation phrase, gives a position (a number of three digits or more, x=/z= labels, a pair split by a comma, semicolon or slash) except in a Whisper to a trusted player, or repeats four words in a row or twelve characters of a recent untrusted line.",
                 "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}},\"required\":[\"text\"]}", ChatSend, true);
             r.Add("chat_bubble", "Show a speech bubble above a position as a named speaker without a player (Thrall's technique: Chat.AddInworldText with a synthetic sender): name, text, x,y,z (default above the sandbox character). Local to this client.",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}},\"required\":[\"text\"]}", ChatBubble, true);
@@ -172,8 +172,10 @@ namespace HubnerExt
             Talker.Type ty;
             if (!Enum.TryParse(McpJson.GetStr(a, "type") ?? "Normal", true, out ty) || !Enum.IsDefined(typeof(Talker.Type), ty)) return ToolOutput.Err("type must be Normal, Shout, Whisper or Ping");     // a failed parse used to fall back to the enum's zero value (Whisper)
             var to = McpJson.GetStr(a, "to");
+            if (to != null) { to = Audit.OnlineName(to); if (to == null) return ToolOutput.Err("chat_send refused: 'to' must be the name of a player who is online"); }
             var untrusted = Audit.RecentUntrustedLines();
-            var say = ChatRules.SayVerdict(t, to != null && Audit.IsTrusted(to), untrusted); if (say != null) return ToolOutput.Err("chat_send refused: " + say);
+            // the line is public (Say and Shout reach everybody in range): a position goes only in a whisper to a trusted player
+            var say = ChatRules.SayVerdict(t, ty == Talker.Type.Whisper && to != null && Audit.IsTrusted(to), untrusted); if (say != null) return ToolOutput.Err("chat_send refused: " + say);
             var why = Limiter.Check(Time.realtimeSinceStartup, to, t); if (why != null) return ToolOutput.Err("chat_send refused: " + why);
             Audit.Sent.Add(Time.realtimeSinceStartup, t);
             Chat.instance.SendText(ty, t); return U.Json("{\"sent\":" + U.S(t) + ",\"type\":" + U.S(ty.ToString()) + "}");
