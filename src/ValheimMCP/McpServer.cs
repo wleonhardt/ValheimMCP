@@ -43,6 +43,8 @@ namespace ValheimMCP
     /// </summary>
     internal static class McpServer
     {
+        internal static readonly ToolStats Stats = new ToolStats();
+
         public const string ServerName = "valheim-mcp";
         public const string ServerVersion = PluginInfo.Version; // generated from ValheimMCP.csproj
         private const string DefaultProtocol = "2024-11-05";
@@ -165,6 +167,10 @@ namespace ValheimMCP
             sb.Append(',');
             AppendTool(sb, "ext_status",
                 "Loaded extensions with their build (commit, branch, dirty, worktree), how many reloads this process has done (every reload stays in memory), calls dropped because their caller gave up or their extension was reloaded, and main-thread stall reports.",
+                "{\"type\":\"object\",\"properties\":{}}");
+            sb.Append(',');
+            AppendTool(sb, "tool_stats",
+                "Per-tool call statistics since the plugin loaded: calls, errors (refusals and bad arguments), threw and timeouts (ours to look at), calls over 25 ms (a frame hitch) and p50/p95/max handler time on the game thread. Tools with slow calls come first.",
                 "{\"type\":\"object\",\"properties\":{}}");
             sb.Append(',');
             AppendTool(sb, "health",
@@ -304,6 +310,8 @@ namespace ValheimMCP
                 }
                 case "ext_status":
                     return Result(id, ToolText(ExtensionHost.StatusJson(), false));
+                case "tool_stats":
+                    return Result(id, ToolText(Stats.Json(), false));
                 case "wait_for_log":
                     return Result(id, DoWaitForLog(args, null));
                 case "get_log":
@@ -313,7 +321,9 @@ namespace ValheimMCP
                     var tool = Tools.Get(name);
                     if (tool == null) return ErrorResponse(id, -32602, "Unknown tool: " + name);
                     if (tool.Write && !ModConfig.ToolsWrite) return Result(id, ToolText("write tools are disabled (tools.write=false in valheimmcp.yml)", true));
-                    var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, MainThreadDispatcher.OwnerOf(tool.Handler), name, out var outp, out var terr, out var started);
+                    var handlerMs = 0.0;
+                    var ok = MainThreadDispatcher.RunBlocking(() => { var sw = System.Diagnostics.Stopwatch.StartNew(); try { return tool.Handler(args ?? new Dictionary<string, object>()); } finally { handlerMs = sw.Elapsed.TotalMilliseconds; } }, ModConfig.ToolTimeoutMs, MainThreadDispatcher.OwnerOf(tool.Handler), name, out var outp, out var terr, out var started);
+                    Stats.Record(name, handlerMs, !ok ? CallOutcome.Timeout : terr != null ? CallOutcome.Threw : (outp != null && outp.IsError) ? CallOutcome.Error : CallOutcome.Ok);
                     if (!ok)
                         return Result(id, ToolText(started
                             ? "tool " + name + " is still running after " + ModConfig.ToolTimeoutMs + "ms and will finish on its own: check the world before retrying, a retry can apply the write twice"

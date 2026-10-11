@@ -825,3 +825,23 @@ public class WalkerRound2Tests
         Assert.Equal(StallAction.SideStep, StallLadder.Pick(1, 1, float.NaN, 0, false, false, false, 0.9f, false, 0, 0, false));
     }
 }
+
+public class ToolStatsTests
+{
+    [Fact] public void PercentilesAreNearestRank()
+    {
+        var s = Enumerable.Range(1, 100).Select(i => (double)i).ToList();
+        Assert.Equal(50, ValheimMCP.ToolStats.Percentile(s, 0.5)); Assert.Equal(95, ValheimMCP.ToolStats.Percentile(s, 0.95)); Assert.Equal(0, ValheimMCP.ToolStats.Percentile(new List<double>(), 0.5));
+    }
+    [Fact] public void OutcomesAndSlowCallsAreCountedPerTool()
+    {
+        var t = new ValheimMCP.ToolStats();
+        t.Record("plan_apply", 40, ValheimMCP.CallOutcome.Ok); t.Record("plan_apply", 5, ValheimMCP.CallOutcome.Error); t.Record("plan_apply", 7, ValheimMCP.CallOutcome.Threw); t.Record("ping", 1, ValheimMCP.CallOutcome.Ok);
+        var j = t.Json();
+        Assert.Contains("\"tool\":\"plan_apply\",\"calls\":3,\"errors\":1,\"threw\":1,\"timeouts\":0,\"slow\":1", j);
+        Assert.True(j.IndexOf("plan_apply") < j.IndexOf("\"ping\""));                               // the tool with slow calls comes first
+        Assert.Contains("\"maxMs\":40", j);
+    }
+    [Fact] public void ANastyToolNameCannotBreakTheJson() => Assert.DoesNotContain("\"x", new ValheimMCP.ToolStats().Json() + RecordAndJson("a\"b\\"));
+    static string RecordAndJson(string name) { var t = new ValheimMCP.ToolStats(); t.Record(name, 1, ValheimMCP.CallOutcome.Ok); return t.Json(); }
+}

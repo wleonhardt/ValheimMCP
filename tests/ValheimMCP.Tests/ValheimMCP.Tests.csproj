@@ -21,6 +21,7 @@
     <Compile Include="../../src/ValheimMCP/MainWatch.cs" Link="src/MainWatch.cs" />
     <Compile Include="../../src/ValheimMCP/BindCheck.cs" Link="src/BindCheck.cs" />
     <Compile Include="../../src/ValheimMCP/BuildStamp.cs" Link="src/BuildStamp.cs" />
+    <Compile Include="../../src/ValheimMCP/ToolStats.cs" Link="src/ToolStats.cs" />
     <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
     <Compile Include="../../ext/Pure.cs" Link="ext/Pure.cs" />
     <Compile Include="../../ext/WalkRules.cs" Link="ext/WalkRules.cs" />
