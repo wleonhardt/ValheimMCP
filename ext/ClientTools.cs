@@ -420,7 +420,7 @@ namespace HubnerExt
             if (pathLen > 1500f) return ToolOutput.Err("path is " + U.N(Math.Round(pathLen)) + " m long (max 1500 m per call: it is checked every 0.2 m on the main thread); split it");
             var cur = P[0];
             const float ds = 0.2f;
-            var steps = 0; var maxRise = 0f; var minHead = 99f;
+            var steps = 0; var maxRise = 0f;
             string blocked = null; Vector3 blockAt = Vector3.zero;
             for (var s = 1; s < P.Count && blocked == null; s++)
             {

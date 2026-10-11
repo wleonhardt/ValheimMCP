@@ -1,9 +1,10 @@
-# ValheimMCP config for the dedicated server (CT241). Loopback only; reach it through an SSH tunnel (tunnel-server.sh).
+# ValheimMCP config for the dedicated server. Loopback only; reach it through an SSH tunnel.
 # The server twin has read-only ZDO tools (objects, terraform_map, verify_plan, snapshot, ...); no console commands, no writes.
 server:
-  host: 127.0.0.1
+  host: 127.0.0.1          # a non-loopback host is refused unless token is set
   port: 8731
   commandTimeoutMs: 15000
+  # token: ''              # optional shared secret (Authorization: Bearer <token>); quote it if it contains ' #'
 commands:
   allow:
     - __none__
@@ -19,6 +20,8 @@ tools:
 
 # Hubner extension settings (BepInEx/hubner-ext/HubnerExt.dll)
 hubner:
-  sandboxNames: [Odev, MaRkO, ClaudeEyes]   # character names that count as the sandbox (players tool, restart checks)
+  sandboxNames: [Odev, MaRkO, ClaudeEyes]   # character names that count as the sandbox (the players tool flags them)
+  exposePeerHosts: false                    # true: the players tool returns each peer's IP / Steam id
+  captureWhispers: false                    # true: chat_tail also records whispers
   writeFlagMinutes: 30                      # validity of the ALLOW_SERVER_WRITES flag after it was touched
   jobBudgetMs: 8                            # main-thread time a sliced job (plan_apply) may use per frame: keep small, players share this thread

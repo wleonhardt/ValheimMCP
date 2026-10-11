@@ -1,8 +1,9 @@
-# ValheimMCP config for the sandbox client on Ducky (loopback only; reach it through an SSH tunnel).
+# ValheimMCP config for the sandbox game client (loopback only; reach it through an SSH tunnel from another machine).
 server:
-  host: 127.0.0.1
+  host: 127.0.0.1          # a non-loopback host is refused unless token is set
   port: 8731
   commandTimeoutMs: 15000
+  # token: ''              # optional shared secret (Authorization: Bearer <token>); quote it if it contains ' #'
 render:
   defaultSize: 1024
   minSize: 256
@@ -33,7 +34,7 @@ commands:
     - ban*
     - save
 
-# Hubner extension tools (hubner-mcp/ext): write enables spawn/modify/delete/undo; no terrain-edit tools exist.
+# write enables run_command (console commands) and the extension's spawn/modify/delete/undo/teleport/walk/...; no terrain-edit tools exist.
 tools:
   write: true
   timeoutMs: 30000
@@ -44,6 +45,8 @@ tools:
 
 # Hubner extension settings (BepInEx/hubner-ext/HubnerExt.dll)
 hubner:
-  sandboxNames: [Odev, MaRkO, ClaudeEyes]   # character names that count as the sandbox (players tool, restart checks)
+  sandboxNames: [Odev, MaRkO, ClaudeEyes]   # character names that count as the sandbox: only they get god mode from teleport / walk_to / auto-join
+  exposePeerHosts: false                    # true: the players tool returns each peer's IP / Steam id
+  captureWhispers: false                    # true: chat_tail also records whispers
   writeFlagMinutes: 30                      # server only: validity of the ALLOW_SERVER_WRITES flag after it was touched
   jobBudgetMs: 8                            # main-thread time a sliced job (plan_apply) may use per frame

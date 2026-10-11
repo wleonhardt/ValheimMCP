@@ -1,6 +1,7 @@
 # CI. The plugin itself cannot be compiled on a runner (it needs Iron Gate's and BepInEx's assemblies, which are not redistributable
 # and are not in this repository). What runs here: unit tests of the game-free parts (JSON, YAML, request policy, journal format,
-# plan keys), the Python client compiles, the project files parse, and no machine-specific paths, private addresses or secrets are committed.
+# plan keys, write gate, command policy, protocol negotiation), the Python client's offline tests, the project files parse, and no machine-specific
+# paths, private addresses or secrets are committed.
 name: CI
 
 on:
@@ -27,13 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Python client compiles
-        run: python3 -m compileall -q python
+      - name: Python client compiles and its offline tests pass
+        run: |
+          python3 -m compileall -q python
+          python3 -m unittest discover -s python/tests
 
       - name: Project and config files parse
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils >/dev/null
-          xmllint --noout ValheimMCP.csproj ext/*.csproj tests/ValheimMCP.Tests/*.csproj
+          xmllint --noout ValheimMCP.csproj ext/*.csproj ext/Version.props tests/ValheimMCP.Tests/*.csproj
           python3 - <<'PY'
           import glob, json
           for f in glob.glob("Thunderstore/manifest.json"): json.load(open(f))
@@ -42,7 +45,7 @@ jobs:
       - name: No absolute paths, private addresses or secrets in tracked files
         run: |
           set -u
-          pat='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+/|[A-Z]:[\\/]Users|10\.11\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+          pat='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+/|[A-Z]:[\\/]Users|10\.11\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|CT241|Ducky)'
           if git grep -nIE "$pat" -- . ':!dist' ':!.github/workflows/ci.yml'; then
             echo "machine-specific path, private address or secret found above" >&2; exit 1
           fi
@@ -51,4 +54,7 @@ jobs:
         run: |
           if git ls-files | grep -iE '\.(dll|exe|pdb)$' | grep -v '^dist/'; then
             echo "binaries must not be committed (use dist/ for release zips)" >&2; exit 1
+          fi
+          if git ls-files -s | grep -E '^120000'; then
+            echo "symlinks must not be committed (ext/lib was one, pointing into a home directory)" >&2; exit 1
           fi

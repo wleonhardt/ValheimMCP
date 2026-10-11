@@ -1,49 +1,68 @@
 #!/usr/bin/env bash
-# Build ValheimMCP in Release and assemble a Thunderstore-ready zip in dist/.
+# Build ValheimMCP in Release and assemble the release zips in dist/.
 #
-# Run this locally — compiling requires Valheim's managed assemblies (referenced
-# from your Steam install via the .csproj), which are NOT redistributable and so
-# are not available on a stock CI runner.
+#   dist/ValheimMCP-v<core version>.zip   Thunderstore package: the core plugin (BepInEx/plugins/ValheimMCP/)
+#   dist/HubnerExt-v<ext version>.zip     the Hubner extension: client and server DLLs (BepInEx/hubner-ext/), example configs, Python client
 #
-# The version is read from the .csproj <Version> (the single source of truth) and
-# injected into the packaged manifest.json, so you only ever bump it in one place.
+# Run this locally: compiling needs Valheim's managed assemblies (ext/lib or -p:LibDir via LIBDIR=...), which are NOT redistributable and so are
+# not available on a stock CI runner. The versions are read from the project files (single source of truth): <Version> in ValheimMCP.csproj for the
+# core (also synced into the packaged manifest.json) and in ext/Version.props for the extension.
+# Usage: scripts/package.sh [--core-only]
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
-CSPROJ="ValheimMCP.csproj"
-VERSION="$(grep -oP '<Version>\K[^<]+(?=</Version>)' "${CSPROJ}" | head -1)"
-if [[ -z "${VERSION}" ]]; then
-  echo "error: could not read <Version> from ${CSPROJ}" >&2
+# portable (BSD and GNU): no grep -P
+version_of() { sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$1" | head -1; }
+
+VERSION="$(version_of ValheimMCP.csproj)"
+EXTVERSION="$(version_of ext/Version.props)"
+if [[ -z "${VERSION}" || -z "${EXTVERSION}" ]]; then
+  echo "error: could not read <Version> from ValheimMCP.csproj / ext/Version.props" >&2
   exit 1
 fi
-echo "Packaging ValheimMCP v${VERSION}"
 
-# 1. Build Release and capture the DLL path MSBuild reports (the .csproj uses a
-#    custom OutputPath pointing into your BepInEx plugins dir, so we don't guess it).
-BUILD_LOG="$(dotnet build ${CSPROJ} -c Release)"
-echo "${BUILD_LOG}"
-DLL="$(printf '%s\n' "${BUILD_LOG}" | grep -oP 'ValheimMCP -> \K.*ValheimMCP\.dll' | head -1)"
-if [[ -z "${DLL}" || ! -f "${DLL}" ]]; then
-  echo "error: could not locate built ValheimMCP.dll from the build output" >&2
+DOTNET_ARGS=(-c Release --nologo -v q)
+[[ -n "${LIBDIR:-}" ]] && DOTNET_ARGS+=("-p:LibDir=${LIBDIR}")
+
+echo "Packaging ValheimMCP core v${VERSION}"
+dotnet build ValheimMCP.csproj "${DOTNET_ARGS[@]}"
+DLL="${ROOT}/out/ValheimMCP.dll"
+if [[ ! -f "${DLL}" ]]; then
+  echo "error: ${DLL} was not built" >&2
   exit 1
 fi
-echo "Using DLL: ${DLL}"
 
-# 2. Assemble the Thunderstore package layout in a staging dir.
 STAGE="$(mktemp -d)"
 trap 'rm -rf "${STAGE}"' EXIT
-cp Thunderstore/icon.png README.md CHANGELOG.md LICENSE "${STAGE}/"
-# Sync the manifest's version_number to the .csproj <Version> as we stage it.
-sed -E "s/(\"version_number\"[[:space:]]*:[[:space:]]*\")[^\"]*\"/\1${VERSION}\"/" \
-  Thunderstore/manifest.json > "${STAGE}/manifest.json"
-mkdir -p "${STAGE}/plugins/ValheimMCP"
-cp "${DLL}" "${STAGE}/plugins/ValheimMCP/"
-
-# 3. Zip it.
 mkdir -p dist
+
+# 1. Thunderstore package: core plugin only.
+CORE="${STAGE}/core"
+mkdir -p "${CORE}/plugins/ValheimMCP"
+cp Thunderstore/icon.png README.md CHANGELOG.md LICENSE "${CORE}/"
+sed -E "s/(\"version_number\"[[:space:]]*:[[:space:]]*\")[^\"]*\"/\1${VERSION}\"/" Thunderstore/manifest.json > "${CORE}/manifest.json"
+cp "${DLL}" "${CORE}/plugins/ValheimMCP/"
 OUT="${ROOT}/dist/ValheimMCP-v${VERSION}.zip"
 rm -f "${OUT}"
-( cd "${STAGE}" && zip -r -q "${OUT}" . )
+( cd "${CORE}" && zip -r -q "${OUT}" . )
+echo "Wrote ${OUT}"
+
+[[ "${1:-}" == "--core-only" ]] && exit 0
+
+# 2. Extension package (the host loads BepInEx/hubner-ext/*.dll; Thunderstore has no such folder, so it ships as its own zip).
+echo "Packaging HubnerExt v${EXTVERSION}"
+dotnet build ext/HubnerExt.csproj "${DOTNET_ARGS[@]}"
+dotnet build ext/HubnerExtServer.csproj "${DOTNET_ARGS[@]}"
+EXT="${STAGE}/ext"
+mkdir -p "${EXT}/client" "${EXT}/server" "${EXT}/config" "${EXT}/python"
+cp out/HubnerExt.dll "${EXT}/client/"
+cp out/server/HubnerExt.dll "${EXT}/server/"
+cp config/*.yml "${EXT}/config/"
+cp python/hubner.py python/hubner_mcp.py "${EXT}/python/"
+cp README.md CHANGELOG.md LICENSE "${EXT}/"
+OUT="${ROOT}/dist/HubnerExt-v${EXTVERSION}.zip"
+rm -f "${OUT}"
+( cd "${EXT}" && zip -r -q "${OUT}" . )
 echo "Wrote ${OUT}"

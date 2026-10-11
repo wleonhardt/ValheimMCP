@@ -36,21 +36,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          # gh reads the token from the environment: it is not written into the clone's remote URL
+          gh repo clone "${GITHUB_REPOSITORY}" repo -- --depth 1 --branch "${GITHUB_REF_NAME}"
+
+      - name: Tag matches the project version
+        working-directory: repo
+        run: |
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' ValheimMCP.csproj | head -1)"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match <Version> ${version} in ValheimMCP.csproj" >&2
+            exit 1
+          fi
 
       - name: Create GitHub Release
         working-directory: repo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          zip="$(ls dist/ValheimMCP-${GITHUB_REF_NAME}.zip 2>/dev/null | head -1 || true)"
-          if [ -z "$zip" ]; then
-            echo "No dist/ValheimMCP-${GITHUB_REF_NAME}.zip found on the tagged commit." >&2
+          zip="dist/ValheimMCP-${GITHUB_REF_NAME}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "No $zip found on the tagged commit." >&2
             echo "Build it locally with scripts/package.sh and commit it under dist/." >&2
             exit 1
           fi
-          gh release create "${GITHUB_REF_NAME}" "$zip" \
+          extversion="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' ext/Version.props | head -1)"
+          assets="$zip"
+          [ -f "dist/HubnerExt-v${extversion}.zip" ] && assets="$assets dist/HubnerExt-v${extversion}.zip"
+          # shellcheck disable=SC2086
+          gh release create "${GITHUB_REF_NAME}" $assets \
             --title "${GITHUB_REF_NAME}" \
             --notes "See CHANGELOG.md for changes in this release." \
             --generate-notes
