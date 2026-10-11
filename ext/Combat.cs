@@ -70,4 +70,23 @@ namespace HubnerExt
         /// <summary>CharacterDrop expectation per kill: chance x mean amount, x the level when the drop scales with it.</summary>
         public static double ExpectedDrop(int min, int max, double chance, bool levelMultiplier, int level) { return chance * (min + max) / 2.0 * (levelMultiplier ? Math.Max(1, level) : 1); }
     }
+
+    /// <summary>One PlayerBase EffectArea: where it is and how far its trigger reaches.</summary>
+    internal sealed class BaseArea { public string Prefab = ""; public double X, Y, Z, Radius; }
+
+    /// <summary>
+    ///     Player.UpdateBaseValue counts the PlayerBase EffectArea colliders within 20 m of the player (EffectArea.GetBaseValue: an overlap sphere, so an area counts when its edge is
+    ///     within reach). A random event that is near-base-only needs a base value of 3. Fires, workbenches and wards carry such areas; the radius is a property of each prefab.
+    /// </summary>
+    internal static class BaseValue
+    {
+        public const double Reach = 20; public const int RaidThreshold = 3;
+
+        public static List<BaseArea> InReach(double x, double y, double z, IEnumerable<BaseArea> areas)
+        {
+            return areas.Where(a => Math.Sqrt((a.X - x) * (a.X - x) + (a.Y - y) * (a.Y - y) + (a.Z - z) * (a.Z - z)) <= Reach + a.Radius).ToList();
+        }
+
+        public static bool RaidEligible(int value) { return value >= RaidThreshold; }
+    }
 }

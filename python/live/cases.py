@@ -222,6 +222,15 @@ def creature_case(ctx):
     ctx.check('the damage factor by star is 1, 1.5, 2', r['damageFactorByStar'] == [1, 1.5, 2])
 
 
+def base_value_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('base_value', x=x, z=z)
+    if not r['areas'] and r['value'] == 0 and not r['charactersNearby']: raise Skip(f'no PlayerBase area (fire, workbench, ward...) within reach of {x},{z}')
+    ctx.check('the value is the number of areas in reach', r['value'] == len(r['areas']) or r['value'] > 60, (r['value'], len(r['areas'])))
+    ctx.check('a raid needs three', r['raidEligible'] == (r['value'] >= 3), r['value'])
+    ctx.check('every area is within 20 m plus its own radius', all(((a['pos'][0] - x) ** 2 + (a['pos'][2] - z) ** 2) ** 0.5 <= 20 + a['radius'] + 0.5 + abs(a['pos'][1] - r['point'][1]) for a in r['areas']), r['areas'][:3])
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -303,6 +312,7 @@ CASES = [
     Case('stations', 'stations: level is 1 + the extensions that count', stations_case),
     Case('smelters', 'smelters: queue, room and why one stands still agree', smelters_case),
     Case('creature-info', 'creature_info: stars scale health and damage, hits to kill follow', creature_case),
+    Case('base-value', 'base_value counts the PlayerBase areas in reach; a raid needs three', base_value_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

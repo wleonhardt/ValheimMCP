@@ -430,3 +430,15 @@ public class CombatRulesTests
         Assert.Equal(1.5, CombatRules.ExpectedDrop(1, 2, 1.0, false, 3)); Assert.Equal(4.5, CombatRules.ExpectedDrop(1, 2, 1.0, true, 3)); Assert.Equal(0.5, CombatRules.ExpectedDrop(1, 1, 0.5, true, 1));
     }
 }
+
+public class BaseValueTests
+{
+    static BaseArea A(double x, double r = 0) => new BaseArea { Prefab = "fire", X = x, Radius = r };
+    [Fact] public void AnAreaCountsWhenItsEdgeIsWithinTwentyMetres()
+    {
+        var inReach = BaseValue.InReach(0, 0, 0, new[] { A(19), A(25, 5), A(26, 5), A(40) });
+        Assert.Equal(new[] { 19.0, 25.0 }, inReach.Select(a => a.X).ToArray());                // 25 m away with a 5 m reach: its edge is at 20 m
+    }
+    [Fact] public void ThreeAreasMakeABaseARaidCanComeTo() { Assert.False(BaseValue.RaidEligible(2)); Assert.True(BaseValue.RaidEligible(3)); }
+    [Fact] public void HeightCountsToo() => Assert.Empty(BaseValue.InReach(0, 0, 0, new[] { new BaseArea { Y = 30, Radius = 1 } }));
+}

@@ -11,8 +11,39 @@ namespace HubnerExt
     {
         public static void Register(ToolRegistry r)
         {
+            RegisterBase(r);
             r.Add("creature_info", "A creature prefab's facts (no live instance needed): faction, health per star, speeds, the damage modifiers it has (weak / resistant / immune per type), how it senses (view, hearing, fire fear, passive-aggressive), its attacks from its default and random weapons (damage by type, reach, interval, blockable, dodgeable), taming (time, fed duration, what it eats) and what it drops (amount, chance, expectation per kill). With armor and playerHp it also says what one of its hits does to such a player at 1, 2 and 3 stars (resistance first, then armour, as the game does) and how many hits kill. name = prefab (Troll, Boar, Wolf, Greydwarf_Elite).",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"armor\":{\"type\":\"number\"},\"playerHp\":{\"type\":\"number\"}},\"required\":[\"name\"]}", CreatureInfo);
+        }
+
+        public static void RegisterBase(ToolRegistry r)
+        {
+            r.Add("base_value", "The base value of a point as the game counts it for raids (Player.UpdateBaseValue): the PlayerBase areas (fires, workbenches, wards and so on) whose trigger reaches within 20 m, from the ZDO table and the prefabs' area radii. A near-base-only random event needs 3. Also the base value each online character reports (it is stored on the character), so the two can be compared. x,z (y optional: default the highest area nearby).",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", BaseValueTool);
+        }
+
+        static ToolOutput BaseValueTool(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready || ZNetScene.instance == null) return ToolOutput.Err("world not ready");
+            double x = U.D(a, "x", 0), z = U.D(a, "z", 0); var cache = new Dictionary<int, float>(); var areas = new List<BaseArea>(); const float maxReach = 60f;
+            foreach (var zd in Zdos.InBox((float)(x - 20 - maxReach), (float)(z - 20 - maxReach), (float)(x + 20 + maxReach), (float)(z + 20 + maxReach)))
+            {
+                var h = zd.GetPrefab(); float r;
+                if (!cache.TryGetValue(h, out r))
+                {
+                    r = -1f; var go = ZNetScene.instance.GetPrefab(h);
+                    if (go != null) foreach (var ea in go.GetComponentsInChildren<EffectArea>(true))
+                        if ((ea.m_type & EffectArea.Type.PlayerBase) != 0) { var sc = ea.GetComponent<SphereCollider>(); var col = ea.GetComponent<Collider>(); r = sc != null ? sc.radius * Mathf.Max(ea.transform.lossyScale.x, Mathf.Max(ea.transform.lossyScale.y, ea.transform.lossyScale.z)) : (col != null ? col.bounds.extents.magnitude : 0f); break; }
+                    cache[h] = r;
+                }
+                if (r < 0f) continue;
+                var p = zd.GetPosition(); areas.Add(new BaseArea { Prefab = Zdos.NameOf(h), X = p.x, Y = p.y, Z = p.z, Radius = r });
+            }
+            var y = U.Has(a, "y") ? U.D(a, "y", 0) : (areas.Count > 0 ? areas.Max(q => q.Y) : 0);
+            var inReach = BaseValue.InReach(x, y, z, areas);
+            var players = new List<string>();
+            try { foreach (var c in ZNet.instance.GetAllCharacterZDOS()) { var p = c.GetPosition(); if (Math.Sqrt((p.x - x) * (p.x - x) + (p.z - z) * (p.z - z)) < 40) players.Add("{\"name\":" + U.S(c.GetString(ZDOVars.s_playerName, "?")) + ",\"baseValue\":" + c.GetInt(ZDOVars.s_baseValue, 0) + "}"); } } catch (Exception ex) { U.Once("base_value.players", ex); }
+            return U.Json("{\"point\":[" + U.N(x) + "," + U.N(Math.Round(y, 1)) + "," + U.N(z) + "],\"value\":" + inReach.Count + ",\"raidEligible\":" + B(BaseValue.RaidEligible(inReach.Count)) + ",\"areas\":[" + string.Join(",", inReach.OrderBy(q => q.X).Take(60).Select(q => "{\"prefab\":" + U.S(q.Prefab) + ",\"pos\":[" + U.N(Math.Round(q.X, 1)) + "," + U.N(Math.Round(q.Y, 1)) + "," + U.N(Math.Round(q.Z, 1)) + "],\"radius\":" + U.N(Math.Round(q.Radius, 1)) + "}").ToArray()) + "],\"charactersNearby\":[" + string.Join(",", players.ToArray()) + "],\"note\":\"radius is the sphere trigger of the prefab (a box or capsule area is approximated by its bounding sphere, which can count an area the game would not)\"}");
         }
 
         static readonly string[] Types = { "blunt", "slash", "pierce", "chop", "pickaxe", "fire", "frost", "lightning", "poison", "spirit" };
