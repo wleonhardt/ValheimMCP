@@ -1,0 +1,143 @@
+// plan_check: the pure plan rules (PlanRules.cs) run on the prefabs' real collider boxes, for a plan that is not in the world yet. Works on the dedicated server: it needs only
+// ZNetScene's prefabs (instantiated off-world to read their colliders, as prefab_info does) and the ZDO table; no player, no camera, no loaded zone.
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using UnityEngine;
+using ValheimMCP;
+
+namespace HubnerExt
+{
+    internal static class PlanCheck
+    {
+        static readonly Dictionary<string, PieceGeo> Cache = new Dictionary<string, PieceGeo>();
+        const int MaxItems = 1500;
+
+        public static void Register(ToolRegistry r)
+        {
+            r.Add("plan_check", "Check a plan BEFORE placing it, from the prefabs' real collider boxes and the game's own structure rules (works on the dedicated server): items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz]}] (max 1500). Reports overlap (a piece that cannot clip is an error, building pieces a warning), unsupported (the structure model of WearNTear: contact by colliders grown 0.15 m, per-material loss, ground = full support; a piece under its material's minimum collapses), weak, tilt, water (sea level 30), yaw-grid (22.5 degrees), fire-clearance (1 m round a fire). Existing pieces in the area count as supporters and obstacles (those of plan:<name> are ignored: the plan replaces them). Ground: groundY (a flat pad) or, by default, the world generator's height, which does not know terrain edits. Read-only. Arguments: plan, items, groundY, margin (default 8), examples (default 10).",
+                "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"groundY\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Check);
+        }
+
+        // ------------------------------------------------------------------ prefab geometry
+        static Quat Q(Quaternion q) { return new Quat(q.x, q.y, q.z, q.w); }
+
+        static PieceGeo Geo(string name)
+        {
+            if (Cache.TryGetValue(name, out var c)) return c;
+            if (ZNetScene.instance == null) return null;
+            var prefab = ZNetScene.instance.GetPrefab(name); if (prefab == null) return null;
+            GameObject go = null;
+            try { ZNetView.m_forceDisableInit = true; go = UnityEngine.Object.Instantiate(prefab, new Vector3(0f, -4000f, 0f), Quaternion.identity); }
+            finally { ZNetView.m_forceDisableInit = false; }
+            try
+            {
+                var root = go.transform.position; var g = new PieceGeo { Prefab = name };
+                foreach (var col in go.GetComponentsInChildren<Collider>())
+                {
+                    if (col == null || col.isTrigger || col.attachedRigidbody != null) continue;
+                    var box = col as BoxCollider;
+                    if (box != null)
+                    {
+                        var ls = box.transform.lossyScale;
+                        g.Colliders.Add(new ColliderBox { Centre = V(box.transform.TransformPoint(box.center) - root), Half = new V3(Math.Abs(box.size.x * ls.x) / 2, Math.Abs(box.size.y * ls.y) / 2, Math.Abs(box.size.z * ls.z) / 2), Rot = Q(box.transform.rotation) });
+                    }
+                    else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity });       // like the game: a bounds box for anything else
+                }
+                var wnt = go.GetComponent<WearNTear>();
+                if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); }
+                var piece = go.GetComponent<Piece>();
+                if (piece != null) { g.NoClipping = piece.m_noClipping; g.NotOnTilting = piece.m_notOnTiltingSurface; g.NotOnWood = piece.m_notOnWood; g.NotOnFloor = piece.m_notOnFloor; g.NoInWater = piece.m_noInWater; g.GroundOnly = piece.m_groundOnly; }
+                var n = name.ToLowerInvariant();
+                g.IsStation = go.GetComponent<CraftingStation>() != null;
+                g.IsFire = go.GetComponent<Fireplace>() != null && (n.Contains("fire") || n.Contains("hearth")) && !n.Contains("torch");
+                g.IsWall = wnt != null && (n.Contains("wall") || n.Contains("fence") || n.Contains("palisade"));
+                var top = g.Colliders.Count == 0 ? 0 : g.Colliders.Max(b => b.Centre.Y + b.Half.Y);
+                g.Occupies = top >= 0.5 && !(n.Contains("floor") || n.Contains("rug") || n.Contains("carpet") || n.Contains("door") || n.Contains("roof"));
+                Cache[name] = g; return g;
+            }
+            finally { UnityEngine.Object.Destroy(go); }
+        }
+
+        static V3 V(Vector3 v) { return new V3(v.x, v.y, v.z); }
+
+        // ------------------------------------------------------------------ the tool
+        static ToolOutput Check(Dictionary<string, object> a)
+        {
+            var items = McpJson.GetList(a, "items"); if (items == null || items.Count == 0) return ToolOutput.Err("items required");
+            if (items.Count > MaxItems) return ToolOutput.Err("max " + MaxItems + " items per call (the structure model is quadratic): split the plan by building");
+            if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
+            var plan = McpJson.GetStr(a, "plan"); var margin = Math.Max(1, Math.Min(30, U.D(a, "margin", 8))); var maxEx = Math.Max(1, (int)U.D(a, "examples", 10));
+            Func<double, double, double> ground;
+            string groundNote;
+            if (U.Has(a, "groundY")) { var gy = U.D(a, "groundY", 0); ground = (x, z) => gy; groundNote = "flat ground at y " + U.N(gy); }
+            else if (WorldGenerator.instance != null) { var wg = WorldGenerator.instance; ground = (x, z) => wg.GetHeight((float)x, (float)z); groundNote = "world generator height (terrain edits are not known)"; }
+            else { ground = null; groundNote = "no ground (nothing is grounded)"; }
+
+            var planned = new List<PlacedPiece>(); var unknown = new List<string>(); var bad = new List<string>();
+            double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; var idx = 0;
+            foreach (var o in items)
+            {
+                idx++; var it = o as Dictionary<string, object>; if (it == null) continue;
+                var prefab = McpJson.GetStr(it, "prefab"); var geo = string.IsNullOrEmpty(prefab) ? null : Geo(prefab);
+                if (geo == null) { if (unknown.Count < maxEx) unknown.Add("item " + idx + ": " + (prefab ?? "no prefab")); continue; }
+                double x = McpJson.Get(it, "x", double.NaN), y = McpJson.Get(it, "y", double.NaN), z = McpJson.Get(it, "z", double.NaN);
+                if (!WorldBounds.InWorld(x, double.IsNaN(y) ? 0 : y, z)) { if (bad.Count < maxEx) bad.Add("item " + idx + " (" + prefab + "): position not finite or outside the world"); continue; }
+                if (double.IsNaN(y)) y = ground != null ? ground(x, z) : 0;
+                var rl = McpJson.GetList(it, "rot");
+                var rot = rl != null && rl.Count >= 3 ? Quat.Euler(U.At(rl, 0), U.At(rl, 1), U.At(rl, 2)) : Quat.Yaw(McpJson.Get(it, "yaw", 0));
+                planned.Add(new PlacedPiece { Id = McpJson.GetStr(it, "key") ?? ("#" + idx), Geo = geo, Pos = new V3(x, y, z), Rot = rot });
+                x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); z0 = Math.Min(z0, z); z1 = Math.Max(z1, z);
+            }
+            if (planned.Count == 0) return ToolOutput.Err("no usable items" + (unknown.Count > 0 ? ": unknown prefabs " + string.Join(", ", unknown.ToArray()) : ""));
+
+            // what is already there: supporters and obstacles, not reported on
+            var all = new List<PlacedPiece>(planned); int world = 0;
+            if (Zdos.Ready)
+                foreach (var z in Zdos.InBox((float)(x0 - margin), (float)(z0 - margin), (float)(x1 + margin), (float)(z1 + margin)))
+                {
+                    if (plan != null && z.GetString(Plans.PlanHash, "") == plan) continue;
+                    var name = Zdos.NameOf(z.GetPrefab()); if (name.StartsWith("_", StringComparison.Ordinal)) continue;
+                    var geo = Geo(name); if (geo == null || geo.Colliders.Count == 0) continue;
+                    var p = z.GetPosition();
+                    all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false }); world++;
+                }
+
+            var problems = new List<PlanProblem>();
+            problems.AddRange(PlanChecks.Overlaps(all));
+            foreach (var p in planned)
+            {
+                var gy = ground != null ? ground(p.Pos.X, p.Pos.Z) : double.NaN;
+                if (ground != null)
+                {
+                    var nx = ground(p.Pos.X + 1, p.Pos.Z) - ground(p.Pos.X - 1, p.Pos.Z); var nz = ground(p.Pos.X, p.Pos.Z + 1) - ground(p.Pos.X, p.Pos.Z - 1);
+                    var normalY = 1.0 / Math.Sqrt(1 + (nx / 2) * (nx / 2) + (nz / 2) * (nz / 2));
+                    var t = PlanChecks.Tilt(p, normalY); if (t != null) problems.Add(t);
+                    var w = PlanChecks.Water(p, gy); if (w != null) problems.Add(w);
+                }
+                var yawDeg = p.Rot.Rotate(new V3(0, 0, 1)); var g = PlanChecks.Grid(p, Math.Atan2(yawDeg.X, yawDeg.Z) * 180 / Math.PI); if (g != null) problems.Add(g);
+            }
+            problems.AddRange(PlanChecks.FireClearance(all));
+
+            var support = SupportModel.Run(all, ground, null);
+            int unsupported = 0, weak = 0; double minSupport = double.PositiveInfinity;
+            foreach (var p in planned)
+            {
+                SupportResult s; if (!support.TryGetValue(p, out s)) continue;
+                minSupport = Math.Min(minSupport, s.Support);
+                if (!s.Holds) { unsupported++; problems.Add(new PlanProblem { Rule = "unsupported", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " at " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z)) + ": support " + U.N(Math.Round(s.Support, 1)) + " is under the " + p.Geo.Material + " minimum of " + U.N(s.Min) + ": it collapses" }); }
+                else if (s.Support < s.Min * 1.5 && !s.Grounded) { weak++; problems.Add(new PlanProblem { Rule = "weak", Severity = "warning", Piece = p.Id, Detail = p.Geo.Prefab + ": support " + U.N(Math.Round(s.Support, 1)) + " is close to the minimum of " + U.N(s.Min) }); }
+            }
+
+            var byRule = problems.GroupBy(p => p.Rule + "|" + p.Severity).OrderBy(g => g.Key).ToList();
+            var sb = new StringBuilder("{\"planned\":" + planned.Count + ",\"skipped\":" + (items.Count - planned.Count) + ",\"worldPiecesConsidered\":" + world + ",\"ground\":" + U.S(groundNote) + ",\"errors\":" + problems.Count(p => p.Severity == "error") + ",\"warnings\":" + problems.Count(p => p.Severity == "warning") +
+                ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"problems\":[");
+            sb.Append(string.Join(",", byRule.Select(g => "{\"rule\":" + U.S(g.First().Rule) + ",\"severity\":" + U.S(g.First().Severity) + ",\"count\":" + g.Count() + ",\"examples\":[" + string.Join(",", g.Take(maxEx).Select(p => "{\"piece\":" + U.S(p.Piece) + ",\"detail\":" + U.S(p.Detail) + "}").ToArray()) + "]}").ToArray()));
+            sb.Append("]}");
+            return U.Json(sb.ToString());
+        }
+    }
+}

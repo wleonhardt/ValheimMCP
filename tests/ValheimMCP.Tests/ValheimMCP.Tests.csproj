@@ -25,6 +25,7 @@
     <Compile Include="../../ext/Pure.cs" Link="ext/Pure.cs" />
     <Compile Include="../../ext/WalkRules.cs" Link="ext/WalkRules.cs" />
     <Compile Include="../../ext/Rules.cs" Link="ext/Rules.cs" />
+    <Compile Include="../../ext/PlanRules.cs" Link="ext/PlanRules.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

@@ -34,6 +34,7 @@ namespace HubnerExt
             VirtualPeers.Register(r);
             Neighbours.Register(r);
             WorldEvents.Register(r);
+            PlanCheck.Register(r);
             Journal.Load();
             ClientTools.Register(r);                                    // on the server only the whitelisted physics/read tools register (see Reg.cs)
 #if !SERVER
