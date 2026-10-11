@@ -25,6 +25,7 @@ Operations file for coding agents working in this repository.
 - A tool that writes to the world must be registered as a write tool, go through `Plans.Guard` on the server, respect `Plans.Protected`, and be journaled. A new argument named `dry` only skips the server gate if the handler really only reports (`honoursDry`).
 - A new catch block logs (`U.Once`, `Plugin.Log`) or rethrows, or carries `// allow: why`: the silent-catch count may only go down (`scripts/lint-baseline.json`). Creating, destroying or moving objects is allowed only in the files `scripts/lint_writes.py` lists.
 - ZDO ids are valid for one world load only. Never persist one as the identity of an object: use `hub_plan` + `hub_key` (see `Identity` in `ext/Pure.cs`).
+- A `plan_check` rule is added to `PlanRuleBook` (`ext/PlanRules.cs`) with its origin (hard, ghost or taste) and the decompiled source it comes from; a taste rule is never an error. Check a game fact in the decompile before a rule depends on it and record the result in `plans/decisions/`.
 - Build every project and run the tests before committing: `dotnet build -c Release ValheimMCP.csproj ext/HubnerExt.csproj ext/HubnerExtServer.csproj` (one per call) and `dotnet test`.
 - Never commit build output (`out/`, `*.pdb`, `*.dll`), symlinks, passwords, tokens, IP addresses or host names. CI rejects them.
 - Live testing needs the game and a world; mark what was not exercised live in the commit message and in `plans/next-up.md`.

@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### 0.7.0 core / 0.10.0 extension (decompile check and Tier 1 of the ClaudeNJevHeim module reviews)
+The facts behind these changes were checked in our own decompile first: `plans/decisions/0003-decompile-check-results.md`. None of the game-touching code has run in the game yet (see the live checklist in `plans/next-up.md`).
+
+Behaviour you may notice
+- `plan_check` follows the game: every problem carries `origin` (`hard` = the world enforces it after a spawn, `ghost` = only the hammer's placement check, `taste` = our preference, never an error) and the game's status `code`; `plan_rules` lists the rule book. An overlap of a piece that cannot clip is an error only past the game's 0.2 m (it was 0.05 m). Fire clearance is a warning. `weak` uses the per-material ratio (wood 1.67, core wood 1.5, iron 1.18, grausten 3.0, stone and marble 1.33). Colliders are filtered by the layers the game's checks use, so nav blockers no longer count, and a rock, tree or bush a piece touches gives it full support, as in the game.
+- New `plan_check` rules: `fire-blocked` (a solid within 0.5 m above the fire, or terrain above it: the fire does not burn), `extension-no-station`, `extension-spacing`, `station-out-of-range`, `not-on-wood`, `no-build-zone` (exact: the location prefab's own `m_noBuild` and radius override), `private-zone`. `plan_check` also reports `unknownKeys` and `missingY`.
+- `plan_apply` refuses an item with no `y` (it used to build at y 0, under the sea) unless it says `seat:"ground"`, reports `unknownKeys`, and builds lowest first (`order:"plan"` keeps the caller's order) so a slow sliced job never leaves a piece standing on nothing for the owner's support sweep to destroy.
+- `plan_remove` and `zdo_delete` refuse a removal that would bring down pieces resting on the removed ones (`allowCollapse:true` overrides; `plan_remove` dry runs report `wouldCollapse`).
+- `bed_check` follows `Bed.Interact`: spawn point, heat area (`$msg_bednofire`), the time window, owner; `canClaim` (exposure only), `canSleep` (exposure and heat), `sleepNow`, `firstFailure`.
+- `paint_at` reads the nearest paint pixel like the game and gives `isCultivated` / `isCleared`. `fires` uses the on/off state and fuel item. `portals` says whether its list is complete (a joined client holds only portals near it). `verify_plan` reports `flipped180`.
+- Walker: the last point counts as reached only within `arriveHeight` (default 2 m) of its y when one was given (`wrong_storey` ends a walk a storey off); ledge probes take the slope off and ignore saplings, drops and animals; a side step avoids a portal trigger or lit fire first; an encumbered character with no stamina gives up (it cannot regenerate) instead of resting for ever.
+- Chat: hints for tool names, machine-shaped text, injections cut over two lines, odd speaker names, flooding; rows carry `ours` and `to`; a name on `hubner.trustedPlayers` without a platform id is `name_only` (still untrusted); `chat_send` refuses a repeated injection, a position for an untrusted listener and an echoed untrusted line, and allows 6 lines per listener per 10 minutes (`to`).
+- Journal entries carry the world (`name#uid`): an entry of another world is not touched; an object not found in an area the client has not loaded is "cannot tell" and the entry is kept. The extension releases a held time or weather when it unloads.
+- `log_tail` folds lines that differ only in numbers (`collapse:false` for the raw tail); `objects digest:true` gives kinds with counts and boxes.
+
+New
+- Core: `tool_stats` (calls, errors, threw, timeouts, slow calls, p50/p95/max handler time per tool).
+- Extension: `plan_rules`.
+- Research: `plans/research/2026-10-clauden-jevheim-synthesis.md` and the 12 module reports; `plans/decisions/0003-decompile-check-results.md`.
+
 ### 0.6.0 core / 0.9.0 extension (what the ClaudeNJevHeim review suggested)
 Behaviour you may notice
 - A JSON-RPC message without an id is a notification and is never executed (a `tools/call` without an id used to run).

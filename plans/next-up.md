@@ -36,11 +36,26 @@ Implemented with game-free tests (see CHANGELOG 0.6.0 / 0.9.0); none of it has r
 9. Readers: `locations_near`, `biome_at`, `fires` (fuel against an in-game fire), `husbandry_state` (feed an animal, watch `fedSecondsLeft`), `death_state`, `cost_mode` against the world options, `players` (`inBed`, `dead`).
 10. Chat: type an injection attempt in game chat and read it with `chat_tail` (`untrusted`, `hints`); `chat_send` twice within 6 s must refuse the second.
 
+### Live verification of the Tier 1 work (0.7.0 core / 0.10.0 extension)
+
+Everything below compiled and passed game-free tests; none of it has run in the game.
+
+11. `plan_check` on a real build: the tower of 9 posts again, plus a hearth with a cauldron on it (no fire-clearance warning), a brazier on a floor stand (the pathblocker collider no longer counts), a campfire under a beam 0.8 m up (`fire-blocked`, and in game the fire really goes out), a workbench with extensions at 4 and 6 m (`extension-no-station`), two extensions 1 m apart (`extension-spacing`), a piece on a rock (grounded).
+12. `bed_check`: a bed with a roof and no fire (`canClaim` true, `canSleep` false, `firstFailure` `$msg_bednofire`; the game says the same when you try), then with a fire; `sleepNow` outside the afternoon/night window.
+13. `plan_apply`: an item with no `y` is refused; a 400-piece roof-and-walls plan as a sliced job builds floor first (watch `job_status`), cancel it half way and check nothing stands on nothing 60 s later.
+14. `plan_remove dry:true` on a foundation under a built floor: `wouldCollapse` lists the pieces; the real call is refused; `allowCollapse:true` removes them and the floor really falls. `zdo_delete` the same.
+15. Location prefab flags on the dedicated server: `plan_check` over a ruin or a start temple. A `?` after the location name means the prefab could not be read there (the answer is then an assumption) and the extension's `selftest`/log carries the reason.
+16. Walker: `walk_to` a bed on an upper floor with a y while standing below: ends `wrong_storey` after 3 s; `arriveHeight:0` arrives. A bank of 30 degrees is not hopped as a ledge. An overloaded character at 0 stamina ends `blocked` (encumbered).
+17. Journal: undo in the same world still works; join a different world and undo an old group (refused: other world); on a client far from a spawned piece, `undo` says "cannot tell" and keeps the entry.
+18. Chat: type an injection split over two lines, a line naming `zdo_delete`, four lines in 10 s, a line with your own name in it; read `chat_tail` for `split_manipulation`, `tool_talk`, `spam`, `to:me`. `chat_send` with `to` of an untrusted player and a coordinate pair is refused.
+19. `tool_stats` after a session: the slow tools come first; `log_tail` folds repeats; `objects digest:true` over a base.
+20. `Env` hold released on hot reload: `time_set` then rebuild the extension: the time is free again.
+
 ### Next candidates (not done)
 
 - Fix the 78 silent catches over time (`python3 scripts/lint_catch.py --list`), lowering the baseline as you go.
 - From the review but skipped on purpose: the design generator, work fronts and stands, the lease, the Jev judge (see `research/2026-10-clauden-jevheim-review.md`).
-- Read the rest of the friend's repository: done 2026-10-11, see `research/2026-10-clauden-jevheim-synthesis.md` (defects in our own code A1-A26, ranked candidates, check-first facts, test infrastructure). Next: verify the check-first facts in the decompile, then Tier 1 of that file.
+- Tier 1 of `research/2026-10-clauden-jevheim-synthesis.md` is done (decompile check in `decisions/0003-decompile-check-results.md`). Not done from it: A14 (plan_check on edited ground), A16 (mesh colliders), A23 (speaker id check against the connection), A24 (`world_state` positions without a source), A26 (Dvergr wards enabled); Tier 2 readers; Tier 4 test infrastructure (`accept.py`, `live_guard`, `smoke.py`, scene capture).
 
 ### Other
 
