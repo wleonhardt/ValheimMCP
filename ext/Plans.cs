@@ -235,7 +235,7 @@ namespace HubnerExt
             var group = McpJson.GetStr(a, "group") ?? plan; int maxEx = (int)McpJson.Get(a, "examples", 8);
             bool boxGiven = McpJson.GetList(a, "box") != null;
             bool forcedPlace = McpJson.GetBool(a, "force", false) && McpJson.GetStr(a, "forceConfirm") == ForceConfirm;      // placing inside somebody's guard stone area needs the same override as touching their things
-            int wardRefused = 0, noBuildAdvice = 0; var exNoBuild = new List<string>();
+            int wardRefused = 0, noBuildAdvice = 0; var exNoBuild = new List<string>(); var unknownKeys = new Dictionary<string, int>();
             var box = Box(a, items);
             var zs = ZoneSystem.instance;
 
@@ -289,7 +289,9 @@ namespace HubnerExt
                     try
                     {
                         var prefab = McpJson.GetStr(it, "prefab");
+                        foreach (var uk in PlanItemRules.Unknown(it.Keys)) unknownKeys[uk] = unknownKeys.ContainsKey(uk) ? unknownKeys[uk] + 1 : 1;
                         if (string.IsNullOrEmpty(prefab)) { errors++; if (exErr.Count < maxEx) exErr.Add("item " + idx + ": prefab missing"); continue; }
+                        if (PlanItemRules.MissingY(U.Has(it, "y"), McpJson.GetStr(it, "seat"))) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": y missing (a missing y used to build at y 0, under the sea; give y, or seat:\"ground\" to stand it on the terrain)"); continue; }
                         if (U.IsForbidden(prefab) || prefab.StartsWith("Player", StringComparison.Ordinal) || U.IsLiving(prefab)) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": forbidden (terrain, player or creature)"); continue; }
                         double x = McpJson.Get(it, "x", double.NaN), y = McpJson.Get(it, "y", 0), zz = McpJson.Get(it, "z", double.NaN), yaw = McpJson.Get(it, "yaw", 0);
                         if (double.IsNaN(x) || double.IsNaN(zz)) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": x and z must be numbers"); continue; }
@@ -420,7 +422,7 @@ namespace HubnerExt
             }
             finally { Journal.End(); }
 
-            var sb = new StringBuilder("{\"plan\":" + U.S(plan) + ",\"dry\":" + (dry ? "true" : "false") + ",\"items\":" + items.Count + ",\"unchanged\":" + unchanged + ",\"spawned\":" + spawned + ",\"adopted\":" + adopted + ",\"moved\":" + moved + ",\"updated\":" + updated + ",\"deleted\":" + deleted + ",\"duplicateKeys\":" + dupes + ",\"errors\":" + errors + ",\"box\":[" + string.Join(",", box.Select(v => U.N(v)).ToArray()) + "],\"wardRefused\":" + wardRefused + ",\"noBuildAdvice\":" + noBuildAdvice + ",\"noBuildExamples\":[" + string.Join(",", exNoBuild.Select(U.S).ToArray()) + "],\"sweep\":" + U.S(sweepSkipped ? "skipped (items had errors)" : (boxGiven ? "box" : "world")) + ",\"sweepSkipped\":" + (sweepSkipped ? "true" : "false") + ",\"group\":" + U.S(group) + ",\"labelled\":" + labelled + ",\"labelPending\":" + labelPending);
+            var sb = new StringBuilder("{\"plan\":" + U.S(plan) + ",\"dry\":" + (dry ? "true" : "false") + ",\"items\":" + items.Count + ",\"unchanged\":" + unchanged + ",\"spawned\":" + spawned + ",\"adopted\":" + adopted + ",\"moved\":" + moved + ",\"updated\":" + updated + ",\"deleted\":" + deleted + ",\"duplicateKeys\":" + dupes + ",\"errors\":" + errors + ",\"box\":[" + string.Join(",", box.Select(v => U.N(v)).ToArray()) + "],\"unknownKeys\":{" + string.Join(",", unknownKeys.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "},\"wardRefused\":" + wardRefused + ",\"noBuildAdvice\":" + noBuildAdvice + ",\"noBuildExamples\":[" + string.Join(",", exNoBuild.Select(U.S).ToArray()) + "],\"sweep\":" + U.S(sweepSkipped ? "skipped (items had errors)" : (boxGiven ? "box" : "world")) + ",\"sweepSkipped\":" + (sweepSkipped ? "true" : "false") + ",\"group\":" + U.S(group) + ",\"labelled\":" + labelled + ",\"labelPending\":" + labelPending);
             sb.Append(",\"examples\":{\"spawn\":[" + string.Join(",", exSpawn.Select(U.S).ToArray()) + "],\"moved\":[" + string.Join(",", exMoved.Select(U.S).ToArray()) + "],\"deleted\":[" + string.Join(",", exDel.Select(U.S).ToArray()) + "],\"errors\":[" + string.Join(",", exErr.Select(U.S).ToArray()) + "]}}");
             yield return U.Json(sb.ToString());
         }

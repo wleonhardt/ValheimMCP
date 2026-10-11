@@ -295,3 +295,17 @@ public class SleepRulesTests
         Assert.Null(SleepRules.FirstFailure(true, false, true, true, false));
     }
 }
+
+public class PlanItemRulesTests
+{
+    [Fact] public void ATypoedKeyIsReported() => Assert.Equal(new[] { "rotY" }, PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "rotY" }));
+    [Fact] public void EveryKeyTheToolReadsIsKnown() => Assert.Empty(PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag" }));
+    [Fact] public void AMissingYNeedsSeatGround() { Assert.True(PlanItemRules.MissingY(false, null)); Assert.False(PlanItemRules.MissingY(false, "ground")); Assert.False(PlanItemRules.MissingY(true, null)); }
+}
+
+public class FireRulesTests
+{
+    [Fact] public void ABurningFireIsOnAndHasFuelOrNeedsNone() { Assert.True(FireRules.Burning(1, 3, false)); Assert.True(FireRules.Burning(1, 0, true)); Assert.False(FireRules.Burning(1, 0, false)); }
+    [Fact] public void ASwitchedOffFireDoesNotBurnWhateverItHolds() { Assert.False(FireRules.Burning(0, 5, false)); Assert.False(FireRules.Burning(0, 0, true)); }
+    [Fact] public void FuelToFullRoundsDownBecauseTheGameRefusesAboveMaxMinusOne() { Assert.Equal(7, FireRules.FuelToFull(2.5, 10, false)); Assert.Equal(0, FireRules.FuelToFull(0, 10, true)); }
+}

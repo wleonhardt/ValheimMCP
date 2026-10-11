@@ -70,6 +70,9 @@ namespace HubnerExt
 
         public static void Tick() { if (_releaseAt > 0f && Time.time >= _releaseAt) DoRelease(); }
 
+        /// <summary>When the extension unloads (a hot reload) a held time or weather would stay set with nobody left to release it.</summary>
+        public static void Uninstall() { if (_timeHeld || _weather.Length > 0 || _releaseAt > 0f) DoRelease(); }
+
         static ToolOutput State(Dictionary<string, object> a)
         {
             var em = EnvMan.instance; if (em == null) return U.Json("{\"world\":false}");

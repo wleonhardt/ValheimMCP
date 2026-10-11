@@ -22,6 +22,7 @@ namespace HubnerExt
             WorldEvents.Uninstall();
 #if !SERVER
             Control.Uninstall();
+            Env.Uninstall();
 #endif
         }
 
@@ -140,13 +141,13 @@ namespace HubnerExt
                 "List world objects near a point or in a box from the ZDO table (every object this process knows; on the dedicated server that is the whole world, on the client the loaded area). Filters: prefab substring(s) comma separated, built=true (creator!=0) / false, limit (default 300, max 3000), offset. Fast: indexed by zone.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"y0\":{\"type\":\"number\"},\"y1\":{\"type\":\"number\"},\"prefab\":{\"type\":\"string\"},\"built\":{\"type\":\"boolean\"},\"limit\":{\"type\":\"number\"},\"offset\":{\"type\":\"number\"}}}", Objects);
             r.Add("portals",
-                "Every portal in the world from the game's portal list (the generic objects query does not see portals): id, prefab, position, tag, and the tag's partner count so unpaired or ambiguous tags stand out. Use before spawning a tagged portal.",
+                "The portals this process knows from the game's portal list (the generic objects query does not see portals): id, prefab, position, tag, and the tag's partner count so unpaired or ambiguous tags stand out. On the dedicated server that is every portal in the world; a joined client holds only the portals of the sectors it has been near, so the list can be incomplete there (the result says which). Use before spawning a tagged portal.",
                 "{\"type\":\"object\",\"properties\":{}}", Portals);
             r.Add("terraform_map",
                 "Where has the terrain been edited? Decodes every zone's terrain-compiler data (no heightmap needed). Returns per-zone edit counts, a coarse raster of the largest height change per cell (metres, + = raised), and clustered edited regions with bounding boxes. Use it to know what you must not touch.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"cell\":{\"type\":\"number\",\"description\":\"raster cell size in metres (default 4)\"},\"minDelta\":{\"type\":\"number\",\"description\":\"ignore changes smaller than this (default 0.15)\"},\"raster\":{\"type\":\"boolean\",\"description\":\"include the raster (default true)\"}},\"required\":[\"x0\",\"z0\",\"x1\",\"z1\"]}", Terraform.Map);
             r.Add("verify_plan",
-                "Compare a build plan with the world. items:[{prefab,x,y,z,yaw,text?}] (positions are prefab pivots, as spawned). Reports ok / moved / missing / duplicate / wrong-text counts with examples, and 'extra' objects of plan prefabs inside the plan's box that the plan does not contain. tol (default 0.06 m) is the position match, yawTol 2 degrees.",
+                "Compare a build plan with the world. items:[{prefab,x,y,z,yaw,text?}] (positions are prefab pivots, as spawned). Reports ok / moved / missing / duplicate / wrong-text counts with examples, and 'extra' objects of plan prefabs inside the plan's box that the plan does not contain, and flipped180 (placed 180 degrees off the plan, which is accepted because some pieces look the same turned; a faced piece such as a wall with an outside face is not the same). tol (default 0.06 m) is the position match, yawTol 2 degrees.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"alsoPrefabs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"tol\":{\"type\":\"number\"},\"matchRadius\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Verify.Plan);
             r.Add("snapshot", "Record every object in a box under a name (kept in memory; a copy is also written to hubner-ext/snapshots/<name>.jsonl for inspection) so a later snapshot_diff can show exactly what changed. Name: letters, digits, _ - . (max 64).",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"name\",\"x0\",\"z0\",\"x1\",\"z1\"]}", Snap.Take);
@@ -181,7 +182,8 @@ namespace HubnerExt
                 var tg = z.GetString("tag", ""); var p = z.GetPosition();
                 rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Zdos.NameOf(z.GetPrefab())) + ",\"pos\":[" + U.N(Math.Round(p.x, 1)) + "," + U.N(Math.Round(p.y, 1)) + "," + U.N(Math.Round(p.z, 1)) + "],\"tag\":" + U.S(tg) + ",\"sameTag\":" + byTag[tg] + "}");
             }
-            return U.Json("{\"count\":" + rows.Count + ",\"portals\":[" + string.Join(",", rows.ToArray()) + "]}");
+            var complete = ZNet.instance != null && ZNet.instance.IsServer();       // a server (or a single-player host) holds every ZDO; a joined client only those of sectors it has been near
+            return U.Json("{\"count\":" + rows.Count + ",\"complete\":" + (complete ? "true" : "false") + ",\"source\":" + U.S(complete ? "the server's full ZDO table" : "this client's portal list (sectors it has been near only)") + ",\"portals\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
         static ToolOutput Objects(Dictionary<string, object> a)
@@ -376,8 +378,8 @@ namespace HubnerExt
             Func<float, float, long> key = (x, z) => ((long)Math.Floor(x) << 32) ^ (uint)(int)Math.Floor(z);
             for (int i = 0; i < recs.Count; i++) { var k = key(recs[i].Pos.x, recs[i].Pos.z); if (!cells.TryGetValue(k, out var l)) cells[k] = l = new List<int>(); l.Add(i); }
             var used = new bool[recs.Count];
-            int ok = 0, moved = 0, missing = 0, dup = 0, badText = 0, badYaw = 0;
-            var exMoved = new List<string>(); var exMiss = new List<string>(); var exDup = new List<string>(); var exText = new List<string>(); var exYaw = new List<string>();
+            int ok = 0, moved = 0, missing = 0, dup = 0, badText = 0, badYaw = 0, flipped = 0;
+            var exMoved = new List<string>(); var exMiss = new List<string>(); var exDup = new List<string>(); var exText = new List<string>(); var exYaw = new List<string>(); var exFlip = new List<string>();
             Func<int, Vector3, List<int>> candidates = (pi_, pos_) =>
             {
                 var res = new List<int>();
@@ -410,6 +412,7 @@ namespace HubnerExt
                 }
                 if (exact.Count > 1) { dup++; if (exDup.Count < maxEx) { var ids = new List<string>(); foreach (var i in exact) ids.Add(U.S(recs[i].Id)); exDup.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"ids\":[" + string.Join(",", ids.ToArray()) + "]}"); } }
                 var r0 = recs[exact[0]];
+                if (Zdos.AngDiff(r0.Yaw, yaw) > 2f && Math.Abs(Mathf.DeltaAngle(r0.Yaw, yaw + 180f)) <= 2f) { flipped++; if (exFlip.Count < maxEx) exFlip.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"planYaw\":" + U.N(yaw) + ",\"worldYaw\":" + U.N(Math.Round(r0.Yaw, 1)) + ",\"id\":" + U.S(r0.Id) + "}"); }
                 if (Zdos.AngDiff(r0.Yaw, yaw) > 2f && Math.Abs(Mathf.DeltaAngle(r0.Yaw, yaw + 180f)) > 2f) { badYaw++; if (exYaw.Count < maxEx) exYaw.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"planYaw\":" + U.N(yaw) + ",\"worldYaw\":" + U.N(Math.Round(r0.Yaw, 1)) + ",\"id\":" + U.S(r0.Id) + "}"); }
                 if (text != null && r0.Text != text) { badText++; if (exText.Count < maxEx) exText.Add("{\"id\":" + U.S(r0.Id) + ",\"want\":" + U.S(text) + ",\"have\":" + U.S(r0.Text) + "}"); }
                 ok++;
@@ -418,8 +421,8 @@ namespace HubnerExt
             for (int i = 0; i < recs.Count; i++)
                 if (!used[i] && recs[i].Creator == 0 && recs[i].Pos.x >= lx - 0.5f && recs[i].Pos.x <= hx + 0.5f && recs[i].Pos.z >= lz - 0.5f && recs[i].Pos.z <= hz + 0.5f)
                 { extra++; if (exExtra.Count < maxEx) exExtra.Add(Zdos.Json(recs[i])); }
-            return U.Json("{\"planned\":" + plan.Count + ",\"ok\":" + ok + ",\"moved\":" + moved + ",\"missing\":" + missing + ",\"duplicates\":" + dup + ",\"wrongYaw\":" + badYaw + ",\"wrongText\":" + badText + ",\"extraOfPlanPrefabs\":" + extra +
-                ",\"examples\":{\"missing\":[" + string.Join(",", exMiss.ToArray()) + "],\"moved\":[" + string.Join(",", exMoved.ToArray()) + "],\"duplicates\":[" + string.Join(",", exDup.ToArray()) + "],\"wrongYaw\":[" + string.Join(",", exYaw.ToArray()) + "],\"wrongText\":[" + string.Join(",", exText.ToArray()) + "],\"extra\":[" + string.Join(",", exExtra.ToArray()) + "]}}");
+            return U.Json("{\"planned\":" + plan.Count + ",\"ok\":" + ok + ",\"moved\":" + moved + ",\"missing\":" + missing + ",\"duplicates\":" + dup + ",\"wrongYaw\":" + badYaw + ",\"flipped180\":" + flipped + ",\"wrongText\":" + badText + ",\"extraOfPlanPrefabs\":" + extra +
+                ",\"examples\":{\"missing\":[" + string.Join(",", exMiss.ToArray()) + "],\"moved\":[" + string.Join(",", exMoved.ToArray()) + "],\"duplicates\":[" + string.Join(",", exDup.ToArray()) + "],\"wrongYaw\":[" + string.Join(",", exYaw.ToArray()) + "],\"flipped180\":[" + string.Join(",", exFlip.ToArray()) + "],\"wrongText\":[" + string.Join(",", exText.ToArray()) + "],\"extra\":[" + string.Join(",", exExtra.ToArray()) + "]}}");
         }
     }
 

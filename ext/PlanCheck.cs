@@ -18,7 +18,7 @@ namespace HubnerExt
 
         public static void Register(ToolRegistry r)
         {
-            r.Add("plan_check", "Check a plan BEFORE placing it, from the prefabs' real collider boxes and the game's own structure rules (works on the dedicated server): items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz]}] (max 1500). Reports overlap (a piece that cannot clip is an error, building pieces a warning), unsupported (the structure model of WearNTear: contact by colliders grown 0.15 m, per-material loss, ground = full support; a piece under its material's minimum collapses), weak, tilt, water (sea level 30), yaw-grid (22.5 degrees), fire-clearance (1 m round a fire). Existing pieces in the area count as supporters and obstacles (those of plan:<name> are ignored: the plan replaces them). Ground: groundY (a flat pad) or, by default, the world generator's height, which does not know terrain edits. Read-only. Arguments: plan, items, groundY, margin (default 8), examples (default 10).",
+            r.Add("plan_check", "Check a plan BEFORE placing it, from the prefabs' real collider boxes and the game's own structure rules (works on the dedicated server): items:[{prefab,x,y,z,yaw|rot:[rx,ry,rz]}] (max 1500). Reports overlap (a piece that cannot clip is an error, building pieces a warning), unsupported (the structure model of WearNTear: contact by colliders grown 0.15 m, per-material loss, ground = full support; a piece under its material's minimum collapses), weak, tilt, water (sea level 30), yaw-grid (22.5 degrees), fire-clearance (1 m round a fire). Items with no y are checked at the ground but plan_apply refuses them unless they say seat:\"ground\" (missingY counts them; unknownKeys lists item keys the tools drop). Existing pieces in the area count as supporters and obstacles (those of plan:<name> are ignored: the plan replaces them). Ground: groundY (a flat pad) or, by default, the world generator's height, which does not know terrain edits. Read-only. Arguments: plan, items, groundY, margin (default 8), examples (default 10).",
                 "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"groundY\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Check);
             r.Add("plan_rules", "The rule book of plan_check: every rule with its origin (hard = the world enforces it after a spawn, ghost = only the hammer's placement check does, taste = our preference, never an error), the game's status code and the decompiled source it comes from. Read-only.", "{\"type\":\"object\",\"properties\":{}}", Rules);
         }
@@ -94,10 +94,12 @@ namespace HubnerExt
             else { ground = null; groundNote = "no ground (nothing is grounded)"; }
 
             var planned = new List<PlacedPiece>(); var unknown = new List<string>(); var bad = new List<string>();
-            double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; var idx = 0;
+            double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; var idx = 0; var unknownKeys = new Dictionary<string, int>(); var missingY = 0;
             foreach (var o in items)
             {
                 idx++; var it = o as Dictionary<string, object>; if (it == null) continue;
+                foreach (var uk in PlanItemRules.Unknown(it.Keys)) unknownKeys[uk] = unknownKeys.ContainsKey(uk) ? unknownKeys[uk] + 1 : 1;
+                if (PlanItemRules.MissingY(U.Has(it, "y"), McpJson.GetStr(it, "seat"))) missingY++;
                 var prefab = McpJson.GetStr(it, "prefab"); var geo = string.IsNullOrEmpty(prefab) ? null : Geo(prefab);
                 if (geo == null) { if (unknown.Count < maxEx) unknown.Add("item " + idx + ": " + (prefab ?? "no prefab")); continue; }
                 double x = McpJson.Get(it, "x", double.NaN), y = McpJson.Get(it, "y", double.NaN), z = McpJson.Get(it, "z", double.NaN);
@@ -165,7 +167,7 @@ namespace HubnerExt
 
             var byRule = problems.GroupBy(p => p.Rule + "|" + p.Severity).OrderBy(g => g.Key).ToList();
             var sb = new StringBuilder("{\"planned\":" + planned.Count + ",\"skipped\":" + (items.Count - planned.Count) + ",\"worldPiecesConsidered\":" + world + ",\"ground\":" + U.S(groundNote) + ",\"errors\":" + problems.Count(p => p.Severity == "error") + ",\"warnings\":" + problems.Count(p => p.Severity == "warning") +
-                ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"problems\":[");
+                ",\"unsupported\":" + unsupported + ",\"weak\":" + weak + ",\"minSupport\":" + (double.IsInfinity(minSupport) ? "null" : U.N(Math.Round(minSupport, 1))) + ",\"unknownPrefabs\":[" + string.Join(",", unknown.Select(U.S).ToArray()) + "],\"badItems\":[" + string.Join(",", bad.Select(U.S).ToArray()) + "],\"unknownKeys\":{" + string.Join(",", unknownKeys.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "},\"missingY\":" + missingY + ",\"problems\":[");
             sb.Append(string.Join(",", byRule.Select(g => "{\"rule\":" + U.S(g.First().Rule) + ",\"severity\":" + U.S(g.First().Severity) + ",\"origin\":" + U.S(g.First().Origin) + ",\"code\":" + U.S(g.First().Code) + ",\"count\":" + g.Count() + ",\"examples\":[" + string.Join(",", g.Take(maxEx).Select(p => "{\"piece\":" + U.S(p.Piece) + ",\"detail\":" + U.S(p.Detail) + "}").ToArray()) + "]}").ToArray()));
             sb.Append("]}");
             return U.Json(sb.ToString());

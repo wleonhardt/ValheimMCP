@@ -281,22 +281,18 @@ namespace HubnerExt
         {
             var pts = Pts(a); if (pts.Count > 500) return ToolOutput.Err("max 500 points"); var rows = new List<string>();
             var fh = typeof(Heightmap).GetMethod("FindHeightmap", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector3) }, null);
-            var pm = typeof(Heightmap).GetField("m_paintMask", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-            var w2n = typeof(Heightmap).GetMethod("WorldToNormalizedHM", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             foreach (var p in pts)
             {
                 try
                 {
                     var pos = new Vector3(p[0], 0f, p[1]); var hm = fh == null ? null : fh.Invoke(null, new object[] { pos }) as Heightmap;
-                    var tex = hm == null || pm == null ? null : pm.GetValue(hm) as Texture2D;
-                    if (tex == null || w2n == null) { rows.Add("[" + U.N(p[0]) + "," + U.N(p[1]) + ",null]"); continue; }
-                    var args = new object[] { pos, 0f, 0f }; w2n.Invoke(hm, args);
-                    var c = tex.GetPixelBilinear((float)args[1], (float)args[2]);
-                    rows.Add("[" + U.N(p[0]) + "," + U.N(p[1]) + "," + U.N(Math.Round(c.r, 2)) + "," + U.N(Math.Round(c.g, 2)) + "," + U.N(Math.Round(c.b, 2)) + "," + U.N(Math.Round(c.a, 2)) + "]");
+                    if (hm == null) { rows.Add("[" + U.N(p[0]) + "," + U.N(p[1]) + ",null]"); continue; }
+                    var c = hm.GetPaintMask(pos);                       // the nearest paint pixel, as the game's own IsCultivated / IsCleared read it (not an interpolation)
+                    rows.Add("[" + U.N(p[0]) + "," + U.N(p[1]) + "," + U.N(Math.Round(c.r, 2)) + "," + U.N(Math.Round(c.g, 2)) + "," + U.N(Math.Round(c.b, 2)) + "," + U.N(Math.Round(c.a, 2)) + "," + (hm.IsCultivated(pos) ? "true" : "false") + "," + (hm.IsCleared(pos) ? "true" : "false") + "]");
                 }
                 catch { rows.Add("[" + U.N(p[0]) + "," + U.N(p[1]) + ",null]"); }
             }
-            return U.Json("{\"columns\":[\"x\",\"z\",\"dirt\",\"cultivated\",\"paved\",\"vegetation\"],\"paint\":[" + string.Join(",", rows.ToArray()) + "]}");
+            return U.Json("{\"columns\":[\"x\",\"z\",\"dirt\",\"cultivated\",\"paved\",\"vegetation\",\"isCultivated\",\"isCleared\"],\"paint\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
     }
 }

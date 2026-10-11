@@ -106,6 +106,27 @@ namespace HubnerExt
         }
     }
 
+    /// <summary>The keys a plan_apply item understands, and what a missing one means. A key the tool does not know is dropped silently, so a typo (rotY) would build the wrong thing without a word.</summary>
+    internal static class PlanItemRules
+    {
+        public static readonly HashSet<string> Known = new HashSet<string> { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag" };
+
+        public static List<string> Unknown(IEnumerable<string> keys)
+        {
+            var res = new List<string>(); foreach (var k in keys) if (!Known.Contains(k)) res.Add(k); return res;
+        }
+
+        /// <summary>Without a y an item used to be built at y 0 (far under the sea, which is at 30): y is required unless the item says seat:"ground".</summary>
+        public static bool MissingY(bool hasY, string seat) { return !hasY && seat != "ground"; }
+    }
+
+    /// <summary>What a fireplace's ZDO says about burning (Fireplace.IsBurning, decompiled): on (state 1, the default), and fuel above 0 or infinite fuel. The game also puts a fire out when it is blocked above, under water or its smoke is blocked; those are not stored in the ZDO.</summary>
+    internal static class FireRules
+    {
+        public static bool Burning(int state, double fuel, bool infinite) { return state == 1 && (fuel > 0 || infinite); }
+        public static double FuelToFull(double fuel, double maxFuel, bool infinite) { return infinite ? 0 : Math.Max(0, Math.Floor(maxFuel - fuel)); }
+    }
+
     /// <summary>The rows of the ownership summary.</summary>
     internal static class OwnershipSummary
     {
