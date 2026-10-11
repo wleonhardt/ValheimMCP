@@ -345,6 +345,17 @@ def fuel_case(ctx):
         ctx.check(f"{f['fuel']}: no cover figure means nothing is burning", f['hoursOfCover'] is not None or f['burningPerHour'] == 0, f)
 
 
+def biome_threats_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    m = c.tool('biome_threats', biome='Meadows', armor=10)
+    if m['spawners'] == 0: raise Skip('no spawner list found for Meadows in this game')
+    ctx.check('every spawner has a prefab and a positive spawn interval', all(q['prefab'] and q['intervalSec'] > 0 for q in m['list']), m['list'][:2])
+    ctx.check('the star range is ordered', all(q['levels'][0] <= q['levels'][1] for q in m['list']))
+    p = c.tool('biome_threats', x=x, z=z)
+    for q in p['list']:
+        ctx.check(f"{q['prefab']}: admitted exactly when nothing fails", q['admittedNow'] == (not q['failing']), q)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -437,6 +448,7 @@ CASES = [
     Case('level-check', 'level_check: reach, volumes and strokes agree', level_case),
     Case('cookers', 'cookers: slot states and times agree', cookers_case),
     Case('fuel-forecast', 'fuel_forecast: hours of cover follow from stock and rate', fuel_case),
+    Case('biome-threats', 'biome_threats: spawners are well formed and admission follows the failing conditions', biome_threats_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

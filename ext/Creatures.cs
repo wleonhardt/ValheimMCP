@@ -13,6 +13,8 @@ namespace HubnerExt
         public static void Register(ToolRegistry r)
         {
             RegisterBase(r);
+            r.Add("biome_threats", "What the game can spawn in a biome (SpawnSystem lists, read from the game): for each spawner the creature, how many at most, how often and with what chance, group size, star range, day/night, the global key it needs, altitude, tilt and distance-from-centre limits, whether it spawns in or out of forests, and the creature's top-star health and hardest hit on a player of the given armour. biome = Meadows | BlackForest | Swamp | Mountain | Plains | Mistlands | AshLands | DeepNorth | Ocean; or x,z to take the biome, altitude and ground tilt of a point and say which spawners are admitted there NOW (key set, time of day, altitude, distance from the centre; environment and player distance need the live game and are not judged). armor, playerHp as in creature_info.",
+                "{\"type\":\"object\",\"properties\":{\"biome\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"armor\":{\"type\":\"number\"},\"playerHp\":{\"type\":\"number\"}}}", BiomeThreats);
             r.Add("raid_state", "Random events (raids) as the game runs them: the one running now (name, seconds left, where, range, start message), the roll timer (every interval x event rate seconds the game rolls chance / rate percent; seconds to the next roll), and every event with its duration, whether it needs a base (3 player-base areas, see base_value), biomes, the global keys it needs and forbids, whether those keys are set in this world now, and what it spawns. Read-only; works on the server.",
                 "{\"type\":\"object\",\"properties\":{}}", RaidState);
             r.Add("threats_near", "What round a point could hurt a player of given armour and health, ranked ignore / watch / now: creatures from the ZDO table (works on the server) with distance, level, health, whether alert or after a target (the synced flags: another client's creature has no target stored), the reach and size of its hardest hit after resistance and armour, hits to kill, and seconds to contact at its run speed. Tamed animals and non-hostile ones are ignored; in a PassiveMobs world nothing is 'now' until it is alert and after a target. x,z,radius (default 40, max 120), armor (default 0), playerHp (default 100), limit.",
@@ -49,6 +51,55 @@ namespace HubnerExt
             var players = new List<string>();
             try { foreach (var c in ZNet.instance.GetAllCharacterZDOS()) { var p = c.GetPosition(); if (Math.Sqrt((p.x - x) * (p.x - x) + (p.z - z) * (p.z - z)) < 40) players.Add("{\"name\":" + U.S(c.GetString(ZDOVars.s_playerName, "?")) + ",\"baseValue\":" + c.GetInt(ZDOVars.s_baseValue, 0) + "}"); } } catch (Exception ex) { U.Once("base_value.players", ex); }
             return U.Json("{\"point\":[" + U.N(x) + "," + U.N(Math.Round(y, 1)) + "," + U.N(z) + "],\"value\":" + inReach.Count + ",\"raidEligible\":" + B(BaseValue.RaidEligible(inReach.Count)) + ",\"areas\":[" + string.Join(",", inReach.OrderBy(q => q.X).Take(60).Select(q => "{\"prefab\":" + U.S(q.Prefab) + ",\"pos\":[" + U.N(Math.Round(q.X, 1)) + "," + U.N(Math.Round(q.Y, 1)) + "," + U.N(Math.Round(q.Z, 1)) + "],\"radius\":" + U.N(Math.Round(q.Radius, 1)) + "}").ToArray()) + "],\"charactersNearby\":[" + string.Join(",", players.ToArray()) + "],\"note\":\"radius is the sphere trigger of the prefab (a box or capsule area is approximated by its bounding sphere, which can count an area the game would not)\"}");
+        }
+
+        static List<SpawnSystem.SpawnData> _spawners;
+
+        static List<SpawnSystem.SpawnData> Spawners()
+        {
+            if (_spawners != null || ZNetScene.instance == null) return _spawners ?? new List<SpawnSystem.SpawnData>();
+            var f = typeof(ZNetScene).GetField("m_namedPrefabs", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+            var dict = f != null ? f.GetValue(ZNetScene.instance) as Dictionary<int, GameObject> : null; var list = new List<SpawnSystem.SpawnData>(); var seen = new HashSet<SpawnSystemList>();
+            if (dict != null) foreach (var go in dict.Values)
+            {
+                if (go == null) continue; var ss = go.GetComponent<SpawnSystem>(); if (ss == null) continue;
+                foreach (var l in ss.m_spawnLists) if (l != null && seen.Add(l)) list.AddRange(l.m_spawners);
+            }
+            _spawners = list; return _spawners;
+        }
+
+        static readonly Dictionary<string, int> BiomeNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { { "Meadows", 1 }, { "Swamp", 2 }, { "Mountain", 4 }, { "BlackForest", 8 }, { "Plains", 16 }, { "AshLands", 32 }, { "DeepNorth", 64 }, { "Ocean", 256 }, { "Mistlands", 512 } };
+
+        static ToolOutput BiomeThreats(Dictionary<string, object> a)
+        {
+            if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
+            var armor = U.D(a, "armor", 0); var hp = U.D(a, "playerHp", 100); int biome = 0; double px = 0, py = 0, pz = 0, tilt = 0; var point = U.Has(a, "x") && U.Has(a, "z");
+            var bn = McpJson.GetStr(a, "biome");
+            if (bn != null) { if (!BiomeNames.TryGetValue(bn, out biome)) return ToolOutput.Err("unknown biome " + bn + " (" + string.Join(", ", BiomeNames.Keys.ToArray()) + ")"); }
+            var wg = WorldGenerator.instance;
+            if (point)
+            {
+                px = U.D(a, "x", 0); pz = U.D(a, "z", 0); if (!WorldBounds.InWorld(px, 0, pz)) return ToolOutput.Err("x and z must be finite and inside the world");
+                if (wg == null) return ToolOutput.Err("no world generator");
+                py = wg.GetHeight((float)px, (float)pz); biome = (int)wg.GetBiome((float)px, (float)pz);
+                var gx = wg.GetHeight((float)px + 1, (float)pz) - wg.GetHeight((float)px - 1, (float)pz); var gz = wg.GetHeight((float)px, (float)pz + 1) - wg.GetHeight((float)px, (float)pz - 1);
+                tilt = Math.Atan(Math.Sqrt(gx * gx + gz * gz) / 2) * 180 / Math.PI;
+            }
+            if (biome == 0) return ToolOutput.Err("give biome or x,z");
+            var zs = ZoneSystem.instance; Func<string, bool> keySet = k => zs != null && zs.GetGlobalKey(k);
+            var em = EnvMan.instance; var isDay = true;
+            if (point && em != null && ZNet.instance != null) isDay = DayClock.IsDay(DayClock.Fraction(ZNet.instance.GetTimeSeconds(), em.m_dayLengthSec));
+            var rows = new List<string>();
+            foreach (var sp in Spawners())
+            {
+                if (sp.m_prefab == null || !sp.m_enabled || sp.m_devDisabled || (((int)sp.m_biome) & biome) == 0) continue;
+                var ch = sp.m_prefab.GetComponent<Character>(); double top = 0, best = 0;
+                if (ch != null) { top = CombatRules.MaxHealth(ch.m_health, sp.m_maxLevel); foreach (var at in Attacks(sp.m_prefab)) best = Math.Max(best, CombatRules.Hit(at.Key, null, armor, sp.m_maxLevel)); }
+                var cond = new SpawnConditions { AtDay = sp.m_spawnAtDay, AtNight = sp.m_spawnAtNight, RequiredKey = sp.m_requiredGlobalKey, MinAltitude = sp.m_minAltitude, MaxAltitude = sp.m_maxAltitude, MinDistanceFromCenter = sp.m_minDistanceFromCenter, MaxDistanceFromCenter = sp.m_maxDistanceFromCenter, MinTilt = sp.m_minTilt, MaxTilt = sp.m_maxTilt, BiomeMask = (int)sp.m_biome };
+                var failing = point ? SpawnRules.Failing(cond, biome, px, py, pz, tilt, isDay, keySet) : null;
+                rows.Add("{\"name\":" + U.S(sp.m_name) + ",\"prefab\":" + U.S(sp.m_prefab.name) + ",\"maxSpawned\":" + sp.m_maxSpawned + ",\"intervalSec\":" + U.N(sp.m_spawnInterval) + ",\"chancePercent\":" + U.N(sp.m_spawnChance) + ",\"group\":[" + sp.m_groupSizeMin + "," + sp.m_groupSizeMax + "],\"levels\":[" + sp.m_minLevel + "," + sp.m_maxLevel + "],\"day\":" + B(sp.m_spawnAtDay) + ",\"night\":" + B(sp.m_spawnAtNight) + ",\"requiredKey\":" + U.S(sp.m_requiredGlobalKey) + ",\"requiredEnvironments\":[" + string.Join(",", sp.m_requiredEnvironments.Select(U.S).ToArray()) + "],\"altitude\":[" + U.N(sp.m_minAltitude) + "," + U.N(sp.m_maxAltitude) + "],\"tilt\":[" + U.N(sp.m_minTilt) + "," + U.N(sp.m_maxTilt) + "],\"fromCentre\":[" + U.N(sp.m_minDistanceFromCenter) + "," + U.N(sp.m_maxDistanceFromCenter) + "],\"inForest\":" + B(sp.m_inForest) + ",\"outsideForest\":" + B(sp.m_outsideForest) + ",\"insidePlayerBase\":" + B(sp.m_insidePlayerBase) + ",\"huntsPlayer\":" + B(sp.m_huntPlayer) + ",\"topStarHealth\":" + U.N(Math.Round(top)) + ",\"topStarHardestHit\":" + U.N(Math.Round(best, 1)) + ",\"hitsToKillPlayer\":" + (best > 0 ? CombatRules.HitsToDie(hp, best).ToString(CultureInfo.InvariantCulture) : "null") + (point ? ",\"admittedNow\":" + B(failing.Count == 0) + ",\"failing\":[" + string.Join(",", failing.Select(U.S).ToArray()) + "]" : "") + "}");
+            }
+            return U.Json("{\"biome\":" + biome + (point ? ",\"point\":[" + U.N(px) + "," + U.N(Math.Round(py, 1)) + "," + U.N(pz) + "],\"tiltDegrees\":" + U.N(Math.Round(tilt, 1)) + ",\"day\":" + B(isDay) : "") + ",\"spawners\":" + rows.Count + ",\"list\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
         static ToolOutput RaidState(Dictionary<string, object> a)

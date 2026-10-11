@@ -424,3 +424,30 @@ class FuelCaseTests(unittest.TestCase):
     def test_cookers_fail_when_a_burnt_item_still_has_a_time_to_burn(self):
         self.fake.replies['cookers'] = {'count': 1, 'cookers': [{'prefab': 'grill', 'slots': [{'slot': 0, 'item': 'Coal', 'state': 'burnt', 'secondsToDone': None, 'secondsToBurnt': 12}]}]}
         self.assertEqual(accept.run_case(self.case('cookers'), self.ctx)['verdict'], accept.FAIL)
+
+
+class BiomeCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (5.0, 5.0)
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self): return [c for c in cases.CASES if c.key == 'biome-threats'][0]
+
+    def spawner(self, **kw): return dict({'prefab': 'Boar', 'intervalSec': 4, 'levels': [1, 3], 'failing': [], 'admittedNow': True}, **kw)
+
+    def test_passes_when_admission_follows_the_failing_list(self):
+        self.fake.replies['biome_threats'] = lambda a: {'spawners': 1, 'list': [self.spawner()]}
+        self.assertEqual(accept.run_case(self.case(), self.ctx)['verdict'], accept.PASS)
+
+    def test_fails_when_a_spawner_with_a_failing_condition_is_admitted(self):
+        self.fake.replies['biome_threats'] = lambda a: {'spawners': 1, 'list': [self.spawner(failing=['not by day'])]}
+        self.assertEqual(accept.run_case(self.case(), self.ctx)['verdict'], accept.FAIL)
+
+    def test_is_skipped_without_a_spawner_list(self):
+        self.fake.replies['biome_threats'] = lambda a: {'spawners': 0, 'list': []}
+        self.assertEqual(accept.run_case(self.case(), self.ctx)['verdict'], accept.SKIPPED)

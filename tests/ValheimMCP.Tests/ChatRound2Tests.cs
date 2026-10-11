@@ -739,3 +739,32 @@ public class CookAndUpkeepRulesTests
         Assert.Equal(4, UpkeepRules.HoursOfCover(56, 14)); Assert.True(double.IsPositiveInfinity(UpkeepRules.HoursOfCover(5, 0)));
     }
 }
+
+public class SpawnRulesTests
+{
+    static readonly SpawnConditions Wolf = new SpawnConditions { BiomeMask = 4, AtDay = true, AtNight = true, MinAltitude = 100, MaxAltitude = 1000, MaxTilt = 35, RequiredKey = "defeated_dragon" };
+    static Func<string, bool> Keys(params string[] set) { return k => set.Contains(k); }
+
+    [Fact] public void ASpawnerFailsEachConditionItsPlaceBreaks()
+    {
+        var f = SpawnRules.Failing(Wolf, 1, 0, 50, 0, 50, true, Keys());
+        Assert.Contains("wrong biome", f); Assert.Contains(f, x => x.StartsWith("needs the global key")); Assert.Contains(f, x => x.StartsWith("altitude")); Assert.Contains(f, x => x.StartsWith("ground tilt"));
+    }
+    [Fact] public void AltitudeIsMeasuredFromTheSea() => Assert.Empty(SpawnRules.Failing(Wolf, 4, 0, 135, 0, 10, true, Keys("defeated_dragon")));          // 135 - 30 = 105
+    [Fact] public void NightOnlyAndDayOnlySpawnersFollowTheClock()
+    {
+        var night = new SpawnConditions { BiomeMask = 1, AtDay = false };
+        Assert.Contains("not by day", SpawnRules.Failing(night, 1, 0, 40, 0, 0, true, Keys()));
+        Assert.Empty(SpawnRules.Failing(night, 1, 0, 40, 0, 0, false, Keys()));
+    }
+    [Fact] public void DistanceFromTheCentreIsFlat()
+    {
+        var far = new SpawnConditions { BiomeMask = 1, MinDistanceFromCenter = 1000 };
+        Assert.Contains(SpawnRules.Failing(far, 1, 300, 40, 400, 0, true, Keys()), x => x.StartsWith("closer"));       // 500 m out
+        Assert.Empty(SpawnRules.Failing(far, 1, 800, 40, 800, 0, true, Keys()));                                         // 1131 m out
+    }
+    [Fact] public void SpawnsSinceTheLastVisitAreCappedAtMaxSpawned()
+    {
+        Assert.Equal(3, SpawnRules.SpawnsAfter(100, 30, 5)); Assert.Equal(5, SpawnRules.SpawnsAfter(10000, 30, 5)); Assert.Equal(1, SpawnRules.SpawnsAfter(10000, 30, 0)); Assert.Equal(0, SpawnRules.SpawnsAfter(10, 30, 5));
+    }
+}

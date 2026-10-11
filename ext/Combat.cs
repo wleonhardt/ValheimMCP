@@ -123,4 +123,36 @@ namespace HubnerExt
             return Threat.Watch;
         }
     }
+
+    internal sealed class SpawnConditions
+    {
+        public bool AtDay = true, AtNight = true; public string RequiredKey = ""; public double MinAltitude = -1000, MaxAltitude = 1000, MinDistanceFromCenter, MaxDistanceFromCenter;
+        public double MinTilt, MaxTilt = 35; public int BiomeMask;
+    }
+
+    /// <summary>
+    ///     Which of SpawnSystem's conditions a place fails (SpawnSystem.UpdateSpawning and FindSpawnPoint, decompiled). Altitude is measured from the sea (y - 30); the distance from the
+    ///     centre is flat from (0, 0); tilt is the angle of the ground (the spawner wants the ground normal between cos(max) and cos(min)). Environment, forest, lava and player
+    ///     distance need the live game and are not judged.
+    /// </summary>
+    internal static class SpawnRules
+    {
+        public static List<string> Failing(SpawnConditions c, int biome, double x, double y, double z, double tiltDeg, bool isDay, Func<string, bool> keySet)
+        {
+            var f = new List<string>();
+            if ((c.BiomeMask & biome) == 0) f.Add("wrong biome");
+            if (!string.IsNullOrEmpty(c.RequiredKey) && !keySet(c.RequiredKey)) f.Add("needs the global key " + c.RequiredKey);
+            if (isDay && !c.AtDay) f.Add("not by day");
+            if (!isDay && !c.AtNight) f.Add("not by night");
+            var alt = y - 30; if (alt < c.MinAltitude || alt > c.MaxAltitude) f.Add("altitude " + Math.Round(alt, 1) + " outside " + c.MinAltitude + ".." + c.MaxAltitude);
+            var centre = Math.Sqrt(x * x + z * z);
+            if (c.MinDistanceFromCenter > 0 && centre < c.MinDistanceFromCenter) f.Add("closer to the world centre than " + c.MinDistanceFromCenter + " m");
+            if (c.MaxDistanceFromCenter > 0 && centre > c.MaxDistanceFromCenter) f.Add("farther from the world centre than " + c.MaxDistanceFromCenter + " m");
+            if (tiltDeg > c.MaxTilt || tiltDeg < c.MinTilt) f.Add("ground tilt " + Math.Round(tiltDeg) + " degrees outside " + c.MinTilt + ".." + c.MaxTilt);
+            return f;
+        }
+
+        /// <summary>The game counts spawns since the last visit: up to maxSpawned, one per interval (UpdateSpawning).</summary>
+        public static int SpawnsAfter(double secondsAway, double interval, int maxSpawned) { return interval <= 0 ? 0 : (int)Math.Min(maxSpawned == 0 ? 1 : maxSpawned, Math.Floor(secondsAway / interval)); }
+    }
 }
