@@ -34,6 +34,7 @@ namespace HubnerExt
             InsightShared.Register(r);
             VirtualPeers.Register(r);
             Neighbours.Register(r);
+            ClockTools.Register(r);
             WorldEvents.Register(r);
             PlanCheck.Register(r);
             Journal.Load();

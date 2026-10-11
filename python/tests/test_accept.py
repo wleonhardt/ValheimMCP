@@ -189,3 +189,29 @@ class CaseOnFakeTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WorldClockCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp'))
+        self.case = [c for c in cases.CASES if c.key == 'world-clock'][0]
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    GOOD = {'dayFraction': 0.9, 'isNight': True, 'isAfternoon': False, 'secondsToDusk': 1500, 'secondsToDawn': 400, 'dayLengthSec': 1800, 'sleepWindow': True, 'characters': 2, 'inBed': 1, 'notInBed': ['Freya'], 'nightSkips': False}
+
+    def test_passes_on_a_consistent_clock(self):
+        self.fake.replies['world_clock'] = self.GOOD; self.fake.replies['env_state'] = {'dayFraction': 0.9}
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.PASS)
+
+    def test_fails_when_the_night_skips_with_somebody_out_of_bed(self):
+        self.fake.replies['world_clock'] = dict(self.GOOD, nightSkips=True); self.fake.replies['env_state'] = {'dayFraction': 0.9}
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.FAIL)
+
+    def test_fails_when_the_client_sees_another_time(self):
+        self.fake.replies['world_clock'] = self.GOOD; self.fake.replies['env_state'] = {'dayFraction': 0.4}
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.FAIL)

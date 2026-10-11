@@ -200,3 +200,41 @@ public class ChatCorpusTests
     [Theory, MemberData(nameof(Cases))] public void TheCorpusGetsItsHints(string text, string[] has, string[] lacks) => Judge(text, has, lacks);
     [Theory, MemberData(nameof(Holdout))] public void TheHoldoutSetGetsItsHintsToo(string text, string[] has, string[] lacks) => Judge(text, has, lacks);
 }
+
+public class DayClockTests
+{
+    [Fact] public void TheLitPartOfTheDayIsRawFifteenToEightyFivePercent()
+    {
+        Assert.Equal(0.25, DayClock.Rescale(0.15), 9); Assert.Equal(0.5, DayClock.Rescale(0.5), 9); Assert.Equal(0.75, DayClock.Rescale(0.85), 9);
+        Assert.Equal(0.0, DayClock.Rescale(0.0), 9); Assert.Equal(1.0, DayClock.Rescale(1.0), 9);
+    }
+    [Theory] [InlineData(0.0)] [InlineData(0.1)] [InlineData(0.15)] [InlineData(0.3)] [InlineData(0.5)] [InlineData(0.84)] [InlineData(0.9)] [InlineData(0.99)]
+    public void UnscaleUndoesRescale(double raw) => Assert.Equal(raw, DayClock.Unscale(DayClock.Rescale(raw)), 9);
+    [Fact] public void TheClockFollowsTheWorldTimeAndTheDayLength()
+    {
+        Assert.Equal(0.5, DayClock.Raw(900, 1800), 9);                       // half a 1800 s day
+        Assert.Equal(0.5, DayClock.Raw(1200 + 600, 1200), 9);                // the same clock on a 1200 s day, second day
+        Assert.Equal(0.0, DayClock.Raw(10, 0), 9);                           // an unknown day length does not divide by zero
+    }
+    [Fact] public void DayAfternoonAndNightMatchTheGamesBounds()
+    {
+        Assert.True(DayClock.IsDay(0.25) && DayClock.IsDay(0.75) && !DayClock.IsDay(0.24)); Assert.True(DayClock.IsAfternoon(0.5) && !DayClock.IsAfternoon(0.49));
+        Assert.True(DayClock.IsNight(0.25) && DayClock.IsNight(0.75) && DayClock.IsNight(0.0) && !DayClock.IsNight(0.5));
+    }
+    [Fact] public void SecondsToDuskAndDawnWrapRoundTheDay()
+    {
+        // 1800 s day. At raw 0.5 (900 s) the next dusk is at raw 0.85 = 1530 s: 630 s away; the next dawn is raw 0.15 of the next day = 1800+270: 1170 s away
+        Assert.Equal(630, DayClock.SecondsUntil(900, 1800, 0.75), 6);
+        Assert.Equal(1170, DayClock.SecondsUntil(900, 1800, 0.25), 6);
+        Assert.Equal(0, DayClock.SecondsUntil(1530, 1800, 0.75), 6);
+    }
+    [Fact] public void SleepingNeedsTheWindowAndTheCooldownToBeOver()
+    {
+        Assert.True(DayClock.CanSleepNow(0.6, 100)); Assert.True(DayClock.CanSleepNow(0.9, 100));
+        Assert.False(DayClock.CanSleepNow(0.4, 100)); Assert.False(DayClock.CanSleepNow(0.9, 10));
+    }
+    [Fact] public void TheNightSkipsOnlyWhenEveryCharacterIsInBed()
+    {
+        Assert.True(DayClock.NightSkips(0.9, 3, 3)); Assert.False(DayClock.NightSkips(0.9, 3, 2)); Assert.False(DayClock.NightSkips(0.9, 0, 0)); Assert.False(DayClock.NightSkips(0.4, 2, 2));
+    }
+}

@@ -141,6 +141,57 @@ namespace HubnerExt
         }
     }
 
+    /// <summary>
+    ///     The game's day (EnvMan, decompiled). Raw day fraction = world time mod day length. The game rescales it so that the lit part is 0.25..0.75: raw 0.15..0.85 (70 % of the day)
+    ///     maps there, the rest is night. Day = rescaled 0.25..0.75, afternoon = 0.5..0.75, night = up to 0.25 or from 0.75. The day length is a field of EnvMan: read it, never assume it.
+    /// </summary>
+    internal static class DayClock
+    {
+        public const double SleepCooldownSeconds = 30;           // EnvMan.m_sleepCooldownSeconds after waking
+
+        public static double Raw(double totalSeconds, double dayLengthSec)
+        {
+            if (dayLengthSec <= 0) return 0;
+            var t = (totalSeconds * 1000.0) % (dayLengthSec * 1000.0);
+            return Math.Max(0, Math.Min(1, t / 1000.0 / dayLengthSec));
+        }
+
+        public static double Rescale(double raw)
+        {
+            if (raw >= 0.15 && raw <= 0.85) return 0.25 + (raw - 0.15) / 0.7 * 0.5;
+            if (raw < 0.5) return raw / 0.15 * 0.25;
+            return 0.75 + (raw - 0.85) / 0.15 * 0.25;
+        }
+
+        /// <summary>The inverse of <see cref="Rescale" />.</summary>
+        public static double Unscale(double f)
+        {
+            if (f >= 0.25 && f <= 0.75) return 0.15 + (f - 0.25) / 0.5 * 0.7;
+            if (f < 0.25) return f / 0.25 * 0.15;
+            return 0.85 + (f - 0.75) / 0.25 * 0.15;
+        }
+
+        public static double Fraction(double totalSeconds, double dayLengthSec) { return Rescale(Raw(totalSeconds, dayLengthSec)); }
+        public static bool IsDay(double f) { return f >= 0.25 && f <= 0.75; }
+        public static bool IsAfternoon(double f) { return f >= 0.5 && f <= 0.75; }
+        public static bool IsNight(double f) { return f <= 0.25 || f >= 0.75; }
+        public static string Phase(double f) { return f < 0.25 ? "night (before dawn)" : f < 0.5 ? "morning" : f <= 0.75 ? "afternoon" : "night (after dusk)"; }
+
+        /// <summary>Seconds until the rescaled fraction next reaches <paramref name="target" /> (0.25 dawn, 0.75 dusk); at least 0.</summary>
+        public static double SecondsUntil(double totalSeconds, double dayLengthSec, double target)
+        {
+            var raw = Raw(totalSeconds, dayLengthSec); var want = Unscale(target);
+            var d = want - raw; if (d < 0) d += 1;
+            return d * dayLengthSec;
+        }
+
+        /// <summary>Is sleeping allowed by the clock: afternoon or night, and the cooldown after waking is over. EnvMan.CalculateCanSleep.</summary>
+        public static bool CanSleepNow(double f, double secondsSinceWake) { return (IsAfternoon(f) || IsNight(f)) && secondsSinceWake > SleepCooldownSeconds; }
+
+        /// <summary>Game.UpdateSleeping on the server: the night is skipped when the clock allows it and EVERY character ZDO is in bed (and there is at least one).</summary>
+        public static bool NightSkips(double f, int characters, int inBed) { return (IsAfternoon(f) || IsNight(f)) && characters > 0 && inBed == characters; }
+    }
+
     /// <summary>The rows of the ownership summary.</summary>
     internal static class OwnershipSummary
     {

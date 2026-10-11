@@ -16,7 +16,7 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
     <ItemGroup>
-        <Compile Include="Pure.cs" /><Compile Include="WalkRules.cs" /><Compile Include="Rules.cs" /><Compile Include="PlanRules.cs" /><Compile Include="Neighbours.cs" /><Compile Include="WorldEvents.cs" /><Compile Include="PlanCheck.cs" /><Compile Include="Common.cs" /><Compile Include="FlatJson.cs" /><Compile Include="Shared.cs" /><Compile Include="Plans.cs" /><Compile Include="Audit.cs" /><Compile Include="InsightShared.cs" /><Compile Include="VirtualPeers.cs" /><Compile Include="ClientTools.cs" /><Compile Include="Geo.cs" /><Compile Include="Reg.cs" />
+        <Compile Include="Pure.cs" /><Compile Include="WalkRules.cs" /><Compile Include="Rules.cs" /><Compile Include="PlanRules.cs" /><Compile Include="Neighbours.cs" /><Compile Include="Clock.cs" /><Compile Include="WorldEvents.cs" /><Compile Include="PlanCheck.cs" /><Compile Include="Common.cs" /><Compile Include="FlatJson.cs" /><Compile Include="Shared.cs" /><Compile Include="Plans.cs" /><Compile Include="Audit.cs" /><Compile Include="InsightShared.cs" /><Compile Include="VirtualPeers.cs" /><Compile Include="ClientTools.cs" /><Compile Include="Geo.cs" /><Compile Include="Reg.cs" />
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3"><PrivateAssets>all</PrivateAssets></PackageReference>

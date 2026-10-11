@@ -147,6 +147,18 @@ def portals_complete(ctx):
     ctx.check('the list says whether it is complete', 'complete' in r and 'source' in r, list(r))
 
 
+def world_clock(ctx):
+    c = ctx.client('any'); w = c.tool('world_clock')
+    ctx.check('the fraction is in 0..1', 0 <= w['dayFraction'] <= 1, w['dayFraction'])
+    ctx.check('day, afternoon and night agree with the fraction', w['isNight'] == (w['dayFraction'] <= 0.25 or w['dayFraction'] >= 0.75) and w['isAfternoon'] == (0.5 <= w['dayFraction'] <= 0.75), w)
+    ctx.check('the seconds to dusk and dawn fit in one day', 0 <= w['secondsToDusk'] <= w['dayLengthSec'] and 0 <= w['secondsToDawn'] <= w['dayLengthSec'], (w['secondsToDusk'], w['secondsToDawn']))
+    ctx.check('the night skips only when the window is open and everybody is in bed', w['nightSkips'] == (w['sleepWindow'] and w['characters'] > 0 and w['inBed'] == w['characters']), w)
+    ctx.check('who is not in bed adds up', len(w['notInBed']) == w['characters'] - w['inBed'], w)
+    try: client_f = ctx.client('sandbox').tool('env_state')['dayFraction']
+    except Exception: return
+    ctx.check('the client sees the same time of day (within 0.03)', abs(client_f - w['dayFraction']) < 0.03 or abs(abs(client_f - w['dayFraction']) - 1) < 0.03, (client_f, w['dayFraction']))
+
+
 # ---------------------------------------------------------------- acting (build their own scenario, remove it again)
 def _spot_pre(ctx):
     if ctx.test_xz == (0.0, 0.0): return 'set HUBNER_TEST_X / HUBNER_TEST_Z to a quiet spot (the case builds three poles there and removes them)'
@@ -212,6 +224,7 @@ CASES = [
     Case('chat-tags', 'chat_tail rows carry trust, hints, ours and to', chat_tags),
     Case('log-collapse', 'log_tail folds repeats and says how many are distinct', log_collapse),
     Case('objects-digest', 'objects digest:true adds up', objects_digest),
+    Case('world-clock', 'world_clock agrees with itself and with the client', world_clock),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),
     Case('remove-collapse', 'plan_remove refuses to take a foot from under a tower', collapse_case, acts=True, pre=_spot_pre, clean=collapse_clean),
