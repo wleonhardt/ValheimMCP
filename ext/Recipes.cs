@@ -23,6 +23,10 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}}}", Stations);
             r.Add("smelters", "Smelters, blast furnaces, charcoal kilns, windmills, spinning wheels and eitr refineries round a point or in a box, from the ZDO table (works on the server): the ore queue (names, how many, room left), fuel and how many fuel presses the game still accepts (it refuses above max - 1), fuel needed for what is queued and seconds of fuel left, seconds to finish the queue, products held back until the empty switch is used, what it accepts and what it makes, and why it stands still (no ore, out of fuel). A windmill-driven machine runs at the windmill's power, which is not stored: times assume power 1. A roof or blocked smoke needs the physics and is not judged here.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", Smelters);
+            r.Add("cookers", "Cooking stations (grills, ovens, cauldrons with slots, drying racks) round a point or in a box, from the ZDO table: each slot's item, its status (cooking, done, burnt), seconds until done and until it burns (twice the cook time, if the station can overcook), fuel for the ones that burn fuel and hours left. Whether a fire-lit station's fire is lit is not stored: the times assume it is. x,z,radius (default 40, max 150) or box.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}}}", Cookers);
+            r.Add("fuel_forecast", "What a base burns and how long its chests cover it, per fuel item: every fireplace, smelter and fuel-burning cooker in the area with its fuel, the fuel units it burns per hour while it works, and the stock of that fuel item in the chests of the same area, so 'the hearth and two braziers need 14 wood an hour and the chests hold 60: four hours'. Hours are for the fuel already inside plus the chests. x,z,radius (default 40, max 150) or box. A fireplace that is switched off or empty burns nothing; a smelter burns only with ore queued.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}}}", FuelForecast);
             r.Add("plan_materials", "The bill of materials of a plan: items:[{prefab,...}] as for plan_apply. Sums Piece.m_resources per item, the crafting stations the pieces need (by name, in range of whoever builds by hand), pieces the world makes free (NoBuildCost; items and feasts use NoCraftCost), unknown prefabs, and, with x,z,radius or a box, what the chests there hold and what is missing. standing:true leaves out items that already stand within 0.35 m. Read-only.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"standing\":{\"type\":\"boolean\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"items\"]}", PlanMaterials);
         }
@@ -178,6 +182,72 @@ namespace HubnerExt
                     ",\"fuelSecondsLeft\":" + (spec.MaxFuel <= 0 ? "null" : U.N(Math.Round(SmelterMath.FuelSecondsLeft(spec, fuel, 1)))) + ",\"secondsToEmpty\":" + U.N(Math.Round(SmelterMath.SecondsToEmpty(spec, queued, bake, 1))) + ",\"heldBack\":{\"item\":" + U.S(held) + ",\"amount\":" + heldN + "},\"stalled\":" + U.S(stalled) + ",\"needsRoof\":" + B(spec.RequiresRoof) + ",\"windmill\":" + B(sm.m_windmill != null) + ",\"accepts\":[" + string.Join(",", accepts.Select(U.S).ToArray()) + "],\"makes\":[" + string.Join(",", makes.Select(U.S).ToArray()) + "]}");
             }
             return U.Json("{\"total\":" + total + ",\"returned\":" + rows.Count + ",\"smelters\":[" + string.Join(",", rows.ToArray()) + "]}");
+        }
+
+        static ToolOutput Cookers(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready) return ToolOutput.Err("world not ready");
+            float x0, z0, x1, z1; string err;
+            if (!Box(a, out x0, out z0, out x1, out z1, out err)) return ToolOutput.Err(err ?? "give x,z[,radius] or x0,z0,x1,z1");
+            var rows = new List<string>(); var cache = new Dictionary<int, GameObject>();
+            foreach (var z in Zdos.InBox(x0, z0, x1, z1))
+            {
+                var h = z.GetPrefab(); GameObject go; if (!cache.TryGetValue(h, out go)) cache[h] = go = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(h) : null;
+                var cs = go != null ? go.GetComponent<CookingStation>() : null; if (cs == null) continue;
+                var slots = new List<string>();
+                for (var i = 0; i < cs.m_slots.Length; i++)
+                {
+                    var item = z.GetString("slot" + i, ""); if (item.Length == 0) { slots.Add("{\"slot\":" + i + ",\"item\":null}"); continue; }
+                    var cooked = z.GetFloat("slot" + i, 0f); var status = z.GetInt("slotstatus" + i, 0);
+                    var conv = cs.m_conversion.FirstOrDefault(c => c.m_from != null && (c.m_from.gameObject.name == item || (c.m_to != null && c.m_to.gameObject.name == item)));
+                    var ct = conv != null ? conv.m_cookTime : 0f;
+                    slots.Add("{\"slot\":" + i + ",\"item\":" + U.S(item) + ",\"state\":" + U.S(CookRules.State(status)) + ",\"cookedSeconds\":" + U.N(Math.Round(cooked)) + ",\"secondsToDone\":" + (status == 0 && ct > 0 ? U.N(Math.Round(CookRules.SecondsToDone(cooked, ct))) : "null") + ",\"secondsToBurnt\":" + (status != 2 && ct > 0 && cs.m_canOvercookItems ? U.N(Math.Round(CookRules.SecondsToBurnt(cooked, ct))) : "null") + "}");
+                }
+                var fuel = z.GetFloat("fuel", 0f);
+                rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(go.name) + ",\"pos\":" + U.V(z.GetPosition()) + ",\"needsFire\":" + B(cs.m_requireFire) + ",\"usesFuel\":" + B(cs.m_useFuel) + (cs.m_useFuel ? ",\"fuel\":" + U.N(Math.Round(fuel, 2)) + ",\"maxFuel\":" + cs.m_maxFuel + ",\"fuelHoursLeft\":" + U.N(Math.Round(UpkeepRules.HoursOfCover(fuel, UpkeepRules.UnitsPerHour(cs.m_secPerFuel)), 1)) : "") + ",\"canOvercook\":" + B(cs.m_canOvercookItems) + ",\"slots\":[" + string.Join(",", slots.ToArray()) + "]}");
+            }
+            return U.Json("{\"count\":" + rows.Count + ",\"cookers\":[" + string.Join(",", rows.Take(100).ToArray()) + "]}");
+        }
+
+        static ToolOutput FuelForecast(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready) return ToolOutput.Err("world not ready");
+            float x0, z0, x1, z1; string err;
+            if (!Box(a, out x0, out z0, out x1, out z1, out err)) return ToolOutput.Err(err ?? "give x,z[,radius] or x0,z0,x1,z1");
+            var cache = new Dictionary<int, GameObject>(); var rate = new Dictionary<string, double>(); var inside = new Dictionary<string, double>(); var users = new Dictionary<string, int>();
+            Action<string, double, double> add = (item, perHour, fuelInside) => { rate[item] = (rate.ContainsKey(item) ? rate[item] : 0) + perHour; inside[item] = (inside.ContainsKey(item) ? inside[item] : 0) + fuelInside; users[item] = (users.ContainsKey(item) ? users[item] : 0) + 1; };
+            foreach (var z in Zdos.InBox(x0, z0, x1, z1))
+            {
+                var h = z.GetPrefab(); GameObject go; if (!cache.TryGetValue(h, out go)) cache[h] = go = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(h) : null; if (go == null) continue;
+                var fp = go.GetComponent<Fireplace>();
+                if (fp != null && fp.m_fuelItem != null && !fp.m_infiniteFuel && fp.m_secPerFuel > 0)
+                {
+                    var fuel = z.GetFloat("fuel", 0f);
+                    add(fp.m_fuelItem.gameObject.name, FireRules.Burning(z.GetInt("state", 1), fuel, false) ? UpkeepRules.UnitsPerHour(fp.m_secPerFuel) : 0, fuel);
+                    continue;
+                }
+                var sm = go.GetComponent<Smelter>();
+                if (sm != null && sm.m_fuelItem != null && sm.m_maxFuel > 0)
+                {
+                    var queued = z.GetInt(ZDOVars.s_queued, 0); var fuel = z.GetFloat(ZDOVars.s_fuel, 0f);
+                    add(sm.m_fuelItem.gameObject.name, queued > 0 && fuel > 0 ? sm.m_fuelPerProduct * 3600.0 / sm.m_secPerProduct : 0, fuel);
+                    continue;
+                }
+                var cs = go.GetComponent<CookingStation>();
+                if (cs != null && cs.m_useFuel && cs.m_fuelItem != null)
+                {
+                    var fuel = z.GetFloat("fuel", 0f); var busy = Enumerable.Range(0, cs.m_slots.Length).Any(i => z.GetString("slot" + i, "").Length > 0);
+                    add(cs.m_fuelItem.gameObject.name, fuel > 0 && (cs.m_useFueldWhileEmpty || busy) ? UpkeepRules.UnitsPerHour(cs.m_secPerFuel) : 0, fuel);
+                }
+            }
+            int chests; var stock = Stock(x0, z0, x1, z1, out chests);
+            var rows = rate.Keys.OrderByDescending(k => rate[k]).Select(k =>
+            {
+                var have = stock.ContainsKey(k) ? stock[k] : 0; var total = have + inside[k];
+                var hours = UpkeepRules.HoursOfCover(total, rate[k]);
+                return "{\"fuel\":" + U.S(k) + ",\"burners\":" + users[k] + ",\"burningPerHour\":" + U.N(Math.Round(rate[k], 2)) + ",\"insideThem\":" + U.N(Math.Round(inside[k], 1)) + ",\"inChests\":" + have + ",\"hoursOfCover\":" + (double.IsInfinity(hours) ? "null" : U.N(Math.Round(hours, 1))) + "}";
+            });
+            return U.Json("{\"chests\":" + chests + ",\"fuels\":[" + string.Join(",", rows.ToArray()) + "],\"note\":\"the hours count the fuel already inside the burners and the chests of the same area, at the rate they burn now\"}");
         }
 
         static string CostKeys()

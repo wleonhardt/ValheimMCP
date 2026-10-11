@@ -399,3 +399,28 @@ class LevelCaseTests(unittest.TestCase):
     def test_fails_when_a_target_far_above_is_called_reachable(self):
         self.fake.replies['level_check'] = lambda a: dict(self.answer(a), unreachable=0)
         self.assertEqual(accept.run_case(self.case(), self.ctx)['verdict'], accept.FAIL)
+
+
+class FuelCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (5.0, 5.0)
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self, key): return [c for c in cases.CASES if c.key == key][0]
+
+    def test_fuel_passes_when_the_hours_follow_from_the_numbers(self):
+        self.fake.replies['fuel_forecast'] = {'fuels': [{'fuel': 'Wood', 'burningPerHour': 14, 'insideThem': 6, 'inChests': 50, 'hoursOfCover': 4.0}]}
+        self.assertEqual(accept.run_case(self.case('fuel-forecast'), self.ctx)['verdict'], accept.PASS)
+
+    def test_fuel_fails_when_they_do_not(self):
+        self.fake.replies['fuel_forecast'] = {'fuels': [{'fuel': 'Wood', 'burningPerHour': 14, 'insideThem': 6, 'inChests': 50, 'hoursOfCover': 9.0}]}
+        self.assertEqual(accept.run_case(self.case('fuel-forecast'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_cookers_fail_when_a_burnt_item_still_has_a_time_to_burn(self):
+        self.fake.replies['cookers'] = {'count': 1, 'cookers': [{'prefab': 'grill', 'slots': [{'slot': 0, 'item': 'Coal', 'state': 'burnt', 'secondsToDone': None, 'secondsToBurnt': 12}]}]}
+        self.assertEqual(accept.run_case(self.case('cookers'), self.ctx)['verdict'], accept.FAIL)

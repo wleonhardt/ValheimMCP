@@ -717,3 +717,25 @@ public class TerrainOpsTests
         Assert.Equal(8, r.Unreachable); Assert.Equal(17, r.MaxShortfall, 9);              // x=2,3 stand on base 30: the target 5 is 25 m below it, 8 m is the most a stroke moves
     }
 }
+
+public class CookAndUpkeepRulesTests
+{
+    [Fact] public void ItIsDoneAfterTheCookTimeAndBurntAfterTwiceIt()
+    {
+        Assert.Equal(20, CookRules.SecondsToDone(10, 30)); Assert.Equal(0, CookRules.SecondsToDone(40, 30));
+        Assert.Equal(50, CookRules.SecondsToBurnt(10, 30)); Assert.Equal(0, CookRules.SecondsToBurnt(70, 30));
+    }
+    [Fact] public void TheStatusEnumIsTheGames() { Assert.Equal("cooking", CookRules.State(0)); Assert.Equal("done", CookRules.State(1)); Assert.Equal("burnt", CookRules.State(2)); }
+    [Fact] public void ALineSaysWhatToDo()
+    {
+        Assert.Equal("Meat is done in 20 s", CookRules.Describe("Meat", 0, 10, 30, true));
+        Assert.Equal("CookedMeat is done, burns in 50 s", CookRules.Describe("CookedMeat", 1, 10, 30, true));
+        Assert.Equal("CookedMeat is done", CookRules.Describe("CookedMeat", 1, 10, 30, false));
+        Assert.Equal("Coal is burnt", CookRules.Describe("Coal", 2, 70, 30, true));
+    }
+    [Fact] public void FuelRatesAndCover()
+    {
+        Assert.Equal(1200, UpkeepRules.UnitsPerHour(3)); Assert.Equal(0.72, UpkeepRules.UnitsPerHour(5000), 6); Assert.Equal(0, UpkeepRules.UnitsPerHour(0));
+        Assert.Equal(4, UpkeepRules.HoursOfCover(56, 14)); Assert.True(double.IsPositiveInfinity(UpkeepRules.HoursOfCover(5, 0)));
+    }
+}

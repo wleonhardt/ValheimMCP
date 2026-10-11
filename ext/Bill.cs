@@ -189,4 +189,29 @@ namespace HubnerExt
             return null;
         }
     }
+
+    /// <summary>CookingStation.UpdateCooking (decompiled): while the fire is lit (or the station has fuel) a slot's cooked time grows by a second per second; after the cook time the item is done, after twice that it burns (if the station can overcook).</summary>
+    internal static class CookRules
+    {
+        public static double SecondsToDone(double cooked, double cookTime) { return Math.Max(0, cookTime - cooked); }
+        public static double SecondsToBurnt(double cooked, double cookTime) { return Math.Max(0, 2 * cookTime - cooked); }
+
+        /// <summary>0 not done, 1 done, 2 burnt (the game's status enum, stored as "slotstatus").</summary>
+        public static string State(int status) { return status == 1 ? "done" : status == 2 ? "burnt" : "cooking"; }
+
+        /// <summary>A line for a slot: when it is ready and when it burns.</summary>
+        public static string Describe(string item, int status, double cooked, double cookTime, bool canOvercook)
+        {
+            if (status == 2) return item + " is burnt";
+            if (status == 1) return item + " is done" + (canOvercook ? ", burns in " + Math.Round(SecondsToBurnt(cooked, cookTime)) + " s" : "");
+            return item + " is done in " + Math.Round(SecondsToDone(cooked, cookTime)) + " s";
+        }
+    }
+
+    /// <summary>Fuel consumption: how long a stock lasts at a rate, and what a fireplace burns per hour.</summary>
+    internal static class UpkeepRules
+    {
+        public static double UnitsPerHour(double secPerUnit) { return secPerUnit <= 0 ? 0 : 3600.0 / secPerUnit; }
+        public static double HoursOfCover(double stock, double perHour) { return perHour <= 0 ? double.PositiveInfinity : stock / perHour; }
+    }
 }

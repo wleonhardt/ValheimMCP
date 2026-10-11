@@ -323,6 +323,28 @@ def level_case(ctx):
     ctx.check('every level tool needs at least one stroke', all(t['strokes'] >= 1 for t in r['levelTools']), r['levelTools'])
 
 
+def cookers_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('cookers', x=x, z=z, radius=100)
+    if r['count'] == 0: raise Skip(f'no cooking station within 100 m of {x},{z}')
+    for k in r['cookers']:
+        for s in k['slots']:
+            if s['item'] is None: continue
+            ctx.check(f"{k['prefab']} slot {s['slot']}: a burnt item has no time left to burn", s['state'] != 'burnt' or s['secondsToBurnt'] is None, s)
+            ctx.check(f"{k['prefab']} slot {s['slot']}: only an item still cooking has a time to done", s['state'] == 'cooking' or s['secondsToDone'] is None, s)
+            ctx.check(f"{k['prefab']} slot {s['slot']}: done comes before burnt", s['secondsToDone'] is None or s['secondsToBurnt'] is None or s['secondsToDone'] <= s['secondsToBurnt'], s)
+
+
+def fuel_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('fuel_forecast', x=x, z=z, radius=60)
+    if not r['fuels']: raise Skip(f'no fireplace, smelter or fuel-burning cooker within 60 m of {x},{z}')
+    for f in r['fuels']:
+        if f['hoursOfCover'] is not None and f['burningPerHour'] > 0:
+            ctx.check(f"{f['fuel']}: hours = (inside + chests) / rate", abs(f['hoursOfCover'] - (f['insideThem'] + f['inChests']) / f['burningPerHour']) < 0.2, f)
+        ctx.check(f"{f['fuel']}: no cover figure means nothing is burning", f['hoursOfCover'] is not None or f['burningPerHour'] == 0, f)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -413,6 +435,8 @@ CASES = [
     Case('raid-state', 'raid_state: roll timer and events agree', raid_case),
     Case('threats-near', 'threats_near: ranked, tamed ignored, passive worlds respected', threats_case),
     Case('level-check', 'level_check: reach, volumes and strokes agree', level_case),
+    Case('cookers', 'cookers: slot states and times agree', cookers_case),
+    Case('fuel-forecast', 'fuel_forecast: hours of cover follow from stock and rate', fuel_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),
