@@ -160,7 +160,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}},\"required\":[\"points\"]}", BiomeAt);
             r.Add("fires", "Fireplaces (fires, torches, braziers, hearths) in a box or round a point, from the ZDO table: prefab, position, fuel, max fuel, seconds of burning left, the on/off state (a switchable fire that was turned off, or put out by wet weather, does not burn and spends no fuel; plain use toggles a switchable fire off, adding fuel to one needs the alternate use), the fuel item, and whether it burns by that state and its fuel. It cannot see a fire the game puts out for being blocked above, under water or with blocked smoke: plan_check judges the first from geometry. Arguments x,z,radius (default 40) or x0,z0,x1,z1; limit (default 200).",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", Fires);
-            r.Add("husbandry_state", "Tameable creatures round a point from the ZDO table: prefab, position, tamed, name, level, fed seconds left and hungry (the game's own feeding clock), taming progress for wild ones, pregnant, love points. Arguments x,z,radius (default 40, max 300), tamedOnly, limit (default 100). Creatures far from every player may not be known to a server that has not loaded their zone.",
+            r.Add("husbandry_state", "Tameable creatures round a point from the ZDO table: prefab, position, tamed, name, level, fed seconds left and hungry (the game's own feeding clock), taming progress for wild ones, pregnant, love points, and for animals that breed why they are not breeding (hungry, alerted, too many of the kind within range, too few ready partners) or when young are due (Procreation.Procreate). Arguments x,z,radius (default 40, max 300), tamedOnly, limit (default 100). Creatures far from every player may not be known to a server that has not loaded their zone.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"tamedOnly\":{\"type\":\"boolean\"},\"limit\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", HusbandryState);
             r.Add("death_state", "Tombstones in the world: position, owner name and id, time of death, how many item stacks they hold. Optional name filter. The harness never touches them.",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"limit\":{\"type\":\"number\"}}}", DeathState);
@@ -264,9 +264,38 @@ namespace HubnerExt
                 var fedLeft = tm != null ? Husbandry.FedSecondsLeft(nowTicks, z.GetLong("TameLastFeeding", 0L), tm.m_fedDuration) : double.NaN;
                 rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Zdos.NameOf(h)) + ",\"pos\":" + U.V(p) + ",\"tamed\":" + (tamed ? "true" : "false") + ",\"name\":" + U.S(z.GetString("TamedName", "")) + ",\"level\":" + z.GetInt("level", 1) +
                     (tamed ? ",\"fedSecondsLeft\":" + (double.IsNaN(fedLeft) ? "null" : U.N(Math.Round(Math.Max(0, fedLeft)))) + ",\"hungry\":" + (!double.IsNaN(fedLeft) && fedLeft < 0 ? "true" : "false") : ",\"tamenessPercent\":" + (tm != null ? Husbandry.TamenessPercent(z.GetFloat("TameTimeLeft", tm.m_tamingTime), tm.m_tamingTime) : 0)) +
-                    ",\"pregnant\":" + (z.GetLong("pregnant", 0L) != 0L ? "true" : "false") + ",\"lovePoints\":" + z.GetInt("lovePoints", 0) + "}");
+                    ",\"pregnant\":" + (z.GetLong("pregnant", 0L) != 0L ? "true" : "false") + ",\"lovePoints\":" + z.GetInt("lovePoints", 0) + BreedingJson(z, h, tamed, tm, nowTicks) + "}");
             }
             return U.Json("{\"total\":" + total + ",\"returned\":" + rows.Count + ",\"creatures\":[" + string.Join(",", rows.ToArray()) + "]}");
+        }
+
+        /// <summary>For a tamed creature that can breed: why it is not, or when to expect young (Procreation.Procreate, counted from the ZDO table, so on the server it sees the whole world).</summary>
+        static string BreedingJson(ZDO z, int h, bool tamed, Tameable tm, long nowTicks)
+        {
+            var go = Prefab(h); var pr = go != null ? go.GetComponent<Procreation>() : null; if (pr == null || !tamed) return "";
+            try
+            {
+                var spec = new BreedingSpec { Interval = pr.m_updateInterval, TotalRange = pr.m_totalCheckRange, PartnerRange = pr.m_partnerCheckRange, SkipChance = pr.m_pregnancyChance, PregnancyDuration = pr.m_pregnancyDuration, MaxCreatures = pr.m_maxCreatures, RequiredLove = pr.m_requiredLovePoints, SeparatePartner = pr.m_seperatePartner != null, NoPartnerOffspring = pr.m_noPartnerOffspring != null };
+                var offspringHash = pr.m_offspring != null ? Utils.GetPrefabName(pr.m_offspring).GetStableHashCode() : 0;
+                var partnerHash = pr.m_seperatePartner != null ? Utils.GetPrefabName(pr.m_seperatePartner).GetStableHashCode() : h;
+                var p = z.GetPosition(); var range = (float)Math.Max(spec.TotalRange, spec.PartnerRange);
+                int population = 0, partners = 0;
+                foreach (var o in Zdos.InBox(p.x - range, p.z - range, p.x + range, p.z + range))
+                {
+                    var oh = o.GetPrefab(); if (oh != h && oh != offspringHash && oh != partnerHash) continue;
+                    var d = Vector3.Distance(o.GetPosition(), p);
+                    if (d <= spec.TotalRange && (oh == h || oh == offspringHash)) population++;
+                    if (d <= spec.PartnerRange && oh == partnerHash && o.GetBool("tamed", false) && o.GetLong("pregnant", 0L) == 0L)
+                    {
+                        var otm = Prefab(oh) != null ? Prefab(oh).GetComponent<Tameable>() : null;
+                        if (otm == null || !Husbandry.Hungry(nowTicks, o.GetLong("TameLastFeeding", 0L), otm.m_fedDuration)) partners++;
+                    }
+                }
+                var st = new BreedingState { Tamed = true, Hungry = tm != null && Husbandry.Hungry(nowTicks, z.GetLong("TameLastFeeding", 0L), tm.m_fedDuration), Alerted = z.GetBool("alert", false), PregnantTicks = z.GetLong("pregnant", 0L), NowTicks = nowTicks, Love = z.GetInt("lovePoints", 0), Population = population, ReadyPartners = partners };
+                var v = BreedingRules.Diagnose(spec, st);
+                return ",\"breeding\":{\"canBreedNow\":" + (v.Blockers.Count == 0 && !v.Pregnant ? "true" : "false") + ",\"blockers\":[" + string.Join(",", v.Blockers.Select(U.S).ToArray()) + "],\"due\":" + (v.Due ? "true" : "false") + ",\"secondsToBirth\":" + (double.IsNaN(v.SecondsToBirth) ? "null" : U.N(Math.Round(v.SecondsToBirth))) + ",\"expectedSecondsToYoung\":" + (double.IsNaN(v.ExpectedSeconds) ? "null" : U.N(Math.Round(v.ExpectedSeconds))) + ",\"nearby\":" + population + ",\"cap\":" + spec.MaxCreatures + ",\"readyPartners\":" + partners + "}";
+            }
+            catch (Exception ex) { U.Once("husbandry.breeding", ex); return ""; }
         }
 
         static ToolOutput DeathState(Dictionary<string, object> a)

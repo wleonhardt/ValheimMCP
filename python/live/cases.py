@@ -231,6 +231,18 @@ def base_value_case(ctx):
     ctx.check('every area is within 20 m plus its own radius', all(((a['pos'][0] - x) ** 2 + (a['pos'][2] - z) ** 2) ** 0.5 <= 20 + a['radius'] + 0.5 + abs(a['pos'][1] - r['point'][1]) for a in r['areas']), r['areas'][:3])
 
 
+def breeding_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('husbandry_state', x=x, z=z, radius=60, tamedOnly=True)
+    rows = [q for q in r['creatures'] if 'breeding' in q]
+    if not rows: raise Skip(f'no tamed animal that breeds within 60 m of {x},{z}')
+    for q in rows:
+        b = q['breeding']
+        ctx.check(f"{q['prefab']}: canBreedNow = no blockers and not pregnant", b['canBreedNow'] == (not b['blockers'] and not q['pregnant']), q)
+        ctx.check(f"{q['prefab']}: a hungry animal says so", (not q['hungry']) or any(s.startswith('hungry') for s in b['blockers']) or q['pregnant'], q)
+        ctx.check(f"{q['prefab']}: it counts itself", b['nearby'] >= 1, b)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -313,6 +325,7 @@ CASES = [
     Case('smelters', 'smelters: queue, room and why one stands still agree', smelters_case),
     Case('creature-info', 'creature_info: stars scale health and damage, hits to kill follow', creature_case),
     Case('base-value', 'base_value counts the PlayerBase areas in reach; a raid needs three', base_value_case),
+    Case('breeding', 'husbandry_state: why animals are not breeding agrees with their state', breeding_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

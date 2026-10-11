@@ -442,3 +442,36 @@ public class BaseValueTests
     [Fact] public void ThreeAreasMakeABaseARaidCanComeTo() { Assert.False(BaseValue.RaidEligible(2)); Assert.True(BaseValue.RaidEligible(3)); }
     [Fact] public void HeightCountsToo() => Assert.Empty(BaseValue.InReach(0, 0, 0, new[] { new BaseArea { Y = 30, Radius = 1 } }));
 }
+
+public class BreedingRulesTests
+{
+    static readonly BreedingSpec Boar = new BreedingSpec { Interval = 10, TotalRange = 10, PartnerRange = 3, SkipChance = 0.5, PregnancyDuration = 10, MaxCreatures = 5, RequiredLove = 3 };
+    static BreedingState Ok() => new BreedingState { Tamed = true, Population = 3, ReadyPartners = 2, Love = 0 };
+
+    [Fact] public void AnUntamedAnimalDoesNotBreed() => Assert.Contains("not tamed", BreedingRules.Diagnose(Boar, new BreedingState { Tamed = false }).Blockers);
+    [Fact] public void HungerAlertAndCrowdingAreNamed()
+    {
+        var s = Ok(); s.Hungry = true; s.Alerted = true; s.Population = 5;
+        var b = BreedingRules.Diagnose(Boar, s).Blockers;
+        Assert.Equal(3, b.Count); Assert.Contains(b, x => x.StartsWith("hungry")); Assert.Contains(b, x => x.StartsWith("alerted")); Assert.Contains(b, x => x.Contains("cap is 5"));
+    }
+    [Fact] public void NeedsTwoReadyOfItsKindOrOneOfAnotherKindOrNone()
+    {
+        var s = Ok(); s.ReadyPartners = 1;
+        Assert.Single(BreedingRules.Diagnose(Boar, s).Blockers);
+        var sep = new BreedingSpec { SeparatePartner = true, RequiredLove = 1 }; Assert.Empty(BreedingRules.Diagnose(sep, s).Blockers);
+        var alone = new BreedingSpec { NoPartnerOffspring = true, RequiredLove = 1 }; s.ReadyPartners = 0; Assert.Empty(BreedingRules.Diagnose(alone, s).Blockers);
+    }
+    [Fact] public void TheExpectedTimeIsTheRemainingLoveOverTheChanceToNotSkipTimesTheInterval()
+    {
+        var v = BreedingRules.Diagnose(Boar, Ok());
+        Assert.Equal(3 / 0.5 * 10 + 10, v.ExpectedSeconds, 6);                          // 6 ticks of 10 s on average, then the pregnancy
+        var s = Ok(); s.Love = 2; Assert.Equal(1 / 0.5 * 10 + 10, BreedingRules.Diagnose(Boar, s).ExpectedSeconds, 6);
+    }
+    [Fact] public void ApregnantAnimalIsDueAfterThePregnancyDuration()
+    {
+        var s = Ok(); s.PregnantTicks = 100 * Husbandry.TicksPerSecond; s.NowTicks = 104 * Husbandry.TicksPerSecond;
+        var v = BreedingRules.Diagnose(Boar, s); Assert.True(v.Pregnant); Assert.False(v.Due); Assert.Equal(6, v.SecondsToBirth, 6);
+        s.NowTicks = 111 * Husbandry.TicksPerSecond; Assert.True(BreedingRules.Diagnose(Boar, s).Due);
+    }
+}

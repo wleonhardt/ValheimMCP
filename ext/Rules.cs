@@ -529,6 +529,49 @@ namespace HubnerExt
         public bool IsOurs(double now, string text) { var n = ChatRules.Norm(text); return n.Length > 0 && _sent.Any(e => now - e.Key <= Window && e.Value == n); }
     }
 
+    internal sealed class BreedingSpec
+    {
+        public double Interval = 10, TotalRange = 10, PartnerRange = 3, SkipChance = 0.5, PregnancyDuration = 10;
+        public int MaxCreatures = 4, RequiredLove = 4; public bool SeparatePartner, NoPartnerOffspring;
+    }
+
+    internal sealed class BreedingState
+    {
+        public bool Tamed = true, Hungry, Alerted; public long PregnantTicks; public long NowTicks; public int Love, Population, ReadyPartners;
+    }
+
+    internal sealed class BreedingVerdict
+    {
+        public List<string> Blockers = new List<string>(); public bool Pregnant, Due; public double SecondsToBirth = double.NaN, ExpectedSeconds = double.NaN;
+    }
+
+    /// <summary>Procreation.Procreate (decompiled), every m_updateInterval on the owner: not tamed, hungry or alerted, too many of the kind close by, or too few ready partners, and it does nothing; otherwise love grows by one with probability 1 - m_pregnancyChance (the field is the chance to SKIP) until it reaches the required points, then pregnancy lasts m_pregnancyDuration.</summary>
+    internal static class BreedingRules
+    {
+        public static BreedingVerdict Diagnose(BreedingSpec sp, BreedingState st)
+        {
+            var v = new BreedingVerdict();
+            if (!st.Tamed) { v.Blockers.Add("not tamed"); return v; }
+            if (st.PregnantTicks != 0)
+            {
+                v.Pregnant = true; var elapsed = (st.NowTicks - st.PregnantTicks) / (double)Husbandry.TicksPerSecond;
+                v.Due = elapsed > sp.PregnancyDuration; v.SecondsToBirth = Math.Max(0, sp.PregnancyDuration - elapsed);
+                return v;
+            }
+            if (st.Hungry) v.Blockers.Add("hungry (it must be fed)");
+            if (st.Alerted) v.Blockers.Add("alerted (something is scaring it)");
+            if (st.Population >= sp.MaxCreatures) v.Blockers.Add(st.Population + " of its kind and offspring within " + sp.TotalRange + " m, the cap is " + sp.MaxCreatures);
+            var need = sp.NoPartnerOffspring ? 0 : (sp.SeparatePartner ? 1 : 2);
+            if (st.ReadyPartners < need) v.Blockers.Add(st.ReadyPartners + " ready partners within " + sp.PartnerRange + " m (itself included), needs " + need + (sp.SeparatePartner ? " of the partner kind" : ""));
+            if (v.Blockers.Count == 0 && sp.SkipChance < 1)
+            {
+                var ticks = Math.Max(0, sp.RequiredLove - st.Love) / (1 - sp.SkipChance);
+                v.ExpectedSeconds = ticks * sp.Interval + sp.PregnancyDuration;
+            }
+            return v;
+        }
+    }
+
     /// <summary>Tameable's arithmetic as the game does it (Tameable.IsHungry, GetTameness).</summary>
     internal static class Husbandry
     {
