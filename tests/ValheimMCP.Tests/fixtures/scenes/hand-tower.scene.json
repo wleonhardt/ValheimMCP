@@ -1,0 +1,145 @@
+{
+ "schema": "hubner.scene/1",
+ "name": "hand-tower",
+ "source": "hand-built",
+ "note": "Three wooden poles stacked on flat ground. The recorded support values are the known series for wood (100 grounded, then 73.75 and 54.39: loss 0.125 per metre of centre distance + 0.1), not our model's output.",
+ "terrain": {
+  "x0": -3,
+  "z0": -3,
+  "nx": 7,
+  "nz": 7,
+  "h": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ]
+ },
+ "prefabs": {
+  "wood_pole2": {
+   "material": "Wood",
+   "supports": true,
+   "com": [
+    0,
+    1,
+    0
+   ],
+   "colliders": [
+    {
+     "c": [
+      0,
+      1,
+      0
+     ],
+     "h": [
+      0.2,
+      1,
+      0.2
+     ],
+     "q": [
+      0,
+      0,
+      0,
+      1
+     ],
+     "layer": "piece"
+    }
+   ]
+  }
+ },
+ "objects": [
+  {
+   "id": "a",
+   "prefab": "wood_pole2",
+   "pos": [
+    0,
+    -0.05,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "support": 100
+  },
+  {
+   "id": "b",
+   "prefab": "wood_pole2",
+   "pos": [
+    0,
+    1.95,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "support": 73.75
+  },
+  {
+   "id": "c",
+   "prefab": "wood_pole2",
+   "pos": [
+    0,
+    3.95,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "support": 54.39
+  }
+ ]
+}

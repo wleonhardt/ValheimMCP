@@ -516,3 +516,55 @@ public class TerrainRulesTests
     [Theory] [InlineData(0.49, 0)] [InlineData(0.5, 1)] [InlineData(-0.5, 0)] [InlineData(-0.51, -1)] [InlineData(3.2, 3)]
     public void TheNearestVertexRoundsHalfUp(double v, int vertex) => Assert.Equal(vertex, TerrainRules.NearestVertex(v));
 }
+
+public class SceneFixtureTests
+{
+    static string Dir => System.IO.Path.Combine(AppContext.BaseDirectory, "fixtures", "scenes");
+    static SceneData Load(string file) => SceneLoader.FromTree(MiniJson.Parse(System.IO.File.ReadAllText(file)));
+    public static IEnumerable<object[]> Files() => System.IO.Directory.GetFiles(Dir, "*.scene.json").Select(f => new object[] { System.IO.Path.GetFileName(f) });
+
+    [Theory, MemberData(nameof(Files))]
+    public void OurSupportModelAgreesWithWhatTheGameRecorded(string file)
+    {
+        var scene = Load(System.IO.Path.Combine(Dir, file));
+        var diffs = SceneCheck.Support(scene);
+        Assert.True(diffs.Count == 0, file + " (" + scene.Source + "): " + string.Join("; ", diffs.Select(d => d.ToString())));
+    }
+
+    [Fact] public void ATamperedRecordIsCaught()
+    {
+        var scene = Load(System.IO.Path.Combine(Dir, "hand-tower.scene.json"));
+        scene.Objects.First(o => o.Id == "c").Support = 5;                              // the game says the top pole is almost unsupported: we say it holds with 54
+        var d = SceneCheck.Support(scene);
+        Assert.Single(d); Assert.Equal("c", d[0].Id);
+    }
+    [Fact] public void AGameRecordedFallIsCaughtToo()
+    {
+        var scene = Load(System.IO.Path.Combine(Dir, "hand-tower.scene.json"));
+        scene.Objects.RemoveAll(o => o.Id == "a");                                      // without the foot the others hang in the air: we say they fall, the game recorded values
+        var d = SceneCheck.Support(scene);
+        Assert.Contains(d, x => x.Kind.StartsWith("we say it falls"));
+    }
+    [Fact] public void TheTerrainGridAnswersInsideAndNotOutside()
+    {
+        var scene = Load(System.IO.Path.Combine(Dir, "hand-tower.scene.json"));
+        Assert.Equal(0, scene.Ground(0.5, 0.5), 9); Assert.Equal(-1000, scene.Ground(50, 50), 9);
+    }
+    [Fact] public void AWrongSchemaOrHeightCountIsRefused()
+    {
+        Assert.Throws<FormatException>(() => SceneLoader.FromTree(MiniJson.Parse("{\"schema\":\"other/1\"}")));
+        Assert.Throws<FormatException>(() => SceneLoader.FromTree(MiniJson.Parse("{\"schema\":\"hubner.scene/1\",\"terrain\":{\"x0\":0,\"z0\":0,\"nx\":2,\"nz\":2,\"h\":[1,2,3]}}")));
+    }
+}
+
+public class SceneEdgeTests
+{
+    [Fact] public void PiecesNearTheEdgeOfACaptureAreNotJudged()
+    {
+        var scene = SceneLoader.FromTree(MiniJson.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "fixtures", "scenes", "hand-tower.scene.json"))));
+        scene.Objects.First(o => o.Id == "c").Support = 5;
+        scene.CenterX = 0; scene.CenterZ = 0; scene.Radius = 3;                          // the whole tower is within 12 m of a 3 m capture's edge
+        Assert.Empty(SceneCheck.Support(scene));
+        scene.Radius = 0; Assert.Single(SceneCheck.Support(scene));
+    }
+}

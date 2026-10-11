@@ -254,6 +254,18 @@ def ground_case(ctx):
     ctx.check('a flat groundY still wins', c.tool('plan_check', items=item, groundY=0)['ground'].startswith('flat ground'))
 
 
+def scene_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    info = c.tool('scene_capture', name='accept-scene', x=x, z=z, radius=16, note='accept.py')
+    if info['objects'] == 0: raise Skip(f'nothing with colliders within 16 m of {x},{z}')
+    s = json.loads(c.raw_text('scene_get', name='accept-scene'))
+    ctx.check('the schema is hubner.scene/1', s['schema'] == 'hubner.scene/1', s['schema'])
+    ctx.check('the objects are all there', len(s['objects']) == info['objects'], (len(s['objects']), info['objects']))
+    ctx.check('every object has its prefab geometry', all(o['prefab'] in s['prefabs'] for o in s['objects']))
+    ctx.check('the terrain grid is nx x nz', len(s['terrain']['h']) == s['terrain']['nx'] * s['terrain']['nz'], s['terrain']['source'])
+    ctx.check('the game recorded support for the pieces (WearNTear owners)', info['withRecordedSupport'] >= 0, info)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -338,6 +350,7 @@ CASES = [
     Case('base-value', 'base_value counts the PlayerBase areas in reach; a raid needs three', base_value_case),
     Case('breeding', 'husbandry_state: why animals are not breeding agrees with their state', breeding_case),
     Case('plan-check-ground', 'plan_check says where its ground came from and can be forced', ground_case),
+    Case('scene-capture', 'scene_capture writes a scene that scene_get returns whole', scene_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

@@ -32,6 +32,8 @@ namespace HubnerExt
         // ------------------------------------------------------------------ prefab geometry
         static Quat Q(Quaternion q) { return new Quat(q.x, q.y, q.z, q.w); }
 
+        internal static PieceGeo GeoOf(string name) { return Geo(name); }
+
         static PieceGeo Geo(string name)
         {
             if (Cache.TryGetValue(name, out var c)) return c;

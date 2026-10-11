@@ -251,3 +251,62 @@ class RecipeCaseTests(unittest.TestCase):
         seq = iter([{'materials': {'Wood': 2}, 'unknownPrefabs': []}, {'materials': {'Wood': 5}, 'unknownPrefabs': []}, {'materials': {}, 'unknownPrefabs': ['no_such_piece']}])
         self.fake.replies['plan_materials'] = lambda a: next(seq)
         self.assertEqual(accept.run_case(self.case('plan-materials'), self.ctx)['verdict'], accept.FAIL)
+
+
+class CaptureSceneTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.client = hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def test_a_scene_is_saved_next_to_the_unit_tests_fixtures(self):
+        import tempfile, capture_scene
+        self.fake.replies['scene_capture'] = {'name': 'x', 'objects': 3}
+        self.fake.replies['scene_get'] = json.dumps({'schema': 'hubner.scene/1', 'name': 'x'})
+        with tempfile.TemporaryDirectory() as d:
+            info, path = capture_scene.capture(self.client, 'x', 1, 2, 10, 'note', dest=d)
+            self.assertEqual(info['objects'], 3)
+            self.assertTrue(path.endswith('x.scene.json')); self.assertEqual(json.load(open(path))['schema'], 'hubner.scene/1')
+        self.assertEqual([c for c in self.fake.calls if c[0] == 'scene_capture'][0][1], {'name': 'x', 'x': 1, 'z': 2, 'radius': 10, 'note': 'note'})
+
+    def test_something_that_is_not_json_is_not_saved(self):
+        import tempfile, capture_scene
+        self.fake.replies['scene_capture'] = {'name': 'x'}; self.fake.replies['scene_get'] = 'not json {'
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError): capture_scene.capture(self.client, 'x', 1, 2, dest=d)
+            self.assertEqual(os.listdir(d), [])
+
+
+class SceneCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (5.0, 5.0)
+        self.case = [c for c in cases.CASES if c.key == 'scene-capture'][0]
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def scene(self, n_objects=2, h=4):
+        return json.dumps({'schema': 'hubner.scene/1', 'prefabs': {'p': {}}, 'objects': [{'prefab': 'p'}] * n_objects, 'terrain': {'nx': 2, 'nz': 2, 'h': [0] * h, 'source': 's'}})
+
+    def test_passes_on_a_consistent_scene(self):
+        self.fake.replies['scene_capture'] = {'objects': 2, 'withRecordedSupport': 1}; self.fake.replies['scene_get'] = self.scene()
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.PASS)
+
+    def test_fails_when_objects_are_lost_between_capture_and_get(self):
+        self.fake.replies['scene_capture'] = {'objects': 3, 'withRecordedSupport': 1}; self.fake.replies['scene_get'] = self.scene()
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.FAIL)
+
+    def test_fails_on_a_short_terrain_grid(self):
+        self.fake.replies['scene_capture'] = {'objects': 2, 'withRecordedSupport': 1}; self.fake.replies['scene_get'] = self.scene(h=3)
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.FAIL)
+
+    def test_is_skipped_when_nothing_is_there(self):
+        self.fake.replies['scene_capture'] = {'objects': 0}
+        self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.SKIPPED)

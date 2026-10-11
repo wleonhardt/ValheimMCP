@@ -93,6 +93,12 @@ class Client:
         try: return json.loads(t)
         except ValueError: return t
 
+    def raw_text(self, _name, /, **args):
+        """The text a tool returns, unparsed (for files too large to want a round trip through json.loads and back)."""
+        r = self.raw(_name, args); t = self.text(r)
+        if r.get('isError'): raise RuntimeError(f'{_name}: {t}')
+        return t
+
     def confirm(self, args):
         if self.server: args.setdefault('confirm', 'server-write')
         return args
@@ -150,6 +156,8 @@ class Client:
     def validate_placement(self, items, **kw): return self.tool('validate_placement', items=items, **kw)
     def verify_plan(self, items, **kw): return self.tool('verify_plan', items=items, **kw)
     def find_text(self, q, **kw): return self.tool('find_text', q=q, **kw)
+    def scene_capture(self, name, x, z, radius=24, note=''): return self.tool('scene_capture', name=name, x=x, z=z, radius=radius, note=note)
+    def scene_get(self, name): return self.raw_text('scene_get', name=name)
     def portals(self): return self.tool('portals')
     def player_state(self): return self.tool('player_state')
     def containers(self, **kw): return self.tool('containers', **kw)
