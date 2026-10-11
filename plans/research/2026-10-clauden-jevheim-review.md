@@ -11,7 +11,7 @@ A client-side player bot for Valheim 1.0.17. Claude supervises, a fast judge mod
 - The repository has no LICENSE for its own code. Only the vendored `.claude/skills/typesafe-ai/` is MIT. Without a licence nothing may be copied verbatim: ask the friend, or reimplement from the descriptions here. Game facts and formulas are not copyrightable.
 - The lineage is ours: `VhBridge/ExtHost.cs` says "Adapted from wleonhardt/ValheimMCP ExtensionHost (MIT)"; `Mcp.cs` and `RequestPolicy.cs` come from upstream and this fork; `Render.cs` and several readers say "adapted from HubnerExt". His `CLAUDE.md` calls this fork one that "spawns objects and forces god mode" and says not to deploy it, which matches what the review fixes addressed.
 - `data/geometry.json` (209 prefabs, schema vh.geometry/1) and `data/pieces-catalog.json` (664 pieces) are derived from Iron Gate assets, and the `tables` field of the catalog came from a 1.0.12 dump. Do not import them; regenerate from our own install.
-- His repository embeds `C:\Users\<name>\...` paths in 24 tracked files and a default `.env` path in `VhBridge/Tools.cs`. Worth telling him before it is made public.
+- His repository embeds Windows user-profile paths in 24 tracked files and a default `.env` path in `VhBridge/Tools.cs`. Worth telling him before it is made public.
 
 ## Defects found in our own code because of this review
 
@@ -66,7 +66,7 @@ Not worth taking: work fronts, stands, scaffolds, the Director, the design gener
 - `tools/build/vh.targets` stamps `dirty=false` when only untracked files changed.
 - `Debug.get_value` invokes properties, so it can have side effects and read secrets if exposed beyond loopback.
 - `ExtHost` keeps one extension per DLL path (a second type is never unloaded), and loads each refused file as an assembly before checking it.
-- Hard-coded `C:\Users\<name>` fallback in `VhExt.csproj` and `VhBridge/Tools.cs`.
+- Hard-coded Windows user-profile fallback path in `VhExt.csproj` and `VhBridge/Tools.cs`.
 - Smaller: `DecidePolicy` drops a pending HTTP request without disposing it; non-atomic `File.WriteAllText` for checkpoints, policy and orders; the event rotation compares characters with bytes.
 
 ## Not verified

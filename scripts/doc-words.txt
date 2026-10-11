@@ -1,0 +1,9 @@
+# Names that look like tools (snake_case, first word shared with a tool) but are not: event kinds, hints, argument values.
+player_died
+structure_appeared
+tool_talk
+split_manipulation
+name_suspicious
+name_only
+wrong_storey
+extension_no_station

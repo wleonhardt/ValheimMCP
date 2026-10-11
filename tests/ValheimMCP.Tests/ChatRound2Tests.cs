@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HubnerExt;
 using Xunit;
+using ValheimMCP;
 
 public class ChatHintsRound2Tests
 {
@@ -172,4 +173,30 @@ public class DigestTests
         int others; var g = Digest.Groups(new[] { new KeyValuePair<string, double[]>("a", new double[] { 1, 5, 0 }), new KeyValuePair<string, double[]>("a", new double[] { 4, 2, 1 }) }, 10, out others).Single();
         Assert.Equal(new[] { 1.0, 4.0, 2.0, 5.0 }, new[] { g.MinX, g.MaxX, g.MinZ, g.MaxZ }); Assert.Equal(1, g.Built); Assert.Equal(0, others);
     }
+}
+
+public class ChatCorpusTests
+{
+    static IEnumerable<object[]> Load(string file)
+    {
+        var path = System.IO.Path.Combine(AppContext.BaseDirectory, "fixtures", file);
+        var doc = MiniJson.Parse(System.IO.File.ReadAllText(path)) as Dictionary<string, object>;
+        foreach (var o in (List<object>)doc["cases"])
+        {
+            var d = (Dictionary<string, object>)o;
+            yield return new object[] { (string)d["text"], d.ContainsKey("has") ? ((List<object>)d["has"]).Cast<string>().ToArray() : new string[0], d.ContainsKey("lacks") ? ((List<object>)d["lacks"]).Cast<string>().ToArray() : new string[0] };
+        }
+    }
+    public static IEnumerable<object[]> Cases() => Load("chat_cases.json");
+    public static IEnumerable<object[]> Holdout() => Load("chat_holdout.json");
+
+    static void Judge(string text, string[] has, string[] lacks)
+    {
+        var hints = ChatRules.Hints(text);
+        foreach (var h in has) Assert.True(hints.Contains(h), $"'{text}' should have hint {h}, got [{string.Join(",", hints)}]");
+        foreach (var h in lacks) Assert.False(hints.Contains(h), $"'{text}' should not have hint {h}, got [{string.Join(",", hints)}]");
+    }
+
+    [Theory, MemberData(nameof(Cases))] public void TheCorpusGetsItsHints(string text, string[] has, string[] lacks) => Judge(text, has, lacks);
+    [Theory, MemberData(nameof(Holdout))] public void TheHoldoutSetGetsItsHintsToo(string text, string[] has, string[] lacks) => Judge(text, has, lacks);
 }

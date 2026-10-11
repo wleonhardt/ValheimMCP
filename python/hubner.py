@@ -52,6 +52,28 @@ class server_writes:
         return False
 
 
+class GuardError(RuntimeError):
+    """A live script refused to run: the endpoint is not explicit, the game is not in a world, or the world is not on the allow-list."""
+
+
+def live_guard(client=None, worlds=None):
+    """Every script that acts on a real game starts with this. It refuses unless
+      1. the endpoint is explicit (HUBNER_URL set or a Client(url) given: no silent default to whatever listens on 8731),
+      2. the game is in a world (health.inGame), and
+      3. the world's name is on the allow-list (worlds=[...] or HUBNER_LIVE_WORLDS=a,b): a script never runs against the world you play in by accident.
+    Returns the world name."""
+    c = client or Client()
+    if not (c.url or os.environ.get('HUBNER_URL')): raise GuardError('endpoint not explicit: set HUBNER_URL or pass Client(url)')
+    allow = list(worlds) if worlds else [w.strip() for w in os.environ.get('HUBNER_LIVE_WORLDS', '').split(',') if w.strip()]
+    if not allow: raise GuardError('no world allow-list: set HUBNER_LIVE_WORLDS=name[,name] (the worlds a live script may act in)')
+    try: h = c.tool('health')
+    except Exception as e: raise GuardError(f'endpoint does not answer: {e}') from None
+    if not (isinstance(h, dict) and h.get('inGame')): raise GuardError('the game is not in a world (health.inGame is false)')
+    w = c.tool('world_state').get('world')
+    if w not in allow: raise GuardError(f'world {w!r} is not on the allow-list {allow}')
+    return w
+
+
 class Client:
     """One MCP endpoint. url=None follows hubner_mcp.URL at call time (so the old `with on(url):` pattern keeps working)."""
     def __init__(self, url=None, token=None, timeout=60, server=False):

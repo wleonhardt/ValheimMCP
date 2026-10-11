@@ -1,0 +1,191 @@
+"""Offline tests of the live acceptance runner and its cases against a fake endpoint (no game needed)."""
+import json, os, sys, threading, unittest
+from http.server import ThreadingHTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, os.path.join(HERE, '..', 'live'))
+import hubner  # noqa: E402
+import accept  # noqa: E402
+import cases  # noqa: E402
+from test_client import Fake  # noqa: E402
+
+
+class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.client = hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')
+        self.fake.replies.update({'health': {'ok': True, 'inGame': True}, 'world_state': {'world': 'Test'}, 'ext_status': {'droppedCalls': 0, 'mainThreadStallReports': 0}, 'status': {'journalError': ''}, 'plans': {'plans': []}})
+        self.ctx = accept.Ctx(self.client)
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def run_one(self, case, **kw):
+        return accept.run_all([case], self.ctx, guard=False, **kw)[0]
+
+    def test_a_case_that_checks_and_holds_passes(self):
+        r = self.run_one(accept.Case('a', 'doc', lambda c: c.check('x', True)))
+        self.assertEqual(r['verdict'], accept.PASS)
+
+    def test_a_failed_check_fails_the_case_and_says_which(self):
+        r = self.run_one(accept.Case('a', 'doc', lambda c: c.check('the thing', False, 'it was 3')))
+        self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('the thing: it was 3', r['reason'])
+
+    def test_a_case_that_asserts_nothing_fails(self):
+        self.assertEqual(self.run_one(accept.Case('a', 'doc', lambda c: None))['verdict'], accept.FAIL)
+
+    def test_a_case_that_cannot_run_here_is_skipped_with_the_reason_never_failed(self):
+        def run(c): raise accept.Skip('no bed in this world')
+        r = self.run_one(accept.Case('a', 'doc', run)); self.assertEqual((r['verdict'], r['reason']), (accept.SKIPPED, 'no bed in this world'))
+        r = self.run_one(accept.Case('b', 'doc', lambda c: c.check('x', True), pre=lambda c: 'needs a chest')); self.assertEqual((r['verdict'], r['reason']), (accept.SKIPPED, 'needs a chest'))
+
+    def test_an_exception_is_a_failure_with_its_type(self):
+        def run(c): raise KeyError('rules')
+        r = self.run_one(accept.Case('a', 'doc', run)); self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('KeyError', r['reason'])
+
+    def test_a_dry_run_skips_acting_cases_but_runs_the_reading_ones(self):
+        acted = []
+        acts = accept.Case('acts', 'doc', lambda c: acted.append(1) or c.check('x', True), acts=True)
+        reads = accept.Case('reads', 'doc', lambda c: c.check('x', True))
+        rs = accept.run_all([acts, reads], self.ctx, dry_run=True, guard=False)
+        self.assertEqual([r['verdict'] for r in rs], [accept.SKIPPED, accept.PASS]); self.assertEqual(acted, [])
+
+    def test_a_dry_run_still_checks_the_preconditions_of_acting_cases(self):
+        r = self.run_one(accept.Case('acts', 'doc', lambda c: c.check('x', True), acts=True, pre=lambda c: 'no quiet spot'), dry_run=True)
+        self.assertEqual(r['reason'], 'no quiet spot')
+
+    def test_an_acting_case_that_makes_the_extension_drop_calls_fails(self):
+        state = {'n': 0}
+        def status(a): state['n'] += 1; return {'droppedCalls': 0 if state['n'] <= 1 else 2, 'mainThreadStallReports': 0}
+        self.fake.replies['ext_status'] = status
+        r = self.run_one(accept.Case('acts', 'doc', lambda c: c.check('x', True), acts=True))
+        self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('no calls dropped', r['reason'])
+
+    def test_an_acting_case_that_leaves_a_plan_behind_fails(self):
+        seq = iter([{'plans': []}, {'plans': []}, {'plans': [{'plan': 'x'}]}, {'plans': [{'plan': 'x'}]}])
+        self.fake.replies['plans'] = lambda a: next(seq)
+        r = self.run_one(accept.Case('acts', 'doc', lambda c: c.check('x', True), acts=True))
+        self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('plans as before', r['reason'])
+
+    def test_cleanup_runs_even_when_the_case_fails(self):
+        cleaned = []
+        def run(c): raise RuntimeError('boom')
+        r = self.run_one(accept.Case('a', 'doc', run, clean=lambda c: cleaned.append(1)))
+        self.assertEqual(r['verdict'], accept.FAIL); self.assertEqual(cleaned, [1])
+
+    def test_only_selects_by_exact_key_or_prefix(self):
+        cs = [accept.Case('plan-check-tower', '', None), accept.Case('plan-rules', '', None), accept.Case('smoke', '', None)]
+        self.assertEqual([c.key for c in accept.select(cs, 'plan')], ['plan-check-tower', 'plan-rules'])
+        self.assertEqual([c.key for c in accept.select(cs, 'smoke,plan-rules')], ['plan-rules', 'smoke'])
+        self.assertEqual(len(accept.select(cs, None)), 3)
+
+    def test_the_guard_blocks_every_case_when_the_world_is_not_on_the_list(self):
+        rs = accept.run_all([accept.Case('a', 'd', lambda c: c.check('x', True))], self.ctx, worlds=['Other'])
+        self.assertEqual(rs[0]['verdict'], accept.BLOCKED); self.assertIn("'Test' is not on the allow-list", rs[0]['reason'])
+
+    def test_the_guard_passes_a_listed_world(self):
+        rs = accept.run_all([accept.Case('a', 'd', lambda c: c.check('x', True))], self.ctx, worlds=['Test'])
+        self.assertEqual(rs[0]['verdict'], accept.PASS)
+
+    def test_the_text_report_ends_with_all_ok_or_the_failure_count(self):
+        ok = accept.render_text([{'key': 'a', 'verdict': 'pass', 'reason': ''}])
+        self.assertTrue(ok.rstrip().endswith('pass 1, fail 0, skipped 0, blocked 0')); self.assertIn('== ALL OK ==', ok)
+        bad = accept.render_text([{'key': 'a', 'verdict': 'fail', 'reason': 'x'}, {'key': 'b', 'verdict': 'blocked', 'reason': 'y'}])
+        self.assertIn('== 2 FAILED ==', bad)
+
+
+class GuardTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.url = f'http://127.0.0.1:{self.srv.server_address[1]}/mcp'
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def test_refuses_without_an_explicit_endpoint(self):
+        old = os.environ.pop('HUBNER_URL', None)
+        try:
+            with self.assertRaisesRegex(hubner.GuardError, 'not explicit'): hubner.live_guard(hubner.Client(), worlds=['x'])
+        finally:
+            if old is not None: os.environ['HUBNER_URL'] = old
+
+    def test_refuses_without_an_allow_list(self):
+        old = os.environ.pop('HUBNER_LIVE_WORLDS', None)
+        try:
+            with self.assertRaisesRegex(hubner.GuardError, 'allow-list'): hubner.live_guard(hubner.Client(self.url))
+        finally:
+            if old is not None: os.environ['HUBNER_LIVE_WORLDS'] = old
+
+    def test_refuses_when_the_game_is_not_in_a_world(self):
+        self.fake.replies['health'] = {'ok': True, 'inGame': False}
+        with self.assertRaisesRegex(hubner.GuardError, 'not in a world'): hubner.live_guard(hubner.Client(self.url), worlds=['x'])
+
+    def test_returns_the_world_name_when_all_three_hold(self):
+        self.fake.replies.update({'health': {'ok': True, 'inGame': True}, 'world_state': {'world': 'Test'}})
+        self.assertEqual(hubner.live_guard(hubner.Client(self.url), worlds=['Test', 'Other']), 'Test')
+
+
+class CaseTableTests(unittest.TestCase):
+    def test_keys_are_unique_and_every_case_says_what_it_proves(self):
+        keys = [c.key for c in cases.CASES]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertTrue(all(c.doc.strip() for c in cases.CASES))
+
+    def test_acting_cases_clean_up(self):
+        for c in cases.CASES:
+            if c.acts: self.assertIsNotNone(c.clean, c.key); self.assertIsNotNone(c.pre, c.key)
+
+
+class CaseOnFakeTests(unittest.TestCase):
+    """A few real cases against canned answers: they pass on a right answer and fail on a wrong one."""
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp'))
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self, key): return [c for c in cases.CASES if c.key == key][0]
+
+    def test_plan_rules_passes_on_the_real_shape_and_fails_when_an_origin_is_missing(self):
+        good = {'rules': [{'id': 'a', 'origin': 'hard', 'code': 'PrivateZone'}, {'id': 'b', 'origin': 'ghost', 'code': 'MoreSpace'}, {'id': 'c', 'origin': 'taste', 'code': ''}, {'id': 'd', 'origin': 'ghost', 'code': 'NoBuildZone'}, {'id': 'e', 'origin': 'hard', 'code': 'ExtensionMissingStation'}]}
+        self.fake.replies['plan_rules'] = good
+        self.assertEqual(accept.run_case(self.case('plan-rules'), self.ctx)['verdict'], accept.PASS)
+        self.fake.replies['plan_rules'] = {'rules': good['rules'][:2]}
+        self.assertEqual(accept.run_case(self.case('plan-rules'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_chat_tags_is_skipped_on_an_empty_chat_not_passed(self):
+        self.fake.replies['chat_tail'] = {'last': 0, 'count': 0, 'messages': []}
+        r = accept.run_case(self.case('chat-tags'), self.ctx)
+        self.assertEqual(r['verdict'], accept.SKIPPED)
+
+    def test_chat_tags_fails_on_a_row_without_the_new_fields(self):
+        self.fake.replies['chat_tail'] = {'messages': [{'trust': 'other', 'hints': []}]}
+        self.assertEqual(accept.run_case(self.case('chat-tags'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_bed_check_is_skipped_when_there_is_no_bed(self):
+        self.fake.replies['bed_check'] = {'beds': 0, 'rows': []}
+        self.assertEqual(accept.run_case(self.case('bed-check'), self.ctx)['verdict'], accept.SKIPPED)
+
+    def test_bed_check_catches_a_bed_that_claims_it_can_sleep_without_a_fire(self):
+        row = {'pos': [0, 0, 0], 'exposureOk': True, 'heat': False, 'canSleep': True, 'canClaim': True, 'firstFailure': None}
+        self.fake.replies['bed_check'] = {'beds': 1, 'rows': [row]}
+        self.assertEqual(accept.run_case(self.case('bed-check'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_the_tower_case_is_skipped_when_the_prefab_is_missing(self):
+        self.fake.replies['prefab_search'] = {'names': []}
+        self.assertEqual(accept.run_case(self.case('plan-check-tower'), self.ctx)['verdict'], accept.SKIPPED)
+
+    def test_the_acting_cases_are_skipped_without_a_test_spot(self):
+        self.ctx.test_xz = (0.0, 0.0)
+        self.assertEqual(accept.run_case(self.case('remove-collapse'), self.ctx)['verdict'], accept.SKIPPED)
+
+
+if __name__ == '__main__':
+    unittest.main()

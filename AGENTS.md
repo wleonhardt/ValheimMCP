@@ -19,6 +19,7 @@ Operations file for coding agents working in this repository.
   - `python3 -m unittest discover -s python/tests`
   - `python3 -m unittest discover -s scripts/tests` and `python3 scripts/lint_catch.py && python3 scripts/lint_writes.py && python3 scripts/lint_tools.py` (after adding or changing a tool: `python3 scripts/lint_tools.py --write`)
   The game libraries are read from `ext/lib` (git-ignored; copy or link them, or pass `-p:LibDir=...`).
+- `python3 scripts/check.py` runs all of the above and ends with `== ALL OK ==` or the failures with the command to repeat each (`--changed` runs only what the changed files can break). It also runs `python3 scripts/lint_docs.py` (links, paths and tool names in the documents must exist).
 - Check `plans/decisions/` before proposing structural changes.
 - Project knowledge belongs in `plans/`, not in agent memory.
 - Every security-relevant rule gets a pure, game-free implementation that the unit tests link (see `RequestPolicy`, `CommandPolicy`, `JsonRpc`, `WriteGate`, `SafeNames`, `WorldBounds`). Do not bury a gate inside code that needs the game to run.
@@ -58,7 +59,7 @@ See the build/test commands above. `scripts/package.sh` builds the release zips 
 | `src/ValheimMCP/` | Core plugin: HTTP server, MCP protocol, config, log watch, extension host |
 | `ext/` | Hubner extension (tools). Shared source files build into both `HubnerExt.csproj` (client) and `HubnerExtServer.csproj` (server). `Pure.cs` and `FlatJson.cs` are game-free |
 | `tests/ValheimMCP.Tests/` | xunit tests; they link the game-free sources instead of referencing the plugin |
-| `python/` | Client library (`hubner.py`, `hubner_mcp.py`), offline tests in `tests/`, scripts that need a live game in `live/` |
+| `python/` | Client library (`hubner.py`, `hubner_mcp.py`), offline tests in `tests/`, scripts that need a live game in `live/` (`accept.py` runs the acceptance cases; every live script starts with `hubner.live_guard()`) |
 | `config/` | Example `valheimmcp.yml` files |
 | `scripts/`, `.github/` | Packaging and CI |
 | `plans/` | Plans, decisions, open questions |

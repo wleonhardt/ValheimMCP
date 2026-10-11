@@ -16,3 +16,5 @@ src/ValheimMCP/bin/
 !Thunderstore/*.dll
 __pycache__/
 *.pyc
+
+python/live/reports/

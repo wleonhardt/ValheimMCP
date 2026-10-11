@@ -83,3 +83,53 @@ class ToolLintTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+import lint_docs, check
+
+
+class DocLintTests(unittest.TestCase):
+    TOOLS = {'plan_check', 'plan_apply', 'zdo_delete'}
+    PREFIXES = {'plan', 'zdo'}
+
+    def errs(self, text, path='README.md', words=()):
+        return lint_docs.check(path, text, self.TOOLS, self.PREFIXES, set(words))
+
+    def test_a_link_to_a_missing_file_is_an_error(self):
+        self.assertEqual(len(self.errs('see [x](nope/missing.md)')), 1)
+        self.assertEqual(self.errs('see [x](https://example.com/a) and [y](CHANGELOG.md#top)'), [])
+
+    def test_a_path_that_does_not_exist_is_an_error(self):
+        self.assertEqual(len(self.errs('edit `ext/NoSuchFile.cs`')), 1)
+        self.assertEqual(self.errs('edit `ext/PlanRules.cs`'), [])
+
+    def test_a_tool_that_does_not_exist_is_an_error_unless_the_line_says_it_is_gone(self):
+        self.assertEqual(len(self.errs('call `plan_destroy`')), 1)
+        self.assertEqual(self.errs('call `plan_check`'), [])
+        self.assertEqual(self.errs('`plan_destroy` was removed in 0.5'), [])
+        self.assertEqual(self.errs('call `plan_destroy`', words={'plan_destroy'}), [])
+
+    def test_names_that_are_not_tools_are_left_alone(self):
+        self.assertEqual(self.errs('the `hub_plan` tag and `some_other_thing`'), [])
+
+    def test_research_notes_only_have_their_links_checked(self):
+        self.assertEqual(self.errs('a future `plan_materials` in `ext/Future.cs`', path='plans/research/x.md'), [])
+        self.assertEqual(len(self.errs('[x](gone.md)', path='plans/research/x.md')), 1)
+
+
+class CheckRunnerTests(unittest.TestCase):
+    def test_a_change_in_ext_runs_the_ext_builds_and_the_tests_but_not_python(self):
+        k = check.affected(['ext/PlanRules.cs'])
+        self.assertTrue({'build.ext', 'build.server', 'test.dotnet', 'lint.catch'} <= k); self.assertNotIn('py.client', k); self.assertNotIn('build.core', k)
+
+    def test_a_change_in_the_core_runs_all_three_builds(self):
+        self.assertTrue({'build.core', 'build.ext', 'build.server'} <= check.affected(['src/ValheimMCP/McpServer.cs']))
+
+    def test_docs_only_run_the_docs_lint(self):
+        self.assertEqual(check.affected(['README.md', 'plans/next-up.md']), {'lint.docs'})
+
+    def test_a_file_nobody_mapped_runs_everything(self):
+        self.assertEqual(check.affected(['mystery.bin']), {k for k, _ in check.CHECKS})
+
+    def test_every_key_is_unique(self):
+        keys = [k for k, _ in check.CHECKS]; self.assertEqual(len(keys), len(set(keys)))
