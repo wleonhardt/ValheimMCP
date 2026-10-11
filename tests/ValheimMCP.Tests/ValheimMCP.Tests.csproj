@@ -17,12 +17,17 @@
     <Compile Include="../../src/ValheimMCP/CommandPolicy.cs" Link="src/CommandPolicy.cs" />
     <Compile Include="../../src/ValheimMCP/JsonRpc.cs" Link="src/JsonRpc.cs" />
     <Compile Include="../../src/ValheimMCP/SafeRegex.cs" Link="src/SafeRegex.cs" />
+    <Compile Include="../../src/ValheimMCP/MainThreadDispatcher.cs" Link="src/MainThreadDispatcher.cs" />
+    <Compile Include="../../src/ValheimMCP/MainWatch.cs" Link="src/MainWatch.cs" />
+    <Compile Include="../../src/ValheimMCP/BindCheck.cs" Link="src/BindCheck.cs" />
+    <Compile Include="../../src/ValheimMCP/BuildStamp.cs" Link="src/BuildStamp.cs" />
     <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
     <Compile Include="../../ext/Pure.cs" Link="ext/Pure.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 </Project>

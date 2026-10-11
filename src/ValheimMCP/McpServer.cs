@@ -112,6 +112,9 @@ namespace ValheimMCP
                 return hasId ? ErrorResponse(id, -32600, "Missing method") : null;
             }
 
+            // a message without an id is a notification: never answered and never run (a tools/call without an id would act on the game with nobody to hear the result)
+            if (JsonRpc.IsNotification(req)) return null;
+
             switch (method)
             {
                 case "initialize": return Result(id, InitializeResult(req));
@@ -158,6 +161,10 @@ namespace ValheimMCP
             }
             AppendTool(sb, "list_commands",
                 "List all registered Valheim console commands with their descriptions.",
+                "{\"type\":\"object\",\"properties\":{}}");
+            sb.Append(',');
+            AppendTool(sb, "ext_status",
+                "Loaded extensions with their build (commit, branch, dirty, worktree), how many reloads this process has done (every reload stays in memory), calls dropped because their caller gave up or their extension was reloaded, and main-thread stall reports.",
                 "{\"type\":\"object\",\"properties\":{}}");
             sb.Append(',');
             AppendTool(sb, "health",
@@ -295,6 +302,8 @@ namespace ValheimMCP
                         return Result(id, ToolText("render failed: " + (rr?.Error ?? "unknown"), true));
                     return Result(id, ToolImage(Convert.ToBase64String(rr.Png), "image/png"));
                 }
+                case "ext_status":
+                    return Result(id, ToolText(ExtensionHost.StatusJson(), false));
                 case "wait_for_log":
                     return Result(id, DoWaitForLog(args, null));
                 case "get_log":
@@ -304,7 +313,7 @@ namespace ValheimMCP
                     var tool = Tools.Get(name);
                     if (tool == null) return ErrorResponse(id, -32602, "Unknown tool: " + name);
                     if (tool.Write && !ModConfig.ToolsWrite) return Result(id, ToolText("write tools are disabled (tools.write=false in valheimmcp.yml)", true));
-                    var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, out var outp, out var terr, out var started);
+                    var ok = MainThreadDispatcher.RunBlocking(() => tool.Handler(args ?? new Dictionary<string, object>()), ModConfig.ToolTimeoutMs, MainThreadDispatcher.OwnerOf(tool.Handler), name, out var outp, out var terr, out var started);
                     if (!ok)
                         return Result(id, ToolText(started
                             ? "tool " + name + " is still running after " + ModConfig.ToolTimeoutMs + "ms and will finish on its own: check the world before retrying, a retry can apply the write twice"

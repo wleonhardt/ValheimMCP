@@ -23,6 +23,12 @@ namespace ValheimMCP
             return Array.IndexOf(SupportedProtocols, header.Trim()) >= 0;
         }
 
+        /// <summary>A JSON-RPC message without an id is a notification: it gets no answer and is never executed as a request.</summary>
+        public static bool IsNotification(System.Collections.Generic.IDictionary<string, object> req)
+        {
+            return req != null && !req.ContainsKey("id");
+        }
+
         public static string ToolText(string text, bool isError)
         {
             return "{\"content\":[{\"type\":\"text\",\"text\":" + Json.Str(text) + "}],\"isError\":" +

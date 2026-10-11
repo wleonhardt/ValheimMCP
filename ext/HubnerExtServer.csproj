@@ -30,4 +30,5 @@
         <Reference Include="UnityEngine.CoreModule"><HintPath>$(LibDir)/Managed/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(LibDir)/Managed/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     </ItemGroup>
+    <Import Project="../build/BuildStamp.targets" />
 </Project>

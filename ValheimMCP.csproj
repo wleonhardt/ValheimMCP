@@ -47,4 +47,5 @@ namespace ValheimMCP
             <Compile Include="$(IntermediateOutputPath)PluginInfo.g.cs" />
         </ItemGroup>
     </Target>
+    <Import Project="build/BuildStamp.targets" />
 </Project>

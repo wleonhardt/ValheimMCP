@@ -108,7 +108,7 @@ namespace ValheimMCP
         private static readonly Dictionary<string, ToolDef> Map = new Dictionary<string, ToolDef>();
 
         /// <summary>Tools the core answers itself: an extension cannot shadow them (it would never be called, but tools/list would show it twice).</summary>
-        public static readonly HashSet<string> Reserved = new HashSet<string> { "run_command", "list_commands", "health", "render_view", "wait_for_log", "get_log" };
+        public static readonly HashSet<string> Reserved = new HashSet<string> { "run_command", "list_commands", "health", "render_view", "wait_for_log", "get_log", "ext_status" };
 
         public static void Put(ToolDef t)
         {

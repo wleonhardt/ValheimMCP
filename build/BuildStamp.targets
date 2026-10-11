@@ -1,0 +1,35 @@
+<Project>
+    <!-- Writes the git state of the build into the assembly (AssemblyMetadata hubner.commit / branch / dirty / worktree), read by BuildStamp.Of and shown by ext_status
+         and ext_info: with two worktrees and hot reload, "whose DLL is in the game" is otherwise a guess. Built without git: the keys are empty.
+         Untracked files count as dirty (a build with a new source file is not the commit it claims to be). -->
+    <Target Name="HubnerBuildStamp" BeforeTargets="CoreCompile">
+        <Exec Command="git rev-parse --short HEAD" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="_HbCommit" />
+        </Exec>
+        <Exec Command="git rev-parse --abbrev-ref HEAD" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="_HbBranch" />
+        </Exec>
+        <Exec Command="git rev-parse --show-toplevel" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="_HbTop" />
+        </Exec>
+        <Exec Command="git status --porcelain --untracked-files=normal" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="_HbStatus" />
+        </Exec>
+        <PropertyGroup>
+            <_HbDirty Condition="'$(_HbStatus)' != ''">true</_HbDirty>
+            <_HbDirty Condition="'$(_HbStatus)' == ''">false</_HbDirty>
+            <_HbWorktree>$([System.IO.Path]::GetFileName('$(_HbTop)'))</_HbWorktree>
+            <_HbStampFile>$(IntermediateOutputPath)BuildStamp.g.cs</_HbStampFile>
+            <_HbStampText>// &lt;auto-generated/&gt;
+[assembly: System.Reflection.AssemblyMetadata(&quot;hubner.commit&quot;, &quot;$(_HbCommit)&quot;)]
+[assembly: System.Reflection.AssemblyMetadata(&quot;hubner.branch&quot;, &quot;$(_HbBranch)&quot;)]
+[assembly: System.Reflection.AssemblyMetadata(&quot;hubner.dirty&quot;, &quot;$(_HbDirty)&quot;)]
+[assembly: System.Reflection.AssemblyMetadata(&quot;hubner.worktree&quot;, &quot;$(_HbWorktree)&quot;)]
+</_HbStampText>
+        </PropertyGroup>
+        <WriteLinesToFile File="$(_HbStampFile)" Lines="$(_HbStampText)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+        <ItemGroup>
+            <Compile Include="$(_HbStampFile)" />
+        </ItemGroup>
+    </Target>
+</Project>

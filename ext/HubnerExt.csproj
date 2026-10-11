@@ -25,4 +25,5 @@
         <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(LibDir)/Managed/UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
         <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(LibDir)/Managed/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     </ItemGroup>
+    <Import Project="../build/BuildStamp.targets" />
 </Project>

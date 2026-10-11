@@ -25,6 +25,9 @@ namespace ValheimMCP
         private void Awake()
         {
             Log = Logger;
+            MainThreadDispatcher.Warn = s => Log.LogWarning(s);
+            MainWatch.Log = s => Log.LogWarning(s);
+            MainWatch.Start();
 
             // Settings come from BepInEx/config/valheimmcp.yml (written with defaults
             // on first run). See ModConfig / MiniYaml.
@@ -67,11 +70,13 @@ namespace ValheimMCP
         // Drains main-thread work queued by the HTTP listener's background thread.
         private void Update()
         {
+            MainWatch.Frame();
             MainThreadDispatcher.Pump();
         }
 
         private void OnDestroy()
         {
+            MainWatch.Stop();
             ExtensionHost.Stop();
             ExtensionHost.UnloadAll();
             _server?.Stop();
