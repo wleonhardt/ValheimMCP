@@ -119,6 +119,9 @@ namespace HubnerExt
 
         /// <summary>Without a y an item used to be built at y 0 (far under the sea, which is at 30): y is required unless the item says seat:"ground".</summary>
         public static bool MissingY(bool hasY, string seat) { return !hasY && seat != "ground"; }
+
+        /// <summary>An item has a y only when it is a number: null, a string or NaN count as missing (a generator that writes None used to build at y 0).</summary>
+        public static bool HasY(double yOrNaN) { return !double.IsNaN(yOrNaN) && !double.IsInfinity(yOrNaN); }
     }
 
     /// <summary>What a fireplace's ZDO says about burning (Fireplace.IsBurning, decompiled): on (state 1, the default), and fuel above 0 or infinite fuel. The game also puts a fire out when it is blocked above, under water or its smoke is blocked; those are not stored in the ZDO.</summary>

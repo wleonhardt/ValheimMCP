@@ -301,6 +301,7 @@ public class PlanItemRulesTests
 {
     [Fact] public void ATypoedKeyIsReported() => Assert.Equal(new[] { "rotY" }, PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "rotY" }));
     [Fact] public void EveryKeyTheToolReadsIsKnown() => Assert.Empty(PlanItemRules.Unknown(new[] { "prefab", "x", "y", "z", "yaw", "rot", "seat", "key", "label", "text", "tag", "ctag", "ints", "floats" }));
+    [Fact] public void OnlyANumberIsAY() { Assert.True(PlanItemRules.HasY(3.5)); Assert.False(PlanItemRules.HasY(double.NaN)); Assert.False(PlanItemRules.HasY(double.PositiveInfinity)); }
     [Fact] public void AMissingYNeedsSeatGround() { Assert.True(PlanItemRules.MissingY(false, null)); Assert.False(PlanItemRules.MissingY(false, "ground")); Assert.False(PlanItemRules.MissingY(true, null)); }
 }
 
@@ -350,4 +351,16 @@ public class PlanOrderTests
     }
     [Fact] public void SeatedItemsGoFirstWhateverTheirY() => Assert.True(PlanOrder.Rank(50, "ground") < PlanOrder.Rank(0, null));
     [Fact] public void AnItemWithoutYRanksAsGroundLevel() => Assert.Equal(0, PlanOrder.Rank(null, null));
+}
+
+public class NoSupportWearTests
+{
+    [Fact] public void APieceThatNeverWearsFromMissingSupportNeverFalls()
+    {
+        var g = new PieceGeo { Prefab = "ornament", Material = "Wood", Supports = true, WearsWithoutSupport = false, Colliders = { new ColliderBox { Centre = new V3(0, 1, 0), Half = new V3(0.2, 1, 0.2), Layer = "piece" } } };
+        var p = new PlacedPiece { Id = "o", Geo = g, Pos = new V3(0, 50, 0) };                      // floating
+        var r = SupportModel.Run(new[] { p }, (x, z) => 0.0, null)[p];
+        Assert.Equal(0, r.Support, 6); Assert.True(r.Holds);
+        g.WearsWithoutSupport = true; Assert.False(SupportModel.Run(new[] { p }, (x, z) => 0.0, null)[p].Holds);
+    }
 }

@@ -38,6 +38,7 @@ namespace HubnerExt
         {
             if (Cache.TryGetValue(name, out var c)) return c;
             if (ZNetScene.instance == null) return null;
+            if (name == "Player" || U.IsLiving(name)) return null;                               // never instantiate a creature or a player to read its colliders
             var prefab = ZNetScene.instance.GetPrefab(name); if (prefab == null) return null;
             GameObject go = null;
             try { ZNetView.m_forceDisableInit = true; go = UnityEngine.Object.Instantiate(prefab, new Vector3(0f, -4000f, 0f), Quaternion.identity); }
@@ -59,7 +60,7 @@ namespace HubnerExt
                     else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity, Layer = layer });       // a bounds box for anything else (the game uses the real shape)
                 }
                 var wnt = go.GetComponent<WearNTear>();
-                if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); }
+                if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); g.WearsWithoutSupport = wnt.m_noSupportWear; }
                 var piece = go.GetComponent<Piece>();
                 if (piece != null) { g.NoClipping = piece.m_noClipping; g.NotOnTilting = piece.m_notOnTiltingSurface; g.NotOnWood = piece.m_notOnWood; g.NotOnFloor = piece.m_notOnFloor; g.NoInWater = piece.m_noInWater; g.GroundOnly = piece.m_groundOnly; }
                 var n = name.ToLowerInvariant();
@@ -94,15 +95,15 @@ namespace HubnerExt
             double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9;
             foreach (var v in victims) { var p = v.GetPosition(); x0 = Math.Min(x0, p.x); x1 = Math.Max(x1, p.x); z0 = Math.Min(z0, p.z); z1 = Math.Max(z1, p.z); }
             var removed = new HashSet<string>(victims.Select(v => U.Id(v)));
-            var all = new List<PlacedPiece>(); const double margin = 12;
+            var all = new List<PlacedPiece>(); const double margin = 24;                                                       // wood carries about 20 m sideways before it reaches its minimum: look that far past the victims
             foreach (var z in Zdos.InBox((float)(x0 - margin), (float)(z0 - margin), (float)(x1 + margin), (float)(z1 + margin)))
             {
                 var name = Zdos.NameOf(z.GetPrefab()); if (name.StartsWith("_", StringComparison.Ordinal)) continue;
                 var geo = Geo(name); if (geo == null || geo.Colliders.Count == 0) continue;
                 var p = z.GetPosition();
                 all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false });
+                if (all.Count > 4000) { note = "collapse check skipped: more than 4000 pieces around"; return null; }
             }
-            if (all.Count > 4000) { note = "collapse check skipped: " + all.Count + " pieces around"; return null; }
             if (!all.Any(p => removed.Contains(p.Id) && Material.Of(p.Geo.Material) != null)) return new List<string>();
             Func<double, double, double> ground = WorldGenerator.instance != null ? (Func<double, double, double>)((x, z) => WorldGenerator.instance.GetHeight((float)x, (float)z)) : null;
             return RemovalImpact.Collapses(all, removed, ground).Select(p => p.Id + " " + p.Geo.Prefab + " " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z))).ToList();
@@ -143,7 +144,7 @@ namespace HubnerExt
             {
                 idx++; var it = o as Dictionary<string, object>; if (it == null) continue;
                 foreach (var uk in PlanItemRules.Unknown(it.Keys)) unknownKeys[uk] = unknownKeys.ContainsKey(uk) ? unknownKeys[uk] + 1 : 1;
-                if (PlanItemRules.MissingY(U.Has(it, "y"), McpJson.GetStr(it, "seat"))) missingY++;
+                if (PlanItemRules.MissingY(PlanItemRules.HasY(McpJson.Get(it, "y", double.NaN)), McpJson.GetStr(it, "seat"))) missingY++;
                 var prefab = McpJson.GetStr(it, "prefab"); var geo = string.IsNullOrEmpty(prefab) ? null : Geo(prefab);
                 if (geo == null) { if (unknown.Count < maxEx) unknown.Add("item " + idx + ": " + (prefab ?? "no prefab")); continue; }
                 double x = McpJson.Get(it, "x", double.NaN), y = McpJson.Get(it, "y", double.NaN), z = McpJson.Get(it, "z", double.NaN);

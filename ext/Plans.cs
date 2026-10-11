@@ -179,7 +179,9 @@ namespace HubnerExt
         static ZDO CreateZdo(string prefab, Vector3 pos, Quaternion rot, string text, string tag, string plan, string key, out string err)
         {
             err = null;
-            if (ZNetScene.instance != null && ZNetScene.instance.GetPrefab(prefab) == null) { err = prefab + ": unknown prefab"; return null; }
+            var pgo = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(prefab) : null;
+            if (ZNetScene.instance != null && pgo == null) { err = prefab + ": unknown prefab"; return null; }
+            if (pgo != null && pgo.GetComponent<ZNetView>() == null) { err = prefab + ": not a networked prefab (no ZNetView): a ZDO for it would never become an object"; return null; }
             var nz = ZDOMan.instance.CreateNewZDO(pos, Hash(prefab));
             nz.SetPrefab(Hash(prefab));                           // CreateNewZDO leaves the prefab hash 0 on this game version: set it explicitly
             if (nz.GetPrefab() != Hash(prefab)) { err = prefab + ": created object has prefab hash " + nz.GetPrefab(); try { ZDOMan.instance.DestroyZDO(nz); } catch { } return null; }
@@ -231,6 +233,7 @@ namespace HubnerExt
             var items = McpJson.GetList(a, "items"); if (items == null || items.Count == 0) { yield return ToolOutput.Err("items required"); yield break; }
             if (items.Count > 6000) { yield return ToolOutput.Err("max 6000 items per call"); yield break; }
             var byPlanOrder = McpJson.GetStr(a, "order") == "plan";
+            var origIndex = new Dictionary<object, int>(); for (var oi = 0; oi < items.Count; oi++) origIndex[items[oi]] = oi + 1;          // errors name the caller's item number, not the sorted one
             if (!byPlanOrder) items = PlanOrder.LowestFirst(items, o => { var d = o as Dictionary<string, object>; return d == null ? 0 : PlanOrder.Rank(U.Has(d, "y") ? (double?)McpJson.Get(d, "y", 0) : null, McpJson.GetStr(d, "seat")); });
             bool dry = McpJson.GetBool(a, "dry", false), deleteExtra = McpJson.GetBool(a, "deleteExtra", true), adopt = McpJson.GetBool(a, "adopt", true), sweepOnErrors = McpJson.GetBool(a, "sweepOnErrors", false);
             float adoptTol = (float)McpJson.Get(a, "adoptTol", 0.35), movedTol = (float)McpJson.Get(a, "movedTol", 0.15);
@@ -279,12 +282,14 @@ namespace HubnerExt
             Journal.Begin();
             try
             {
-                int idx = 0;
+                int idx = 0, sinceFlush = 0;
                 foreach (var o in items)
                 {
-                    if (++idx % Tick == 0)
+                    ++idx; int ox; if (!origIndex.TryGetValue(o, out ox)) ox = idx;
+                    if (idx % Tick == 0)
                     {
-                        if (idx % Slice == 0) { Journal.End(); yield return null; Journal.Begin(); }      // flush the journal batch now and then, so a crash loses at most one slice
+                        sinceFlush += Tick;
+                        if (sinceFlush >= Slice) { sinceFlush = 0; Journal.End(); yield return null; Journal.Begin(); }      // flush the journal batch now and then, so a crash loses at most one slice
                         else yield return null;
                     }
                     var it = o as Dictionary<string, object>;
@@ -292,10 +297,10 @@ namespace HubnerExt
                     {
                         var prefab = McpJson.GetStr(it, "prefab");
                         foreach (var uk in PlanItemRules.Unknown(it.Keys)) unknownKeys[uk] = unknownKeys.ContainsKey(uk) ? unknownKeys[uk] + 1 : 1;
-                        if (string.IsNullOrEmpty(prefab)) { errors++; if (exErr.Count < maxEx) exErr.Add("item " + idx + ": prefab missing"); continue; }
-                        if (PlanItemRules.MissingY(U.Has(it, "y"), McpJson.GetStr(it, "seat"))) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": y missing (a missing y used to build at y 0, under the sea; give y, or seat:\"ground\" to stand it on the terrain)"); continue; }
+                        if (string.IsNullOrEmpty(prefab)) { errors++; if (exErr.Count < maxEx) exErr.Add("item " + ox + ": prefab missing"); continue; }
+                        if (PlanItemRules.MissingY(PlanItemRules.HasY(McpJson.Get(it, "y", double.NaN)), McpJson.GetStr(it, "seat"))) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": y missing (a missing y used to build at y 0, under the sea; give y, or seat:\"ground\" to stand it on the terrain)"); continue; }
                         if (U.IsForbidden(prefab) || prefab.StartsWith("Player", StringComparison.Ordinal) || U.IsLiving(prefab)) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": forbidden (terrain, player or creature)"); continue; }
-                        double x = McpJson.Get(it, "x", double.NaN), y = McpJson.Get(it, "y", 0), zz = McpJson.Get(it, "z", double.NaN), yaw = McpJson.Get(it, "yaw", 0);
+                        double x = McpJson.Get(it, "x", double.NaN), y = PlanItemRules.HasY(McpJson.Get(it, "y", double.NaN)) ? McpJson.Get(it, "y", 0) : 0, zz = McpJson.Get(it, "z", double.NaN), yaw = McpJson.Get(it, "yaw", 0);
                         if (double.IsNaN(x) || double.IsNaN(zz)) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": x and z must be numbers"); continue; }
                         if (!WorldBounds.InWorld(x, y, zz) || !WorldBounds.Finite(yaw)) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": position or yaw not finite or outside the world"); continue; }
                         bool seat = McpJson.GetStr(it, "seat") == "ground";
@@ -304,10 +309,21 @@ namespace HubnerExt
                         var key = PlanKeys.Of(McpJson.GetStr(it, "key"), prefab, x, y, zz, yaw, seat);
                         if (!wanted.Add(key)) { dupes++; continue; }                         // the same key twice in one plan: first wins
                         var pos = new Vector3((float)x, (float)y, (float)zz);
-                        if (seat && zs != null && zs.GetGroundHeight(new Vector3(pos.x, 5000f, pos.z), out var gh)) pos.y = gh;
+                        if (seat)
+                        {
+                            // the terrain collider exists only where a zone is built (a dedicated server builds zones round its own reference point): elsewhere the world generator gives the ground
+                            if (zs != null && zs.GetGroundHeight(new Vector3(pos.x, 5000f, pos.z), out var gh)) pos.y = gh;
+                            else if (WorldGenerator.instance != null) pos.y = WorldGenerator.instance.GetHeight(pos.x, pos.z);
+                            else { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": seat:ground but no terrain or world generator to give the ground"); continue; }
+                        }
                         var lab = McpJson.GetStr(it, "label"); if (lab != null) labelItems.Add(new KeyValuePair<Vector3, string>(pos, lab));
                         var rot = Quaternion.Euler(0f, (float)yaw, 0f);
-                        var rl = McpJson.GetList(it, "rot"); if (rl != null && rl.Count >= 3) rot = Quaternion.Euler((float)U.At(rl, 0), (float)U.At(rl, 1), (float)U.At(rl, 2));
+                        var rl = McpJson.GetList(it, "rot");
+                        if (rl != null && rl.Count >= 3)
+                        {
+                            if (!WorldBounds.Finite(U.At(rl, 0)) || !WorldBounds.Finite(U.At(rl, 1)) || !WorldBounds.Finite(U.At(rl, 2))) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": rot must be three finite numbers"); continue; }
+                            rot = Quaternion.Euler((float)U.At(rl, 0), (float)U.At(rl, 1), (float)U.At(rl, 2));
+                        }
 
                         ZDO z = null;
                         if (tagged.TryGetValue(key, out var tl)) z = tl.FirstOrDefault(c => !claimed.Contains(c));      // surplus copies of a key fall into the extra sweep below
@@ -337,6 +353,7 @@ namespace HubnerExt
                             claimed.Add(z);
                             if (z.GetPrefab() != Hash(prefab))                                           // wrong/zero prefab (made by an older version): recreate, an in-place fix never reaches connected clients
                             {
+                                if (!forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": recreating it would put it inside an enabled guard stone's area (force:true + forceConfirm overrides)"); continue; }
                                 updated++; if (exMoved.Count < maxEx) exMoved.Add(prefab + " recreated (bad prefab) " + U.V(z.GetPosition()));
                                 if (!dry)
                                 {
@@ -576,6 +593,7 @@ namespace HubnerExt
             }
             var allowCollapse = McpJson.GetBool(a, "allowCollapse", false); string collapseNote = ""; List<string> falls = null;
             if (!allowCollapse || dry) falls = PlanCheck.CollapseOf(victims, out collapseNote);
+            if (falls == null && collapseNote.Length > 0 && !dry && !allowCollapse) return ToolOutput.Err("refused: " + collapseNote + ", so it cannot be shown that nothing outside the removal rests on it. Pass allowCollapse:true to remove anyway (dry:true counts only).");
             if (falls != null && falls.Count > 0 && !dry && !allowCollapse) return ToolOutput.Err("refused: removing these " + n + " objects would bring down " + falls.Count + " pieces that rest on them (WearNTear destroys a piece that loses its support), e.g. " + string.Join("; ", falls.Take(5).ToArray()) + ". Remove them as well, or pass allowCollapse:true.");
             if (!dry)
             {
@@ -751,7 +769,7 @@ namespace HubnerExt
             var ids = McpJson.GetList(a, "ids"); if (ids == null || ids.Count == 0) return ToolOutput.Err("ids required");
             if (ids.Count > 2000) return ToolOutput.Err("max 2000 ids per call");
             var group = McpJson.GetStr(a, "group") ?? "zdo_delete";
-            int done = 0; var errs = new List<string>(); var victims = new List<ZDO>();
+            int done = 0; var errs = new List<string>(); var victims = new List<ZDO>(); var seenVictims = new HashSet<ZDO>();
             foreach (var o in ids)
             {
                 var id = Convert.ToString(o, CultureInfo.InvariantCulture);
@@ -760,6 +778,7 @@ namespace HubnerExt
                     var z = U.FindZdo(id); if (z == null) { errs.Add(id + ": not found"); continue; }
                     var prefab = Zdos.NameOf(z.GetPrefab());
                     if (Protected(z, prefab, a, out var why)) { errs.Add(id + ": " + why); continue; }
+                    if (!seenVictims.Add(z)) continue;                                 // the same id twice is one object
                     victims.Add(z);
                 }
                 catch (Exception ex) { errs.Add(id + ": " + ex.Message); }
@@ -768,6 +787,7 @@ namespace HubnerExt
             if (!allowCollapse && victims.Count > 0)
             {
                 string cnote; var falls = PlanCheck.CollapseOf(victims, out cnote);
+                if (falls == null && cnote.Length > 0) return ToolOutput.Err("refused: " + cnote + ", so it cannot be shown that nothing outside the deletion rests on it. Pass allowCollapse:true to delete anyway.");
                 if (falls != null && falls.Count > 0) return ToolOutput.Err("refused: deleting these " + victims.Count + " objects would bring down " + falls.Count + " pieces that rest on them (WearNTear destroys a piece that loses its support), e.g. " + string.Join("; ", falls.Take(5).ToArray()) + ". Delete them as well, or pass allowCollapse:true.");
             }
             Journal.Begin();
@@ -901,9 +921,18 @@ namespace HubnerExt
             if (sameLoad) { var z0 = U.FindZdo(e.Id); if (z0 != null) cands.Add(FactsOf(z0)); }
             else if (!string.IsNullOrEmpty(e.IdPlan) && !string.IsNullOrEmpty(e.IdKey))
             {
-                foreach (var chunk in Zdos.InBoxChunks(World[0], World[1], World[2], World[3]))
-                    foreach (var z in chunk)
-                        if (z.GetString(PlanHash, "") == e.IdPlan && z.GetString(ItemHash, "") == e.IdKey) cands.Add(FactsOf(z));
+                if (_undoIndex == null)
+                {
+                    // one pass over the world for the whole undo, not one per entry (a 3,000-piece group would otherwise scan the world 3,000 times on the main thread)
+                    _undoIndex = new Dictionary<string, List<ZDO>>();
+                    foreach (var chunk in Zdos.InBoxChunks(World[0], World[1], World[2], World[3]))
+                        foreach (var z in chunk)
+                        {
+                            var pl = z.GetString(PlanHash, ""); if (pl.Length == 0) continue;
+                            var k = pl + "\n" + z.GetString(ItemHash, ""); List<ZDO> l; if (!_undoIndex.TryGetValue(k, out l)) _undoIndex[k] = l = new List<ZDO>(); l.Add(z);
+                        }
+                }
+                List<ZDO> hit; if (_undoIndex.TryGetValue(e.IdPlan + "\n" + e.IdKey, out hit)) foreach (var z in hit) if (z.IsValid()) cands.Add(FactsOf(z));
             }
             else foreach (var z in Zdos.InBox(e.Pos.x - 2f, e.Pos.z - 2f, e.Pos.x + 2f, e.Pos.z + 2f)) cands.Add(FactsOf(z));
             var m = Identity.Find(e.Boot, boot, e.Id, e.Prefab, e.IdPlan, e.IdKey, e.Pos.x, e.Pos.y, e.Pos.z, e.Kind == "spawn", cands, out var found);
@@ -916,8 +945,12 @@ namespace HubnerExt
         }
 
         /// <summary>Undo one journal entry (shared by undo_group and the client's undo). Returns an error string or null.</summary>
+        static Dictionary<string, List<ZDO>> _undoIndex;
+        internal static void ResetUndoIndex() { _undoIndex = null; }
+
         internal static string UndoEntry(JEntry e)
         {
+            if (WorldKey.Differs(e.World, Journal.CurrentWorld())) return e.Id + ": written in the world " + e.World + " and this is " + Journal.CurrentWorld() + ": not touched";
             if (e.Kind == "spawn")
             {
                 var z = ResolveForUndo(e, out var problem);
@@ -927,6 +960,7 @@ namespace HubnerExt
             else if (e.Kind == "delete")
             {
                 string uerr; var nz = CreateZdo(e.Prefab, e.Pos, e.Rot, e.Text, e.Tag, e.Plan ?? "", e.Key ?? "", out uerr); if (nz == null) return e.Id + ": " + uerr;
+                _undoIndex = null;                                                            // a new object the index does not know
                 if (!string.IsNullOrEmpty(e.Text)) nz.Set("text", e.Text); if (!string.IsNullOrEmpty(e.Tag)) nz.Set("tag", e.Tag);
                 if (!string.IsNullOrEmpty(e.Plan)) { nz.Set(PlanKey, e.Plan); nz.Set(ItemKey, e.Key ?? ""); } else { nz.Set(PlanKey, ""); nz.Set(ItemKey, ""); }
                 if (e.Creator != 0) nz.Set("creator", e.Creator);
@@ -964,7 +998,7 @@ namespace HubnerExt
                 if (!string.IsNullOrEmpty(group) ? (e.Group == group) : take.Count < count) take.Add(e);
                 if (string.IsNullOrEmpty(group) && take.Count >= count) break;
             }
-            int undone = 0; var errs = new List<string>();
+            int undone = 0; var errs = new List<string>(); _undoIndex = null;
             Journal.Begin();
             try
             {
@@ -979,7 +1013,7 @@ namespace HubnerExt
                     catch (Exception ex) { errs.Add(e.Id + ": " + ex.Message); }
                 }
             }
-            finally { Journal.End(); }
+            finally { Journal.End(); _undoIndex = null; }
             return U.Json("{\"undone\":" + undone + ",\"errors\":[" + string.Join(",", errs.Select(U.S).ToArray()) + "]}");
         }
 
@@ -1003,6 +1037,7 @@ namespace HubnerExt
         static ToolOutput WorldSave(Dictionary<string, object> a)
         {
             if (ZNet.instance == null) return ToolOutput.Err("no ZNet");
+            if (!ZNet.instance.IsServer()) return ToolOutput.Err("this is a joined client: only the server saves the world (a client writing its partial object table under the server's world name could overwrite a local world of that name)");
             var since = Time.realtimeSinceStartup - _lastSaveRequest;
             if (since < 10f) return ToolOutput.Err("a save was requested " + U.N(Math.Round(since, 1)) + " s ago: poll save_state until saveDone > saveStart instead of saving again");
             _lastSaveRequest = Time.realtimeSinceStartup;

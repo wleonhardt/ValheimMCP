@@ -70,6 +70,7 @@ namespace HubnerExt
             {
                 var p = kv.Value as Dictionary<string, object>; if (p == null) continue;
                 var g = new PieceGeo { Prefab = kv.Key, Material = Str(p, "material"), Supports = Bool(p, "supports") };
+                if (p.ContainsKey("wears")) g.WearsWithoutSupport = Bool(p, "wears");
                 var com = Vec(p, "com"); g.ComOffset = com;
                 foreach (var co in List(p, "colliders"))
                 {

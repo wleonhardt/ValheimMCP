@@ -86,6 +86,7 @@ namespace HubnerExt
         }
 
         public static string N(double d) { return d.ToString("0.###", CultureInfo.InvariantCulture); }
+        public static string N5(double d) { return d.ToString("0.#####", CultureInfo.InvariantCulture); }          // a rotation component: 3 decimals leave a quaternion visibly off after an undo
         public static string S(string s) { return McpJson.Str(s); }
         public static string V(Vector3 v) { return "[" + N(v.x) + "," + N(v.y) + "," + N(v.z) + "]"; }
         public static ToolOutput Json(string s) { return ToolOutput.Ok(s); }
@@ -107,8 +108,14 @@ namespace HubnerExt
             var p = id.Split(':');
             if (p.Length != 2) return null;
             if (!uint.TryParse(p[0], out var idn) || !long.TryParse(p[1], out var user)) return null;
-            return ZDOMan.instance == null ? null : ZDOMan.instance.GetZDO(new ZDOID(user, idn));
+            if (ZDOMan.instance == null) return null;
+            // new ZDOID(user, id) registers the user in a static table indexed by a ushort: an id with a made-up user must not be allowed to fill it (a ZDO that exists has its user there already)
+            if (_userIds == null) _userIds = typeof(ZDOID).GetField("m_userIDs", BindingFlags.Static | BindingFlags.NonPublic) ;
+            var known = _userIds != null ? _userIds.GetValue(null) as List<long> : null;
+            if (known != null && !known.Contains(user)) return null;
+            return ZDOMan.instance.GetZDO(new ZDOID(user, idn));
         }
+        private static FieldInfo _userIds;
 
         private static FieldInfo _inst;
         public static IEnumerable<ZNetView> Instances()
@@ -330,7 +337,7 @@ namespace HubnerExt
         {
             var sb = new StringBuilder();
             sb.Append("{\"seq\":" + e.Seq + ",\"t\":" + U.S(e.Time) + ",\"kind\":" + U.S(e.Kind) + ",\"id\":" + U.S(e.Id) + ",\"prefab\":" + U.S(e.Prefab) + ",\"pos\":" + U.V(e.Pos)
-                + ",\"rot\":[" + U.N(e.Rot.x) + "," + U.N(e.Rot.y) + "," + U.N(e.Rot.z) + "," + U.N(e.Rot.w) + "],\"text\":" + U.S(e.Text ?? "") + ",\"tag\":" + U.S(e.Tag ?? "") + ",\"plan\":" + U.S(e.Plan ?? "")
+                + ",\"rot\":[" + U.N5(e.Rot.x) + "," + U.N5(e.Rot.y) + "," + U.N5(e.Rot.z) + "," + U.N5(e.Rot.w) + "],\"text\":" + U.S(e.Text ?? "") + ",\"tag\":" + U.S(e.Tag ?? "") + ",\"plan\":" + U.S(e.Plan ?? "")
                 + ",\"key\":" + U.S(e.Key ?? "") + ",\"creator\":" + e.Creator + ",\"group\":" + U.S(e.Group ?? "") + ",\"note\":" + U.S(e.Note ?? "")
                 + ",\"boot\":" + U.S(e.Boot ?? "") + ",\"world\":" + U.S(e.World ?? "") + ",\"ip\":" + U.S(e.IdPlan ?? "") + ",\"ik\":" + U.S(e.IdKey ?? ""));
             if (e.Scale != Vector3.one && e.Scale != Vector3.zero) sb.Append(",\"scale\":" + U.V(e.Scale));

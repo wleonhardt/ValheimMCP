@@ -681,6 +681,7 @@ namespace HubnerExt
             Journal.Begin();
             try
             {
+                Plans.ResetUndoIndex();
                 foreach (var e in take)
                 {
                     try

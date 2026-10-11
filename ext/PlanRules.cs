@@ -140,6 +140,7 @@ namespace HubnerExt
         public bool Supports;                       // WearNTear.m_supports
         public V3 ComOffset;
         public bool NoClipping, NotOnTilting, NotOnWood, NotOnFloor, NoInWater, GroundOnly, IsFire, IsWall, IsStation, Occupies = true;
+        public bool WearsWithoutSupport = true;    // WearNTear.m_noSupportWear (the name is the opposite of what it says): false = the piece never takes damage from lack of support
         public bool IsFireplace;                    // has a Fireplace component (torches and sconces too, not only the big fires IsFire names)
         public bool DisableCoverCheck;              // Fireplace.m_disableCoverCheck
         public double CoverCheckOffset = 0.5, CheckTerrainOffset = 0.2;       // Fireplace.m_coverCheckOffset / m_checkTerrainOffset
@@ -205,8 +206,8 @@ namespace HubnerExt
     internal sealed class SupportResult
     {
         public double Support, Min, Max;
-        public bool Grounded;
-        public bool Holds { get { return Support >= Min; } }
+        public bool Grounded, NeverFalls;
+        public bool Holds { get { return NeverFalls || Support >= Min; } }
     }
 
     internal static class SupportModel
@@ -228,7 +229,7 @@ namespace HubnerExt
                 var m = Material.Of(p.Geo.Material); mats[p] = m;
                 if (m == null) { solids.AddRange(p.Boxes(Layers.InSupport)); continue; }
                 plain[p] = p.Boxes(Layers.InSupport); grown[p] = plain[p].Select(b => b.Grown(ContactGrow)).ToList();
-                res[p] = new SupportResult { Max = m.Max, Min = m.Min };
+                res[p] = new SupportResult { Max = m.Max, Min = m.Min, NeverFalls = !p.Geo.WearsWithoutSupport };
             }
             obstacles = solids;
             // contacts that do not change between rounds
@@ -478,7 +479,7 @@ namespace HubnerExt
                 var origin = new V3(f.Pos.X, f.Pos.Y + f.Geo.CoverCheckOffset, f.Pos.Z); var up = new V3(0, 1, 0);
                 foreach (var o in pieces)
                 {
-                    if (o == f) continue;
+                    if (o == f || Math.Abs(o.Pos.X - f.Pos.X) > 8 || Math.Abs(o.Pos.Z - f.Pos.Z) > 8 || Math.Abs(o.Pos.Y - f.Pos.Y) > 12) continue;          // only what can be within half a metre above it
                     foreach (var b in o.Boxes(Layers.InSolid))
                         if (b.RayHits(origin, up, 0.5))
                         { res.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "fire-blocked", Severity = "error", Piece = f.Id, Detail = f.Geo.Prefab + " has " + o.Geo.Prefab + " (" + o.Id + ") within 0.5 m straight above it: the game puts the fire out" })); goto next; }
