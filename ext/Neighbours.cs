@@ -133,7 +133,7 @@ namespace HubnerExt
                 PlanOwned = !string.IsNullOrEmpty(z.GetString(Plans.PlanHash, "")),
                 Tombstone = Ownership.IsTombstonePrefab(prefab),
                 InWard = InWard(p, 0),
-                ContainerWithItems = _containerH != null && _containerH.Contains(h) && z.GetString("items", "").Length > 0
+                ContainerWithItems = _containerH != null && _containerH.Contains(h) && ContainerData.Has(z)
             };
             if (_pieceH != null && _pieceH.Contains(h) && z.GetLong(CreatorHash, 0L) == 0L && !f.PlanOwned)
             {
@@ -183,7 +183,7 @@ namespace HubnerExt
                 var p = z.GetPosition(); var dx = p.x - x; var dz = p.z - zc; if (dx * dx + dz * dz > rad * rad) continue;
                 var h = z.GetPrefab(); var name = Zdos.NameOf(h);
                 if (Ownership.IsTombstonePrefab(name)) { tombs.Add("{\"id\":" + U.S(U.Id(z)) + ",\"pos\":" + U.V(p) + ",\"owner\":" + U.S(z.GetString("ownerName", "")) + "}"); continue; }
-                if (_containerH != null && _containerH.Contains(h) && z.GetString("items", "").Length > 0) chests.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(p) + ",\"creator\":" + z.GetLong(CreatorHash, 0L).ToString(CultureInfo.InvariantCulture) + "}");
+                if (_containerH != null && _containerH.Contains(h) && ContainerData.Has(z)) chests.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(p) + ",\"creator\":" + z.GetLong(CreatorHash, 0L).ToString(CultureInfo.InvariantCulture) + "}");
                 if (name.IndexOf("bed", StringComparison.OrdinalIgnoreCase) >= 0 && z.GetLong("owner", 0L) != 0L) beds.Add("{\"id\":" + U.S(U.Id(z)) + ",\"pos\":" + U.V(p) + ",\"owner\":" + U.S(z.GetString("ownerName", "")) + "}");
                 if (_pieceH == null || !_pieceH.Contains(h)) continue;
                 pieces++; var cr = z.GetLong(CreatorHash, 0L);
@@ -308,7 +308,7 @@ namespace HubnerExt
                     var name = Zdos.NameOf(z.GetPrefab()); if (!Ownership.IsTombstonePrefab(name)) continue;
                     var owner = z.GetString("ownerName", ""); if (filter != null && owner.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
                     total++; if (rows.Count >= limit) continue;
-                    var stacks = 0; try { var s = z.GetString("items", ""); if (s.Length > 0) { var inv = new Inventory("x", null, 8, 8); inv.Load(new ZPackage(s)); stacks = inv.GetAllItems().Count; } } catch (Exception ex) { U.Once("death_state items", ex); }
+                    var stacks = 0; try { var s = ContainerData.Package(z); if (s != null) { var inv = new Inventory("x", null, 8, 8); inv.Load(s); stacks = inv.GetAllItems().Count; } } catch (Exception ex) { U.Once("death_state items", ex); }
                     rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"pos\":" + U.V(z.GetPosition()) + ",\"owner\":" + U.S(owner) + ",\"ownerId\":" + z.GetLong("owner", 0L).ToString(CultureInfo.InvariantCulture) + ",\"timeOfDeath\":" + z.GetLong("timeOfDeath", 0L).ToString(CultureInfo.InvariantCulture) + ",\"itemStacks\":" + stacks + "}");
                 }
             return U.Json("{\"total\":" + total + ",\"tombstones\":[" + string.Join(",", rows.ToArray()) + "]}");

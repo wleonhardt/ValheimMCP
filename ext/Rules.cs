@@ -95,11 +95,12 @@ namespace HubnerExt
         public static bool Exposure(double cover, bool underRoof) { return underRoof && cover >= CoverMin; }
 
         /// <summary>The message token of the first rule that stops sleeping, in the game's order; null when nothing does.</summary>
-        public static string FirstFailure(bool timeOk, bool enemySensed, bool exposureOk, bool heatOk, bool wet)
+        public static string FirstFailure(bool timeOk, bool enemySensed, double cover, bool underRoof, bool heatOk, bool wet)
         {
             if (!timeOk) return "$msg_cantsleep";
             if (enemySensed) return "$msg_bedenemiesnearby";
-            if (!exposureOk) return "$msg_bedneedroof";
+            if (!underRoof) return "$msg_bedneedroof";                         // Bed.CheckExposure: no roof, then a roof with too little cover
+            if (cover < CoverMin) return "$msg_bedtooexposed";
             if (!heatOk) return "$msg_bednofire";
             if (wet) return "$msg_bedwet";
             return null;

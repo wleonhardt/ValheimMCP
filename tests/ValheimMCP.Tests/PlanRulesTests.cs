@@ -287,12 +287,13 @@ public class SleepRulesTests
     [Fact] public void ExposureNeedsARoofAndEightyPercentCover() { Assert.True(SleepRules.Exposure(0.8, true)); Assert.False(SleepRules.Exposure(0.79, true)); Assert.False(SleepRules.Exposure(1.0, false)); }
     [Fact] public void TheGamesMessageOfTheFirstFailingRuleComesInTheGamesOrder()
     {
-        Assert.Equal("$msg_cantsleep", SleepRules.FirstFailure(false, true, false, false, true));
-        Assert.Equal("$msg_bedenemiesnearby", SleepRules.FirstFailure(true, true, false, false, true));
-        Assert.Equal("$msg_bedneedroof", SleepRules.FirstFailure(true, false, false, false, true));
-        Assert.Equal("$msg_bednofire", SleepRules.FirstFailure(true, false, true, false, true));
-        Assert.Equal("$msg_bedwet", SleepRules.FirstFailure(true, false, true, true, true));
-        Assert.Null(SleepRules.FirstFailure(true, false, true, true, false));
+        Assert.Equal("$msg_cantsleep", SleepRules.FirstFailure(false, true, 0.1, false, false, true));
+        Assert.Equal("$msg_bedenemiesnearby", SleepRules.FirstFailure(true, true, 0.1, false, false, true));
+        Assert.Equal("$msg_bedneedroof", SleepRules.FirstFailure(true, false, 0.9, false, false, true));        // no roof, whatever the cover
+        Assert.Equal("$msg_bedtooexposed", SleepRules.FirstFailure(true, false, 0.7, true, false, true));       // a roof but too open
+        Assert.Equal("$msg_bednofire", SleepRules.FirstFailure(true, false, 0.9, true, false, true));
+        Assert.Equal("$msg_bedwet", SleepRules.FirstFailure(true, false, 0.9, true, true, true));
+        Assert.Null(SleepRules.FirstFailure(true, false, 0.8, true, true, false));
     }
 }
 

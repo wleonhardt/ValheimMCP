@@ -157,7 +157,7 @@ namespace HubnerExt
         {
             if (kind == "delete")                                                       // what a delete throws away and a plain respawn cannot bring back: chest contents
             {
-                var items = z.GetString("items", "");
+                var items = ContainerData.ToBase64(z);
                 if (items.Length > 0) { strings = strings != null ? new Dictionary<string, string>(strings) : new Dictionary<string, string>(); strings["items"] = items; }
             }
             Journal.Add(new JEntry { Kind = kind, Id = U.Id(z), Prefab = prefab, Pos = pos, Rot = rot, Text = text, Tag = tag, Plan = plan, Key = key, Creator = creator, Group = group, Scale = z.GetVec3("scale", Vector3.one), Ints = ints, Floats = floats, Strings = strings, IdPlan = z.GetString(PlanHash, ""), IdKey = z.GetString(ItemHash, "") });
@@ -621,8 +621,8 @@ namespace HubnerExt
                         if (cont == null) { errs.Add(id + ": " + prefab + " is not a container"); continue; }
                         if (z.GetInt(InUseHash, 0) != 0) { errs.Add(id + ": a player has it open (their client would write its copy back over this edit)"); continue; }
                         var inv = new Inventory("x", null, cont.m_width, cont.m_height);
-                        var cur = z.GetString("items", "");
-                        if (!McpJson.GetBool(e, "replace", false) && !string.IsNullOrEmpty(cur)) { try { inv.Load(new ZPackage(cur)); } catch (Exception ex) { errs.Add(id + ": unreadable inventory " + ex.Message); continue; } }
+                        var cur = ContainerData.Package(z);
+                        if (!McpJson.GetBool(e, "replace", false) && cur != null) { try { inv.Load(cur); } catch (Exception ex) { errs.Add(id + ": unreadable inventory " + ex.Message); continue; } }
                         var items = McpJson.GetList(e, "items"); if (items == null) { errs.Add(id + ": items required"); continue; }
                         int addedHere = 0;
                         foreach (var io in items)
@@ -641,8 +641,8 @@ namespace HubnerExt
                             }
                         }
                         // journaled like every other write: the old contents ride along as a string field, so undo_group puts them back
-                        Log(group, "modify", z, prefab, z.GetPosition(), z.GetRotation(), z.GetString("text", ""), z.GetString("tag", ""), z.GetString(PlanHash, ""), z.GetString(ItemHash, ""), z.GetLong("creator", 0L), null, null, new Dictionary<string, string> { { "items", cur } });
-                        var pkg = new ZPackage(); inv.Save(pkg); Own(z); z.Set("items", pkg.GetBase64()); done++; added += addedHere;
+                        Log(group, "modify", z, prefab, z.GetPosition(), z.GetRotation(), z.GetString("text", ""), z.GetString("tag", ""), z.GetString(PlanHash, ""), z.GetString(ItemHash, ""), z.GetLong("creator", 0L), null, null, new Dictionary<string, string> { { "items", ContainerData.ToBase64(z) } });
+                        var pkg = new ZPackage(); inv.Save(pkg); Own(z); ContainerData.Write(z, pkg); done++; added += addedHere;
                     }
                     catch (Exception ex) { errs.Add(id + ": " + ex.Message); }
                 }
@@ -934,7 +934,7 @@ namespace HubnerExt
                 Journal.Remap(e.Id, U.Id(nz));                                            // the object has a new id now: older entries about it must find it
                 if (e.Ints != null) foreach (var kv in e.Ints) nz.Set(kv.Key, kv.Value);
                 if (e.Floats != null) foreach (var kv in e.Floats) nz.Set(kv.Key, kv.Value);
-                if (e.Strings != null) foreach (var kv in e.Strings) nz.Set(kv.Key, kv.Value);
+                if (e.Strings != null) foreach (var kv in e.Strings) { if (kv.Key == "items") ContainerData.SetFromBase64(nz, kv.Value); else nz.Set(kv.Key, kv.Value); }
             }
             else if (e.Kind == "modify")
             {
@@ -946,7 +946,7 @@ namespace HubnerExt
                 z.Set(PlanKey, e.Plan ?? ""); z.Set(ItemKey, e.Key ?? "");               // undo of an adoption removes the tag again
                 if (e.Ints != null) foreach (var kv in e.Ints) z.Set(kv.Key, kv.Value);
                 if (e.Floats != null) foreach (var kv in e.Floats) z.Set(kv.Key, kv.Value);
-                if (e.Strings != null) foreach (var kv in e.Strings) z.Set(kv.Key, kv.Value);
+                if (e.Strings != null) foreach (var kv in e.Strings) { if (kv.Key == "items") ContainerData.SetFromBase64(z, kv.Value); else z.Set(kv.Key, kv.Value); }
                 Audit.FixMoved(new HashSet<ZDO> { z });
             }
             return null;

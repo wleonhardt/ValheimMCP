@@ -214,6 +214,25 @@ namespace HubnerExt
         public string Boot, IdPlan, IdKey;     // v4: the world load the Id belongs to, and the plan identity the object has (ZDO ids are renumbered at every load: the tags are what survives a restart)
     }
 
+    /// <summary>
+    ///     Container contents in the ZDO. Since the chunked save format the game keeps a container's inventory as a BYTE ARRAY under "items" (Container.Save / Load use GetByteArray);
+    ///     only a world saved by an older version holds the base64 string, which ZDOMan converts at load. Reading the string alone sees every chest empty.
+    /// </summary>
+    internal static class ContainerData
+    {
+        public static byte[] Read(ZDO z)
+        {
+            var b = z.GetByteArray("items", null); if (b != null && b.Length > 0) return b;
+            var s = z.GetString("items", ""); if (s.Length == 0) return null;
+            try { return Convert.FromBase64String(s); } catch (FormatException) { return null; /* allow: a string that is not base64 is not an inventory */ }
+        }
+        public static bool Has(ZDO z) { return Read(z) != null; }
+        public static ZPackage Package(ZDO z) { var b = Read(z); return b == null ? null : new ZPackage(b); }
+        public static string ToBase64(ZDO z) { var b = Read(z); return b == null ? "" : Convert.ToBase64String(b); }
+        public static void Write(ZDO z, ZPackage pkg) { z.Set("items", pkg.GetArray()); }
+        public static void SetFromBase64(ZDO z, string b64) { z.Set("items", Convert.FromBase64String(b64)); }
+    }
+
     /// <summary>Persistent write journal: every entry is appended to hubner-ext/journal.jsonl (full state, so it can be undone after a hot reload or restart);
     /// undo appends {"undone":seq}. Entries reload on startup; the file is compacted when the undone markers outnumber the live entries.
     /// Begin()/End() batch the appends of one tool call into a single file write (a plan of 3,000 pieces used to be 3,000 writes on the main thread).</summary>

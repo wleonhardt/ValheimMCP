@@ -658,7 +658,7 @@ namespace HubnerExt
                         if (nv == null || nv.GetZDO() == null) { skipped++; continue; }     // already destroyed (stale id)
                         var z = nv.GetZDO(); var t = nv.transform;
                         var entry = new JEntry { Kind = "delete", Id = U.Id(z), Prefab = U.PrefabName(nv), Pos = t.position, Rot = t.rotation, Scale = t.localScale, Text = z.GetString("text", ""), Tag = z.GetString("tag", ""), Plan = z.GetString(Plans.PlanHash, ""), Key = z.GetString(Plans.ItemHash, ""), Creator = z.GetLong("creator", 0L) };
-                        var items = z.GetString("items", ""); if (items.Length > 0) entry.Strings = new Dictionary<string, string> { { "items", items } };
+                        var items = ContainerData.ToBase64(z); if (items.Length > 0) entry.Strings = new Dictionary<string, string> { { "items", items } };
                         nv.ClaimOwnership();
                         ZNetScene.instance.Destroy(nv.gameObject);
                         Journal.Add(entry);                                                  // after the destroy: a failed destroy leaves no entry that "undo" would turn into a duplicate

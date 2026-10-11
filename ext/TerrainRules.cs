@@ -62,7 +62,7 @@ namespace HubnerExt
         static long Key(int x, int z) { return ((long)(x + 100000)) * 1000000L + (z + 100000); }
         double[] D(int x, int z) { double[] d; if (!_d.TryGetValue(Key(x, z), out d)) _d[Key(x, z)] = d = new double[2]; return d; }
         public double Base(int x, int z) { return _base(x, z); }
-        public double Height(int x, int z) { double[] d; return _d.TryGetValue(Key(x, z), out d) ? _base(x, z) + d[0] + d[1] : _base(x, z); }
+        public double Height(int x, int z) { double[] d; return _d.TryGetValue(Key(x, z), out d) ? _base(x, z) + Math.Max(-LevelMax, Math.Min(LevelMax, d[0] + d[1])) : _base(x, z); }          // TerrainComp.ApplyToHeightmap clamps the SUM to base +- 8
 
         /// <summary>Start from heights that already differ from the base (an edited terrain): the difference becomes the level delta.</summary>
         public void SetCurrent(int x, int z, double height) { var d = D(x, z); d[0] = Math.Max(-LevelMax, Math.Min(LevelMax, height - _base(x, z))); d[1] = 0; }
@@ -74,7 +74,7 @@ namespace HubnerExt
                 for (var x = vx - span; x <= vx + span; x++)
                 {
                     if (!square && Math.Sqrt((x - vx) * (double)(x - vx) + (z - vz) * (double)(z - vz)) > radius) continue;
-                    var d = D(x, z); var h = _base(x, z) + d[0] + d[1];
+                    var d = D(x, z); var h = Height(x, z);
                     var delta = targetY - h + d[1]; d[1] = 0; d[0] = Math.Max(-LevelMax, Math.Min(LevelMax, d[0] + delta));
                 }
         }
@@ -91,7 +91,7 @@ namespace HubnerExt
                         var dist = Math.Sqrt((x - vx) * (double)(x - vx) + (z - vz) * (double)(z - vz)); if (dist > radius) continue;
                         if (power > 0) { f = 1 - dist / radius; if (power != 1) f = Math.Pow(f, power); }
                     }
-                    var dd = D(x, z); var h = _base(x, z) + dd[0] + dd[1]; var change = delta * f; var target = posY + change;
+                    var dd = D(x, z); var h = Height(x, z); var change = delta * f; var target = posY + change;
                     if (delta < 0 && target > h) continue;
                     if (delta > 0) { if (target < h) continue; if (target > h + change) target = h + change; }
                     var nd = target - h + dd[1]; dd[1] = 0; dd[0] = Math.Max(-LevelMax, Math.Min(LevelMax, dd[0] + nd));
@@ -106,7 +106,7 @@ namespace HubnerExt
                 {
                     var dist = Math.Sqrt((x - vx) * (double)(x - vx) + (z - vz) * (double)(z - vz)); if (dist > radius) continue;
                     var f = dist / radius; f = power == 3 ? f * f * f : Math.Pow(f, power);
-                    var d = D(x, z); var h = _base(x, z) + d[0] + d[1]; var change = (toY - h) * (1 - f);
+                    var d = D(x, z); var h = Height(x, z); var change = (toY - h) * (1 - f);
                     d[1] = Math.Max(-SmoothMax, Math.Min(SmoothMax, d[1] + change));
                 }
         }
@@ -131,7 +131,7 @@ namespace HubnerExt
                 {
                     rep.Vertices++; var b = baseHeight(x, z); var reach = b + Math.Max(-TerrainGrid.LevelMax, Math.Min(TerrainGrid.LevelMax, targetY - b));
                     var shortfall = Math.Abs(targetY - reach); if (shortfall > 1e-9) { rep.Unreachable++; rep.MaxShortfall = Math.Max(rep.MaxShortfall, shortfall); }
-                    var c = current(x, z); if (targetY > c) { rep.Raised++; rep.FillM3 += targetY - c; } else if (targetY < c) { rep.Lowered++; rep.CutM3 += c - targetY; }
+                    var c = current(x, z); if (reach > c) { rep.Raised++; rep.FillM3 += reach - c; } else if (reach < c) { rep.Lowered++; rep.CutM3 += c - reach; }          // volumes to the height a stroke can actually reach
                 }
             for (var spacing = Math.Max(1, (int)Math.Floor(radius * (square ? 2 : 1.4))); spacing >= 1; spacing--)
             {

@@ -13,7 +13,7 @@ namespace HubnerExt
         public bool OnlyOne, UpgradeOnly;                                                // m_requireOnlyOneIngredient: any ONE of the ingredients; m_noCraftOnlyUpgrade: not a way to make the item
         public List<KeyValuePair<string, int>> Ingredients = new List<KeyValuePair<string, int>>();
         public int RequiredStationLevel { get { return Math.Max(1, MinLevel); } }     // Recipe.GetRequiredStationLevel(1)
-        public double RawPerItem { get { return Ingredients.Sum(i => i.Value) / (double)Math.Max(1, Amount); } }
+        public double RawPerItem { get { return (OnlyOne && Ingredients.Count > 0 ? Ingredients.Min(i => i.Value) : Ingredients.Sum(i => i.Value)) / (double)Math.Max(1, Amount); } }          // an 'any one' recipe costs one ingredient
     }
 
     internal sealed class BillStep

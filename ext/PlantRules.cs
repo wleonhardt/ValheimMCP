@@ -53,7 +53,7 @@ namespace HubnerExt
                 foreach (var b in o.Boxes(InSpaceMask))
                 {
                     var cp = b.ClosestPoint(pos);
-                    if (V3.Dist(cp, pos) <= f.GrowRadius) { v.Status = "NoSpace"; v.Why = o.Geo.Prefab + " (" + o.Id + ") is within " + f.GrowRadius + " m" + (plant ? " and healthy" : ""); return v; }
+                    if (V3.Dist(cp, pos) <= f.GrowRadius) { v.Status = "NoSpace"; v.Why = o.Geo.Prefab + " (" + o.Id + ") is within " + f.GrowRadius + " m" + (plant ? " and healthy (two plants this close: the game updates them one after the other, so one of the two survives and the other is NoSpace)" : ""); return v; }
                 }
             }
             return v;

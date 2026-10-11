@@ -212,14 +212,14 @@ def creature_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'Boar'): raise Skip('prefab Boar not in this game')
     r = c.tool('creature_info', name='Boar', armor=10, playerHp=100)
-    ctx.check('health by star is health x level', r['healthByStar'] == [r['health'], r['health'] * 2, r['health'] * 3], r['healthByStar'])
+    ctx.check('health by level is health x level', r['healthByLevel'] == [r['health'], r['health'] * 2, r['health'] * 3], r['healthByLevel'])
     ctx.check('a boar has an attack', len(r['attacks']) >= 1, r['attacks'])
     ctx.check('a boar can be tamed', 'tame' in r and r['tame']['tamingTimeSec'] > 0, r.get('tame'))
     for w in r['againstPlayer']['hits']:
-        hits = [s['hit'] for s in w['stars']]
-        ctx.check('more stars hurt more', hits == sorted(hits), w)
-        ctx.check('hits to kill are consistent with the hit', all(s['hitsToKill'] >= 100 / max(s['hit'], 0.01) - 1 for s in w['stars']), w)
-    ctx.check('the damage factor by star is 1, 1.5, 2', r['damageFactorByStar'] == [1, 1.5, 2])
+        hits = [s["hit"] for s in w["levels"]]
+        ctx.check('a higher level hurts more', hits == sorted(hits), w)
+        ctx.check('hits to kill are consistent with the hit', all(s['hitsToKill'] >= 100 / max(s['hit'], 0.01) - 1 for s in w['levels']), w)
+    ctx.check('the damage factor by level is 1, 1.5, 2', r['damageFactorByLevel'] == [1, 1.5, 2])
 
 
 def base_value_case(ctx):
@@ -263,7 +263,7 @@ def scene_case(ctx):
     ctx.check('the objects are all there', len(s['objects']) == info['objects'], (len(s['objects']), info['objects']))
     ctx.check('every object has its prefab geometry', all(o['prefab'] in s['prefabs'] for o in s['objects']))
     ctx.check('the terrain grid is nx x nz', len(s['terrain']['h']) == s['terrain']['nx'] * s['terrain']['nz'], s['terrain']['source'])
-    ctx.check('the game recorded support for the pieces (WearNTear owners)', info['withRecordedSupport'] >= 0, info)
+    if info['withRecordedSupport'] == 0: ctx.check('no support was recorded (session-only data: the area was not active here); the capture is still valid', True, info)
 
 
 def plant_case(ctx):
@@ -327,6 +327,7 @@ def cookers_case(ctx):
     c = ctx.client('any'); x, z = ctx.test_xz
     r = c.tool('cookers', x=x, z=z, radius=100)
     if r['count'] == 0: raise Skip(f'no cooking station within 100 m of {x},{z}')
+    if not any(s['item'] is not None for k in r['cookers'] for s in k['slots']): raise Skip('every cooking slot in reach is empty: put something on a grill')
     for k in r['cookers']:
         for s in k['slots']:
             if s['item'] is None: continue
@@ -436,7 +437,7 @@ CASES = [
     Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
     Case('stations', 'stations: level is 1 + the extensions that count', stations_case),
     Case('smelters', 'smelters: queue, room and why one stands still agree', smelters_case),
-    Case('creature-info', 'creature_info: stars scale health and damage, hits to kill follow', creature_case),
+    Case('creature-info', 'creature_info: levels scale health and damage, hits to kill follow', creature_case),
     Case('base-value', 'base_value counts the PlayerBase areas in reach; a raid needs three', base_value_case),
     Case('breeding', 'husbandry_state: why animals are not breeding agrees with their state', breeding_case),
     Case('plan-check-ground', 'plan_check says where its ground came from and can be forced', ground_case),

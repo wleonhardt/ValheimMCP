@@ -71,7 +71,7 @@ namespace HubnerExt
             var notes = new List<string>();
             if (target < 30.4) notes.Add("the target is under 30.4 m: the sea washes it (sea level 30)");
             if (first.Unreachable > 0) notes.Add(first.Unreachable + " vertices are more than 8 m from their base height: a level stroke cannot reach them (shortfall up to " + Math.Round(first.MaxShortfall, 1) + " m)");
-            if (edge > 1.2) notes.Add("the pad edge is a " + Math.Round(edge, 1) + " m step: a character slides on a face this steep; grade the apron");
+            if (edge > 0.8) notes.Add("the pad edge is a " + Math.Round(edge, 1) + " m step: a character slides on a face steeper than 0.78 m per metre (38 degrees); grade the apron");
             return U.Json("{\"pad\":[" + x0 + "," + z0 + "," + x1 + "," + z1 + "],\"targetY\":" + U.N(target) + ",\"vertices\":" + first.Vertices + ",\"unreachable\":" + first.Unreachable + ",\"maxShortfall\":" + U.N(Math.Round(first.MaxShortfall, 2)) + ",\"raised\":" + first.Raised + ",\"lowered\":" + first.Lowered + ",\"fillM3\":" + U.N(Math.Round(first.FillM3, 1)) + ",\"cutM3\":" + U.N(Math.Round(first.CutM3, 1)) + ",\"edgeStep\":" + U.N(Math.Round(edge, 2)) + ",\"heights\":\"" + loaded + " vertices from the loaded terrain, " + generated + " from the world generator\",\"notes\":[" + string.Join(",", notes.Select(U.S).ToArray()) + "],\"levelTools\":[" + string.Join(",", rows.ToArray()) + "],\"otherTools\":[" + string.Join(",", ops.Where(o => !o.Level).Select(o => "{\"tool\":" + U.S(o.Prefab) + ",\"raise\":" + B(o.Raise) + ",\"raiseRadius\":" + U.N(o.RaiseRadius) + ",\"raiseDelta\":" + U.N(o.RaiseDelta) + ",\"smooth\":" + B(o.Smooth) + ",\"smoothRadius\":" + U.N(o.SmoothRadius) + "}").ToArray()) + "]}");
         }
     }

@@ -74,13 +74,13 @@ namespace HubnerExt
             }
             if (plants.Count == 0) return ToolOutput.Err("no usable items: " + string.Join("; ", errors.Take(5).ToArray()));
             var world = World(x0 - 4, z0 - 4, x1 + 4, z1 + 4, null);
-            var planned = plants.Select(p => p.Key).ToList(); var all = new List<PlacedPiece>(world); all.AddRange(planned);
+            var planned = plants.Select(p => p.Key).ToList(); var plannedSet = new HashSet<PlacedPiece>(planned); var all = new List<PlacedPiece>(world); all.AddRange(planned);
             var rows = new List<string>(); var byStatus = new Dictionary<string, int>(); var unknown = 0;
             foreach (var kv in plants)
             {
                 var p = kv.Key; var f = kv.Value; var pos = new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z);
                 var others = all.Where(q => q != p && Math.Abs(q.Pos.X - p.Pos.X) < 40 && Math.Abs(q.Pos.Z - p.Pos.Z) < 40).ToList();
-                var v = PlantRules.Judge(f, p.Pos, BiomeAt(p.Pos.X, p.Pos.Z), CultivatedAt(pos), others, q => planned.Contains(q) || q.Geo.Prefab.StartsWith("sapling", StringComparison.OrdinalIgnoreCase) || q.Geo.Prefab.EndsWith("_sapling", StringComparison.OrdinalIgnoreCase), q => true);
+                var v = PlantRules.Judge(f, p.Pos, BiomeAt(p.Pos.X, p.Pos.Z), CultivatedAt(pos), others, q => plannedSet.Contains(q) || q.Geo.Prefab.StartsWith("sapling", StringComparison.OrdinalIgnoreCase) || q.Geo.Prefab.EndsWith("_sapling", StringComparison.OrdinalIgnoreCase), q => true);
                 byStatus[v.Status] = (byStatus.ContainsKey(v.Status) ? byStatus[v.Status] : 0) + 1; if (v.Unknown) unknown++;
                 rows.Add("{\"key\":" + U.S(p.Id) + ",\"prefab\":" + U.S(f.Prefab) + ",\"pos\":" + U.V(pos) + ",\"status\":" + U.S(v.Status) + ",\"why\":" + U.S(v.Why) + ",\"unknown\":" + B(v.Unknown) + ",\"growSeconds\":[" + U.N(f.GrowTime) + "," + U.N(f.GrowTimeMax) + "]}");
             }

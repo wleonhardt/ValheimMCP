@@ -41,6 +41,15 @@ class RunnerTests(unittest.TestCase):
         r = self.run_one(accept.Case('a', 'doc', run)); self.assertEqual((r['verdict'], r['reason']), (accept.SKIPPED, 'no bed in this world'))
         r = self.run_one(accept.Case('b', 'doc', lambda c: c.check('x', True), pre=lambda c: 'needs a chest')); self.assertEqual((r['verdict'], r['reason']), (accept.SKIPPED, 'needs a chest'))
 
+    def test_a_skip_never_hides_a_check_that_already_failed(self):
+        def run(c): c.check('first', False, 'wrong'); raise accept.Skip('then nothing to look at')
+        r = self.run_one(accept.Case('a', 'doc', run)); self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('first: wrong', r['reason'])
+
+    def test_an_acting_case_whose_health_check_cannot_be_read_fails(self):
+        self.fake.replies['ext_status'] = Exception
+        r = self.run_one(accept.Case('acts', 'doc', lambda c: c.check('x', True), acts=True))
+        self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('health check', r['reason'])
+
     def test_an_exception_is_a_failure_with_its_type(self):
         def run(c): raise KeyError('rules')
         r = self.run_one(accept.Case('a', 'doc', run)); self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('KeyError', r['reason'])
@@ -64,7 +73,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('no calls dropped', r['reason'])
 
     def test_an_acting_case_that_leaves_a_plan_behind_fails(self):
-        seq = iter([{'plans': []}, {'plans': []}, {'plans': [{'plan': 'x'}]}, {'plans': [{'plan': 'x'}]}])
+        seq = iter([{'plans': []}, {'plans': [{'plan': 'x'}]}])
         self.fake.replies['plans'] = lambda a: next(seq)
         r = self.run_one(accept.Case('acts', 'doc', lambda c: c.check('x', True), acts=True))
         self.assertEqual(r['verdict'], accept.FAIL); self.assertIn('plans as before', r['reason'])

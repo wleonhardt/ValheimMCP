@@ -13,19 +13,19 @@ namespace HubnerExt
         public static void Register(ToolRegistry r)
         {
             RegisterBase(r);
-            r.Add("biome_threats", "What the game can spawn in a biome (SpawnSystem lists, read from the game): for each spawner the creature, how many at most, how often and with what chance, group size, star range, day/night, the global key it needs, altitude, tilt and distance-from-centre limits, whether it spawns in or out of forests, and the creature's top-star health and hardest hit on a player of the given armour. biome = Meadows | BlackForest | Swamp | Mountain | Plains | Mistlands | AshLands | DeepNorth | Ocean; or x,z to take the biome, altitude and ground tilt of a point and say which spawners are admitted there NOW (key set, time of day, altitude, distance from the centre; environment and player distance need the live game and are not judged). armor, playerHp as in creature_info.",
+            r.Add("biome_threats", "What the game can spawn in a biome (SpawnSystem lists, read from the game): for each spawner the creature, how many at most, how often and with what chance, group size, level range (level - 1 = stars), day/night, the global key it needs, altitude, tilt and distance-from-centre limits, whether it spawns in or out of forests, and the creature's top-star health and hardest hit on a player of the given armour. biome = Meadows | BlackForest | Swamp | Mountain | Plains | Mistlands | AshLands | DeepNorth | Ocean; or x,z to take the biome, altitude and ground tilt of a point and say which spawners are admitted there NOW (key set, time of day, altitude, distance from the centre; environment and player distance need the live game and are not judged). armor, playerHp as in creature_info.",
                 "{\"type\":\"object\",\"properties\":{\"biome\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"armor\":{\"type\":\"number\"},\"playerHp\":{\"type\":\"number\"}}}", BiomeThreats);
             r.Add("raid_state", "Random events (raids) as the game runs them: the one running now (name, seconds left, where, range, start message), the roll timer (every interval x event rate seconds the game rolls chance / rate percent; seconds to the next roll), and every event with its duration, whether it needs a base (3 player-base areas, see base_value), biomes, the global keys it needs and forbids, whether those keys are set in this world now, and what it spawns. Read-only; works on the server.",
                 "{\"type\":\"object\",\"properties\":{}}", RaidState);
             r.Add("threats_near", "What round a point could hurt a player of given armour and health, ranked ignore / watch / now: creatures from the ZDO table (works on the server) with distance, level, health, whether alert or after a target (the synced flags: another client's creature has no target stored), the reach and size of its hardest hit after resistance and armour, hits to kill, and seconds to contact at its run speed. Tamed animals and non-hostile ones are ignored; in a PassiveMobs world nothing is 'now' until it is alert and after a target. x,z,radius (default 40, max 120), armor (default 0), playerHp (default 100), limit.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"armor\":{\"type\":\"number\"},\"playerHp\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", ThreatsNear);
-            r.Add("creature_info", "A creature prefab's facts (no live instance needed): faction, health per star, speeds, the damage modifiers it has (weak / resistant / immune per type), how it senses (view, hearing, fire fear, passive-aggressive), its attacks from its default and random weapons (damage by type, reach, interval, blockable, dodgeable), taming (time, fed duration, what it eats) and what it drops (amount, chance, expectation per kill). With armor and playerHp it also says what one of its hits does to such a player at 1, 2 and 3 stars (resistance first, then armour, as the game does) and how many hits kill. name = prefab (Troll, Boar, Wolf, Greydwarf_Elite).",
+            r.Add("creature_info", "A creature prefab's facts (no live instance needed): faction, health per level (level 1 has no star, 2 is one star, 3 two), speeds, the damage modifiers it has (weak / resistant / immune per type), how it senses (view, hearing, fire fear, passive-aggressive), its attacks from its default and random weapons (damage by type, reach, interval, blockable, dodgeable), taming (time, fed duration, what it eats) and what it drops (amount, chance, expectation per kill). With armor and playerHp it also says what one of its hits does to such a player at levels 1, 2 and 3 (no star, one star, two stars) (resistance first, then armour, as the game does) and how many hits kill. name = prefab (Troll, Boar, Wolf, Greydwarf_Elite).",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"armor\":{\"type\":\"number\"},\"playerHp\":{\"type\":\"number\"}},\"required\":[\"name\"]}", CreatureInfo);
         }
 
         public static void RegisterBase(ToolRegistry r)
         {
-            r.Add("base_value", "The base value of a point as the game counts it for raids (Player.UpdateBaseValue): the PlayerBase areas (fires, workbenches, wards and so on) whose trigger reaches within 20 m, from the ZDO table and the prefabs' area radii. A near-base-only random event needs 3. Also the base value each online character reports (it is stored on the character), so the two can be compared. x,z (y optional: default the highest area nearby).",
+            r.Add("base_value", "The base value of a point as the game counts it for raids (Player.UpdateBaseValue): the PlayerBase areas (fires, workbenches, wards and so on) whose trigger reaches within 20 m, from the ZDO table and the prefabs' area radii. A near-base-only random event needs 3. Also the base value each online character reports (it is stored on the character), so the two can be compared. x,z (y optional: default the ground height there; a player's base value is measured at the player's feet, so give y for a point above the ground).",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", BaseValueTool);
         }
 
@@ -46,7 +46,9 @@ namespace HubnerExt
                 if (r < 0f) continue;
                 var p = zd.GetPosition(); areas.Add(new BaseArea { Prefab = Zdos.NameOf(h), X = p.x, Y = p.y, Z = p.z, Radius = r });
             }
-            var y = U.Has(a, "y") ? U.D(a, "y", 0) : (areas.Count > 0 ? areas.Max(q => q.Y) : 0);
+            double y;
+            if (U.Has(a, "y")) y = U.D(a, "y", 0);
+            else { float gh; y = ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3((float)x, 0f, (float)z), out gh) ? gh : (WorldGenerator.instance != null ? WorldGenerator.instance.GetHeight((float)x, (float)z) : 0); }
             var inReach = BaseValue.InReach(x, y, z, areas);
             var players = new List<string>();
             try { foreach (var c in ZNet.instance.GetAllCharacterZDOS()) { var p = c.GetPosition(); if (Math.Sqrt((p.x - x) * (p.x - x) + (p.z - z) * (p.z - z)) < 40) players.Add("{\"name\":" + U.S(c.GetString(ZDOVars.s_playerName, "?")) + ",\"baseValue\":" + c.GetInt(ZDOVars.s_baseValue, 0) + "}"); } } catch (Exception ex) { U.Once("base_value.players", ex); }
@@ -65,7 +67,7 @@ namespace HubnerExt
                 if (go == null) continue; var ss = go.GetComponent<SpawnSystem>(); if (ss == null) continue;
                 foreach (var l in ss.m_spawnLists) if (l != null && seen.Add(l)) list.AddRange(l.m_spawners);
             }
-            _spawners = list; return _spawners;
+            if (list.Count > 0) _spawners = list; return list;
         }
 
         static readonly Dictionary<string, int> BiomeNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { { "Meadows", 1 }, { "Swamp", 2 }, { "Mountain", 4 }, { "BlackForest", 8 }, { "Plains", 16 }, { "AshLands", 32 }, { "DeepNorth", 64 }, { "Ocean", 256 }, { "Mistlands", 512 } };
@@ -111,14 +113,26 @@ namespace HubnerExt
             Func<string, bool> isSet = k => zs != null && zs.GetGlobalKey(k);
             var cur = res.GetCurrentRandomEvent();
             var evs = res.m_events.Select(e => "{\"name\":" + U.S(e.m_name) + ",\"enabled\":" + B(e.m_enabled) + ",\"random\":" + B(e.m_random) + ",\"durationSec\":" + U.N(e.m_duration) + ",\"nearBaseOnly\":" + B(e.m_nearBaseOnly) + ",\"eventRange\":" + U.N(e.m_eventRange) + ",\"biomes\":" + (int)e.m_biome + ",\"requiresKeys\":[" + string.Join(",", e.m_requiredGlobalKeys.Select(U.S).ToArray()) + "],\"forbidsKeys\":[" + string.Join(",", e.m_notRequiredGlobalKeys.Select(U.S).ToArray()) + "],\"keysOkNow\":" + B(RaidRules.KeysOk(e.m_requiredGlobalKeys, e.m_notRequiredGlobalKeys, isSet)) + ",\"startMessage\":" + U.S(e.m_startMessage) + ",\"spawns\":[" + string.Join(",", e.m_spawn.Where(sp => sp.m_prefab != null).Select(sp => U.S(sp.m_prefab.name)).Distinct().ToArray()) + "]}").ToArray();
-            return U.Json("{\"current\":" + (cur == null ? "null" : "{\"name\":" + U.S(cur.m_name) + ",\"secondsLeft\":" + U.N(Math.Round(Math.Max(0, cur.m_duration - cur.m_time))) + ",\"pos\":" + U.V(cur.m_pos) + ",\"range\":" + U.N(cur.m_eventRange) + ",\"startMessage\":" + U.S(cur.m_startMessage) + "}") + ",\"eventRate\":" + U.N(rate) + ",\"rollIntervalSeconds\":" + U.N(Math.Round(RaidRules.RollIntervalSeconds(res.m_eventIntervalMin, rate))) + ",\"chancePercent\":" + U.N(Math.Round(RaidRules.ChancePercent(res.m_eventChance, rate), 1)) + ",\"secondsToNextRoll\":" + U.N(Math.Round(RaidRules.SecondsToNextRoll(timer, res.m_eventIntervalMin, rate))) + ",\"timerKnown\":" + B(timer > 0 || cur != null) + ",\"events\":[" + string.Join(",", evs) + "]}");
+            return U.Json("{\"current\":" + (cur == null ? "null" : "{\"name\":" + U.S(cur.m_name) + ",\"secondsLeft\":" + U.N(Math.Round(Math.Max(0, cur.m_duration - cur.m_time))) + ",\"pos\":" + U.V(cur.m_pos) + ",\"range\":" + U.N(cur.m_eventRange) + ",\"startMessage\":" + U.S(cur.m_startMessage) + "}") + ",\"eventRate\":" + U.N(rate) + ",\"rollsEnabled\":" + B(rate > 0) + ",\"rollIntervalSeconds\":" + U.N(Math.Round(RaidRules.RollIntervalSeconds(res.m_eventIntervalMin, rate))) + ",\"chancePercent\":" + U.N(Math.Round(RaidRules.ChancePercent(res.m_eventChance, rate), 1)) + ",\"secondsToNextRoll\":" + U.N(Math.Round(RaidRules.SecondsToNextRoll(timer, res.m_eventIntervalMin, rate))) + ",\"timerKnown\":" + B(timer > 0 || cur != null) + ",\"events\":[" + string.Join(",", evs) + "]}");
+        }
+
+        /// <summary>Every item a Humanoid can hold as a weapon: default items, the random weapon, every item of every random set, the random items, and the unarmed weapon (Humanoid.GiveDefaultItems).</summary>
+        static List<ItemDrop> WeaponDrops(Humanoid hum)
+        {
+            var objs = new List<GameObject>();
+            if (hum.m_defaultItems != null) objs.AddRange(hum.m_defaultItems);
+            if (hum.m_randomWeapon != null) objs.AddRange(hum.m_randomWeapon);
+            if (hum.m_randomSets != null) foreach (var set in hum.m_randomSets) if (set != null && set.m_items != null) objs.AddRange(set.m_items);
+            if (hum.m_randomItems != null) foreach (var ri in hum.m_randomItems) if (ri != null && ri.m_prefab != null) objs.Add(ri.m_prefab);
+            var drops = objs.Where(g => g != null).Distinct().Select(g => g.GetComponent<ItemDrop>()).Where(d => d != null).ToList();
+            if (hum.m_unarmedWeapon != null) drops.Add(hum.m_unarmedWeapon);
+            return drops;
         }
 
         static List<KeyValuePair<Dictionary<string, double>, double>> Attacks(GameObject go)
         {
             var res = new List<KeyValuePair<Dictionary<string, double>, double>>(); var hum = go.GetComponent<Humanoid>(); if (hum == null) return res;
-            var weapons = new List<GameObject>(); if (hum.m_defaultItems != null) weapons.AddRange(hum.m_defaultItems.Where(g => g != null)); if (hum.m_randomWeapon != null) weapons.AddRange(hum.m_randomWeapon.Where(g => g != null));
-            foreach (var w in weapons.Distinct()) { var id = w.GetComponent<ItemDrop>(); if (id == null) continue; var dm = Dmg(id.m_itemData.m_shared.m_damages); if (dm.Count > 0) res.Add(new KeyValuePair<Dictionary<string, double>, double>(dm, id.m_itemData.m_shared.m_aiAttackRange)); }
+            foreach (var id in WeaponDrops(hum)) { var dm = Dmg(id.m_itemData.m_shared.m_damages); if (dm.Count > 0) res.Add(new KeyValuePair<Dictionary<string, double>, double>(dm, id.m_itemData.m_shared.m_aiAttackRange)); }
             return res;
         }
 
@@ -172,27 +186,25 @@ namespace HubnerExt
             var ai = go.GetComponent<BaseAI>(); var mai = go.GetComponent<MonsterAI>(); var hum = go.GetComponent<Humanoid>(); var tame = go.GetComponent<Tameable>(); var drop = go.GetComponent<CharacterDrop>();
             var mods = Mods(ch.m_damageModifiers);
 
-            var weapons = new List<GameObject>();
-            if (hum != null) { if (hum.m_defaultItems != null) weapons.AddRange(hum.m_defaultItems.Where(g => g != null)); if (hum.m_randomWeapon != null) weapons.AddRange(hum.m_randomWeapon.Where(g => g != null)); }
-            var attacks = new List<string>(); var hitsByStar = new List<string>();
-            foreach (var w in weapons.Distinct())
+            var attacks = new List<string>(); var hitsByLevel = new List<string>();
+            foreach (var id in hum != null ? WeaponDrops(hum) : new List<ItemDrop>())
             {
-                var id = w.GetComponent<ItemDrop>(); if (id == null) continue; var sh = id.m_itemData.m_shared; var dm = Dmg(sh.m_damages);
+                var w = id.gameObject; var sh = id.m_itemData.m_shared; var dm = Dmg(sh.m_damages);
                 if (dm.Count == 0) continue;
                 attacks.Add("{\"item\":" + U.S(w.name) + ",\"damage\":" + Obj(dm) + ",\"total\":" + U.N(Math.Round(dm.Values.Sum(), 1)) + ",\"aiAttackRange\":" + U.N(sh.m_aiAttackRange) + ",\"aiAttackRangeMin\":" + U.N(sh.m_aiAttackRangeMin) + ",\"interval\":" + U.N(sh.m_aiAttackInterval) + ",\"blockable\":" + B(sh.m_blockable) + ",\"dodgeable\":" + B(sh.m_dodgeable) + "}");
                 if (U.Has(a, "armor") || U.Has(a, "playerHp"))
-                    hitsByStar.Add("{\"item\":" + U.S(w.name) + ",\"stars\":[" + string.Join(",", Enumerable.Range(1, 3).Select(l => { var h = CombatRules.Hit(dm, null, armor, l); return "{\"level\":" + l + ",\"hit\":" + U.N(Math.Round(h, 1)) + ",\"hitsToKill\":" + CombatRules.HitsToDie(playerHp, h) + "}"; }).ToArray()) + "]}");
+                    hitsByLevel.Add("{\"item\":" + U.S(w.name) + ",\"levels\":[" + string.Join(",", Enumerable.Range(1, 3).Select(l => { var h = CombatRules.Hit(dm, null, armor, l); return "{\"level\":" + l + ",\"hit\":" + U.N(Math.Round(h, 1)) + ",\"hitsToKill\":" + CombatRules.HitsToDie(playerHp, h) + "}"; }).ToArray()) + "]}");
             }
 
             var drops = new List<string>();
             if (drop != null) foreach (var d in drop.m_drops) if (d.m_prefab != null) drops.Add("{\"item\":" + U.S(d.m_prefab.name) + ",\"min\":" + d.m_amountMin + ",\"max\":" + d.m_amountMax + ",\"chance\":" + U.N(d.m_chance) + ",\"levelMultiplier\":" + B(d.m_levelMultiplier) + ",\"expectedPerKill\":" + U.N(Math.Round(CombatRules.ExpectedDrop(d.m_amountMin, d.m_amountMax, d.m_chance, d.m_levelMultiplier, 1), 2)) + "}");
 
-            var sb = new System.Text.StringBuilder("{\"prefab\":" + U.S(go.name) + ",\"nameToken\":" + U.S(ch.m_name) + ",\"faction\":" + U.S(ch.m_faction.ToString()) + ",\"boss\":" + B(ch.m_boss) + ",\"health\":" + U.N(ch.m_health) + ",\"healthByStar\":[" + string.Join(",", Enumerable.Range(1, 3).Select(l => U.N(CombatRules.MaxHealth(ch.m_health, l))).ToArray()) + "],\"damageFactorByStar\":[1,1.5,2],\"speed\":{\"walk\":" + U.N(ch.m_walkSpeed) + ",\"run\":" + U.N(ch.m_runSpeed) + ",\"swim\":" + U.N(ch.m_swimSpeed) + "},\"staggerFactor\":" + U.N(ch.m_staggerDamageFactor) +
+            var sb = new System.Text.StringBuilder("{\"prefab\":" + U.S(go.name) + ",\"nameToken\":" + U.S(ch.m_name) + ",\"faction\":" + U.S(ch.m_faction.ToString()) + ",\"boss\":" + B(ch.m_boss) + ",\"health\":" + U.N(ch.m_health) + ",\"healthByLevel\":[" + string.Join(",", Enumerable.Range(1, 3).Select(l => U.N(CombatRules.MaxHealth(ch.m_health, l))).ToArray()) + "],\"damageFactorByLevel\":[1,1.5,2],\"speed\":{\"walk\":" + U.N(ch.m_walkSpeed) + ",\"run\":" + U.N(ch.m_runSpeed) + ",\"swim\":" + U.N(ch.m_swimSpeed) + "},\"staggerFactor\":" + U.N(ch.m_staggerDamageFactor) +
                 ",\"modifiers\":{" + string.Join(",", mods.Select(kv => U.S(kv.Key) + ":" + U.S(kv.Value.ToString())).ToArray()) + "},\"weakTo\":[" + string.Join(",", mods.Where(kv => CombatRules.Multiplier(kv.Value) > 1).Select(kv => U.S(kv.Key)).ToArray()) + "]");
             if (ai != null) sb.Append(",\"ai\":{\"kind\":" + U.S(mai != null ? "MonsterAI" : ai.GetType().Name) + ",\"viewRange\":" + U.N(ai.m_viewRange) + ",\"viewAngle\":" + U.N(ai.m_viewAngle) + ",\"hearRange\":" + U.N(ai.m_hearRange) + ",\"afraidOfFire\":" + B(ai.m_afraidOfFire) + ",\"avoidFire\":" + B(ai.m_avoidFire) + ",\"passiveAggressive\":" + B(ai.m_passiveAggresive) + (mai != null ? ",\"attacksPlayerBuildings\":" + B(mai.m_attackPlayerObjects) : "") + "}");
             if (tame != null) sb.Append(",\"tame\":{\"tamingTimeSec\":" + U.N(tame.m_tamingTime) + ",\"fedDurationSec\":" + U.N(tame.m_fedDuration) + ",\"commandable\":" + B(tame.m_commandable) + ",\"eats\":[" + string.Join(",", (mai != null && mai.m_consumeItems != null ? mai.m_consumeItems.Where(i => i != null).Select(i => U.S(i.gameObject.name)) : new string[0]).ToArray()) + "]}");
             sb.Append(",\"attacks\":[" + string.Join(",", attacks.ToArray()) + "]");
-            if (hitsByStar.Count > 0) sb.Append(",\"againstPlayer\":{\"armor\":" + U.N(armor) + ",\"playerHp\":" + U.N(playerHp) + ",\"hits\":[" + string.Join(",", hitsByStar.ToArray()) + "]}");
+            if (hitsByLevel.Count > 0) sb.Append(",\"againstPlayer\":{\"armor\":" + U.N(armor) + ",\"playerHp\":" + U.N(playerHp) + ",\"hits\":[" + string.Join(",", hitsByLevel.ToArray()) + "]}");
             sb.Append(",\"drops\":[" + string.Join(",", drops.ToArray()) + "]}");
             return U.Json(sb.ToString());
         }

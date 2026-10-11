@@ -202,7 +202,7 @@ namespace HubnerExt
                 bool exposure = SleepRules.Exposure(pct, roof); bool heat = false;
                 try { heat = EffectArea.IsPointInsideArea(p, EffectArea.Type.Heat); } catch (Exception ex) { err += " heat: " + ex.GetBaseException().Message; /* allow: reported in the row's error field */ }
                 var timeKnown = EnvMan.instance != null; var timeOk = !timeKnown || EnvMan.CanSleep(); var zdo = nv.GetZDO(); var owner = zdo != null ? zdo.GetLong(ZDOVars.s_owner, 0L) : 0L;
-                var fail = SleepRules.FirstFailure(timeOk, false, exposure, heat, false);
+                var fail = SleepRules.FirstFailure(timeOk, false, pct, roof, heat, false);
                 rows.Add("{\"prefab\":" + U.S(U.PrefabName(nv)) + ",\"pos\":" + U.V(p) + ",\"spawnPoint\":" + U.V(point) + ",\"cover\":" + U.N(Math.Round(pct, 2)) + ",\"roof\":" + (roof ? "true" : "false") + ",\"exposureOk\":" + (exposure ? "true" : "false") + ",\"heat\":" + (heat ? "true" : "false") + ",\"canClaim\":" + (exposure ? "true" : "false") + ",\"canSleep\":" + (exposure && heat ? "true" : "false") + ",\"timeKnown\":" + (timeKnown ? "true" : "false") + ",\"sleepNow\":" + (fail == null ? "true" : "false") + ",\"firstFailure\":" + U.S(fail) + ",\"owner\":" + owner.ToString(System.Globalization.CultureInfo.InvariantCulture) + ",\"comfort\":" + cl + ",\"comfortPieces\":{" + string.Join(",", names.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "}" + (err.Length > 0 ? ",\"error\":" + U.S(err) : "") + "}");
             }
             return U.Json("{\"beds\":" + rows.Count + ",\"rows\":[" + string.Join(",", rows.ToArray()) + "]}");
@@ -246,10 +246,10 @@ namespace HubnerExt
             var filter = McpJson.GetStr(a, "item"); int limit = (int)McpJson.Get(a, "limit", 200); var rows = new List<string>();
             foreach (var z in Zdos.InBox(x0, z0, x1, z1))
             {
-                var items = z.GetString("items", ""); if (string.IsNullOrEmpty(items)) continue;
+                var items = ContainerData.Package(z); if (items == null) continue;
                 try
                 {
-                    var inv = new Inventory("x", null, 8, 4); inv.Load(new ZPackage(items));
+                    var inv = new Inventory("x", null, 8, 4); inv.Load(items);
                     var sum = new SortedDictionary<string, int>();
                     foreach (var it in inv.GetAllItems()) { var n = it.m_shared.m_name; sum[n] = (sum.ContainsKey(n) ? sum[n] : 0) + it.m_stack; }
                     if (filter != null && !sum.Keys.Any(k => k.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)) continue;

@@ -57,10 +57,10 @@ def select(cases, only):
 def _health(c):
     """The numbers that must not move during an acting case."""
     try:
-        e = c.tool('ext_status'); s = c.tool('status')
-        return {'dropped': e.get('droppedCalls', 0), 'stalls': e.get('mainThreadStallReports', 0), 'journalError': s.get('journalError', ''), 'plans': len(c.tool('plans').get('plans', [])) if isinstance(c.tool('plans'), dict) else None}
-    except Exception:
-        return None
+        e = c.tool('ext_status'); s = c.tool('status'); pl = c.tool('plans')
+        return {'dropped': e.get('droppedCalls', 0), 'stalls': e.get('mainThreadStallReports', 0), 'journalError': s.get('journalError', ''), 'plans': len(pl.get('plans', [])) if isinstance(pl, dict) else None}
+    except Exception as e:
+        raise RuntimeError(f'the health check of the extension failed ({type(e).__name__}: {e}): an acting case cannot be judged without it')
 
 
 def run_case(case, ctx, dry_run=False):
@@ -88,6 +88,7 @@ def run_case(case, ctx, dry_run=False):
         if not ctx.checks: return result(case, FAIL, 'the case recorded no check: a case that asserts nothing proves nothing', ctx)
         return result(case, FAIL if ctx.failed else PASS, '; '.join(f"{c['name']}: {c['detail']}" for c in ctx.failed), ctx)
     except Skip as e:
+        if ctx.failed: return result(case, FAIL, '; '.join(f"{c['name']}: {c['detail']}" for c in ctx.failed) + f' (then skipped: {e})', ctx)          # a skip never hides a check that already failed
         return result(case, SKIPPED, str(e), ctx)
     except hubner.GuardError as e:
         return result(case, BLOCKED, str(e), ctx)
