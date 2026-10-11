@@ -30,6 +30,8 @@
     <Compile Include="../../ext/Bill.cs" Link="ext/Bill.cs" />
     <Compile Include="../../ext/Combat.cs" Link="ext/Combat.cs" />
     <Compile Include="../../ext/WorldRules.cs" Link="ext/WorldRules.cs" />
+    <Compile Include="../../ext/CoverRules.cs" Link="ext/CoverRules.cs" />
+    <Compile Include="../../ext/ReaderRules.cs" Link="ext/ReaderRules.cs" />
     <Compile Include="../../ext/TerrainRules.cs" Link="ext/TerrainRules.cs" />
     <Compile Include="../../ext/Scene.cs" Link="ext/Scene.cs" />
     <Compile Include="../../ext/PlantRules.cs" Link="ext/PlantRules.cs" />

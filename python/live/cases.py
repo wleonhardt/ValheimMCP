@@ -170,6 +170,28 @@ def world_rules_case(ctx):
     ctx.check('cost_mode and world_rules agree about NoBuildCost', cm['NoBuildCost'] == ('NoBuildCost' in keys), (cm['NoBuildCost'], sorted(keys)))
 
 
+def readers_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    ap = c.tool('active_area', x=x, z=z)
+    ctx.check('active_area answers for the point', len(ap['points']) == 1 and ap['points'][0]['simulated'] == (ap['points'][0]['coveredBy'] > 0), ap)
+    pr = c.tool('producers', x=x, z=z, radius=100)
+    ctx.check('producers: counts add up', pr['returned'] <= pr['total'] and all('kind' in r for r in pr['rows']), pr)
+    for r in pr['rows']:
+        if r['kind'] == 'fermenter': ctx.check(f"{r['prefab']}: only a fermenting barrel has seconds left", (r['secondsLeft'] is not None) == (r['status'] == 'fermenting'), r)
+        if r['kind'] == 'beehive': ctx.check(f"{r['prefab']}: level within 0..max", 0 <= r['level'] <= r['max'], r)
+    lt = c.tool('loot_near', x=x, z=z, radius=100)
+    ctx.check('loot_near: seconds left only for items that will go', all((r['secondsLeft'] is None) == (r['keptBy'] is not None or r['ageSeconds'] is None) for r in lt['rows']), lt['rows'][:3])
+    hv = c.tool('harvest_near', x=x, z=z, radius=100)
+    ctx.check('harvest_near: ready ones come first', all(r['picked'] for r in hv['rows'][hv['ready']:]) and not any(r['picked'] for r in hv['rows'][:min(hv['ready'], len(hv['rows']))]), hv['ready'])
+    ab = c.tool('absence_forecast', x=x, z=z, radius=60, hours=8)
+    ctx.check('absence_forecast: nothing finishes more than it has', ab['fires']['goOut'] <= ab['fires']['burning'] and ab['smelters']['finishTheQueue'] <= ab['smelters']['working'], ab)
+    ctx.check('smelters never catch up more than the cap', ab['smelters']['secondsOfWorkCaughtUp'] <= ab['smelters']['working'] * ab['smelters']['capPerAbsenceSeconds'] + 1e-6, ab['smelters'])
+    sp = c.tool('spawners_near', x=x, z=z, radius=150)
+    ctx.check('spawners_near: a living creature has no respawn timer', all(r['minutesToRespawn'] is None for r in sp['rows'] if r['kind'] == 'spawner' and r['alive']), sp['total'])
+    wr = c.tool('wear_risk', x=x, z=z, radius=40)
+    ctx.check('wear_risk: more pieces than damaged ones', wr['damaged'] <= wr['pieces'] and wr['withoutARoof'] <= wr['pieces'], wr)
+
+
 def recipes_case(ctx):
     c = ctx.client('any')
     r = c.tool('recipe_info', item='Bronze')
@@ -447,6 +469,7 @@ CASES = [
     Case('objects-digest', 'objects digest:true adds up', objects_digest),
     Case('world-clock', 'world_clock agrees with itself and with the client', world_clock),
     Case('world-rules', 'world_rules agrees with cost_mode and itself', world_rules_case),
+    Case('base-readers', 'producers, loot, harvest, spawners, active area, wear and absence agree with themselves', readers_case),
     Case('recipes', 'recipe_info and item_info agree about Bronze', recipes_case),
     Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
     Case('stations', 'stations: level is 1 + the extensions that count', stations_case),

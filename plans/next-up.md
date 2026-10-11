@@ -82,6 +82,11 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 42. `plan_check` on a real base: `snap-seam` warnings appear for pieces left 0.1-0.4 m off a neighbour and not for a base built with the hammer; thin floors on a slope are no longer "unsupported"; a hearth on a raised floor on a slope has no tilt error.
 43. `menu_join` (no `mode` argument) still joins by host and port.
 44. `walk_to` with a heavy inventory: the walker gives up with the encumbered message instead of hopping; a route across a lake goes round it.
+45. Cover: put a bed, a workbench and a beehive in `plan_check` next to real ones that work and ones that do not; compare `bed-cover` with `bed_check` (cover percent and roof) at the same spot. Expect the model within about 10% of the game; record the differences.
+46. `active_area` over the base with one player and none; `net_peers` with a throttled link (send queue).
+47. `producers` over a barrel in the middle of a brew (seconds left against the real timer), a hive (level, seconds to full) and a sap collector on an ancient root.
+48. `loot_near` with an item dropped an hour ago away from players; `harvest_near` over a berry field; `resource_nodes` over a big rock partly mined; `spawners_near` at a camp.
+49. `wear_risk` in a rainy meadow and in the Ashlands (read `ashDamageSetting`); `absence_forecast` for 8 hours against the real state after leaving a base for that long.
 
 ### Next candidates (not done)
 

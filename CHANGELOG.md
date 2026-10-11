@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### Cover model and base-keeping readers (0.14.0 extension)
+Ported from the decompiled game and unit-tested; none of it has run in the game yet.
+- `plan_check` judges cover: a bed (roof and 80% cover at its spawn point), a roofed crafting station (70%), a smelter (a roof), a fermenter barrel (roof and 70%), and a beehive (under 25% cover). It is a model of the game's 17 cover rays and its roof cast on the pieces' boxes: near the limit it can be a little off, so a close miss is a warning. Rules `bed-cover`, `station-cover`, `smelter-roof`, `fermenter-cover`, `beehive-cover`.
+- New readers, all from the ZDO table and the prefabs, so they work on the dedicated server: `net_peers` (ping, quality, send queue), `active_area` (is a place simulated), `producers` (barrels, hives, sap collectors), `loot_near` (floor items and the one-hour despawn), `harvest_near` (pickables and their respawn), `resource_nodes` (mine rocks, trees, logs: what is left and which tool tier works), `spawners_near`, `wear_risk` (rain, ash, wrong biome, roof state), `absence_forecast` (what fires, smelters, barrels, hives, pickables and floor items do while nobody is there).
+
 ### Decompile review (0.13.0 extension)
 Three reviewers read the decompiled game against our rules (record: `plans/research/2026-10-decompile-review.md`). Compile-checked and unit-tested only.
 - New tool `world_rules`: the server options (global keys), rates as multipliers, what a death costs (tombstone, gear, bag, skills), whether portals are blocked now.

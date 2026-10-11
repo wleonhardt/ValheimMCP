@@ -13,10 +13,14 @@ Three read-only reviewers read the decompiled game (assembly_valheim.dll and ass
 - `smelters`: `catchUpCapSeconds` (3600; `Smelter.UpdateSmelter`), and the note that a windmill's output is not read.
 - `PlanOrder` comment: the support sweep waits 30 s after a piece appears, not a few seconds.
 
+## Done later (0.14.0)
+
+The cover model (`CoverRules.cs`: beds, stations, smelters, fermenters, beehives in `plan_check`) and the readers `net_peers`, `active_area`, `producers`, `loot_near`, `harvest_near`, `resource_nodes`, `spawners_near`, `wear_risk`, `absence_forecast` (`Readers.cs`, rules in `ReaderRules.cs`). Not read: tar under a floor item, PlayerBase areas, lava paint, deep-north snow, the heat area a bed needs for sleeping.
+
 ## Left, in order of value
 
-1. Cover model for plan_check (beds, stations, smelters need a roof and cover): needs the 17-ray model from decision 0003 as a pure function, then a live comparison with `bed_check`.
-2. Systems readers: `net_peers` (server), `producers` (fermenter, beehive, sap collector), `loot_near` (floor items and the 3600 s despawn), `harvest_near` (pickables), `active_area`, `absence_forecast`, `wear_risk`, `spawners_near`, `resource_nodes`. Details and ZDO keys are in the reviewer's list kept below.
+1. (done, see above)
+2. Systems readers (done except the ones noted): `net_peers` (server), `producers` (fermenter, beehive, sap collector), `loot_near` (floor items and the 3600 s despawn), `harvest_near` (pickables), `active_area`, `absence_forecast`, `wear_risk`, `spawners_near`, `resource_nodes`. Details and ZDO keys are in the reviewer's list kept below.
 3. Non-box colliders: the game uses the world AABB of the rotated collider plus 0.3 m; we rotate the prefab-frame bounds.
 4. Walker: stamina test is a fraction (0.15) where the game tests an absolute 10; nav agent radius 0.4 against our capsule 0.49; the player is a Rigidbody with a capsule, so `StepUp 0.45` is not a game number (needs a live probe before it changes).
 5. `m_onlyInBiome`, `m_blockRadius`, `m_mustConnectTo`, smoke-blocked fires, biome wear (rain, ash, lava, deep north), `m_nonPlayer` damage and NG+ flat damage in `Combat`, plant status inside a shield dome, night skip needs "not already skipping" and 10 s since the last sleep, spawn rule conditions (biome area, alt biomes, persistent events).

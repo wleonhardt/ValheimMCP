@@ -98,7 +98,7 @@ namespace HubnerExt
         }
 
         // ------------------------------------------------------------------ stock
-        static bool Box(Dictionary<string, object> a, out float x0, out float z0, out float x1, out float z1, out string err)
+        internal static bool Box(Dictionary<string, object> a, out float x0, out float z0, out float x1, out float z1, out string err)
         {
             err = null; x0 = z0 = x1 = z1 = 0;
             if (U.Has(a, "x0")) { if (!(U.Has(a, "x1") && U.Has(a, "z0") && U.Has(a, "z1"))) { err = "a box needs x0,z0,x1,z1"; return false; } x0 = (float)U.D(a, "x0", 0); z0 = (float)U.D(a, "z0", 0); x1 = (float)U.D(a, "x1", 0); z1 = (float)U.D(a, "z1", 0); return true; }

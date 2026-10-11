@@ -115,6 +115,7 @@ namespace HubnerExt
     {
         public V3 Centre, Half;          // in the prefab's own frame
         public Quat Rot = Quat.Identity;
+        public bool Leaky;               // tagged "leaky": Cover.IsUnderRoof ignores it
         public string Layer = "Default"; // Unity layer name of the collider (the game's checks each look at their own set of layers)
     }
 
@@ -152,6 +153,7 @@ namespace HubnerExt
         public string ProvidesStation = "";         // CraftingStation.m_name when this piece is a station
         public double StationRangeBuild = 10, StationExtraRange = 0;      // CraftingStation.m_rangeBuild / m_extraRangePerLevel
 
+        public List<CoverPoint> CoverPoints = new List<CoverPoint>();   // bed spawn point, roofed station / smelter check point
         public List<V3> SnapPoints = new List<V3>();    // direct children of the prefab tagged "snappoint" (Piece.GetSnapPoints), in the piece's own space
 
         public bool IsWood { get { return Material == "Wood" || Material == "HardWood"; } }
@@ -171,9 +173,14 @@ namespace HubnerExt
         /// <summary>The collider boxes in the world; <paramref name="layer"/> keeps only the colliders on the layers a given check looks at.</summary>
         public List<Obb> Boxes(Func<string, bool> layer)
         {
+            return BoxesOf(Geo.Colliders.Where(c => layer == null || layer(c.Layer)));
+        }
+
+        /// <summary>The world boxes of some of this piece's colliders.</summary>
+        public List<Obb> BoxesOf(IEnumerable<ColliderBox> colliders)
+        {
             var res = new List<Obb>();
-            foreach (var c in Geo.Colliders)
-                if (layer == null || layer(c.Layer))
+            foreach (var c in colliders)
                     res.Add(Obb.Make(Pos + Rot.Rotate(new V3(c.Centre.X * Scale.X, c.Centre.Y * Scale.Y, c.Centre.Z * Scale.Z)), new V3(c.Half.X * Math.Abs(Scale.X), c.Half.Y * Math.Abs(Scale.Y), c.Half.Z * Math.Abs(Scale.Z)), Rot * c.Rot));
             return res;
         }
@@ -379,6 +386,11 @@ namespace HubnerExt
             new PlanRule { Id = "tilt", Origin = Ghost, Code = "Invalid", Source = "Piece.m_notOnTiltingSurface: surface normal y under 0.8" },
             new PlanRule { Id = "water", Origin = Ghost, Code = "Invalid", Source = "Piece.m_noInWater" },
             new PlanRule { Id = "snap-seam", Origin = Ghost, Code = "", Source = "Player.FindClosestSnapPoints: the hammer moves a ghost until its nearest snap point meets the nearest snap point of a piece within 10 m, when they are under 0.5 m apart. A ZDO spawn never snaps, so a plan that leaves them 0.02 to 0.5 m apart has a seam or an overlap the hammer would have closed" },
+            new PlanRule { Id = "bed-cover", Origin = Hard, Code = "", Source = "Bed.CheckExposure: Cover.GetCoverForPoint at the spawn point needs a roof ($msg_bedneedroof) and cover of 0.8 ($msg_bedtooexposed), else the bed cannot be claimed. A model of the 17 cover rays, not the game's physics" },
+            new PlanRule { Id = "station-cover", Origin = Hard, Code = "", Source = "CraftingStation.CheckUsable: with m_craftRequireRoof, Cover at m_roofCheckPoint needs a roof and cover of 0.7, else the station cannot be used" },
+            new PlanRule { Id = "fermenter-cover", Origin = Hard, Code = "", Source = "Fermenter.UpdateCover: no roof or under 70% cover at m_roofCheckPoint restarts the fermentation timer every 10 s" },
+            new PlanRule { Id = "beehive-cover", Origin = Hard, Code = "", Source = "Beehive.HaveFreeSpace: cover at m_coverPoint must be under m_maxCover (0.25), else the hive makes no honey ($piece_beehive_freespace)" },
+            new PlanRule { Id = "smelter-roof", Origin = Hard, Code = "", Source = "Smelter.UpdateRoof: with m_requiresRoof, Cover.IsUnderRoof at m_roofCheckPoint, else the smelter does not work" },
             new PlanRule { Id = "yaw-grid", Origin = Ghost, Code = "", Source = "the hammer rotates in steps of 22.5 degrees; a ZDO spawn can be anything" },
             new PlanRule { Id = "fire-clearance", Origin = Taste, Code = "", Source = "our preference: a metre of free ground round a fire (vanilla has no such placement rule; the real failures are fire-blocked and smoke)" },
             new PlanRule { Id = "fire-blocked", Origin = Hard, Code = "", Source = "Fireplace.CheckUnderTerrain: terrain above y + m_checkTerrainOffset, or a solid within 0.5 m straight up from y + m_coverCheckOffset, and the fire does not burn" },
