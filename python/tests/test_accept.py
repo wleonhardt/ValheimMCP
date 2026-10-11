@@ -215,3 +215,39 @@ class WorldClockCaseTests(unittest.TestCase):
     def test_fails_when_the_client_sees_another_time(self):
         self.fake.replies['world_clock'] = self.GOOD; self.fake.replies['env_state'] = {'dayFraction': 0.4}
         self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.FAIL)
+
+
+class RecipeCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (10.0, 10.0)
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self, key): return [c for c in cases.CASES if c.key == key][0]
+
+    BRONZE = {'count': 1, 'recipes': [{'item': 'Bronze', 'makes': 2, 'station': 'forge', 'stationLevel': 1, 'upgradeOnly': False, 'ingredients': [{'item': 'Copper', 'amount': 2}, {'item': 'Tin', 'amount': 1}]}]}
+
+    def test_missing_for_passes_when_the_numbers_follow_the_recipe(self):
+        self.fake.replies['recipe_info'] = self.BRONZE
+        self.fake.replies['missing_for'] = {'chests': 0, 'complete': False, 'steps': ['Bronze x6: 3 crafts at forge level 1 from 6 Copper + 3 Tin'], 'missing': {'Copper': 6, 'Tin': 3}, 'stations': {'forge': 1}}
+        self.assertEqual(accept.run_case(self.case('missing-for'), self.ctx)['verdict'], accept.PASS)
+
+    def test_missing_for_fails_when_a_craft_is_not_rounded_up(self):
+        self.fake.replies['recipe_info'] = self.BRONZE
+        self.fake.replies['missing_for'] = {'chests': 0, 'complete': False, 'steps': ['Bronze x5'], 'missing': {'Copper': 5, 'Tin': 3}, 'stations': {'forge': 1}}
+        self.assertEqual(accept.run_case(self.case('missing-for'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_missing_for_is_skipped_when_there_is_stock_at_the_spot(self):
+        self.fake.replies['recipe_info'] = self.BRONZE
+        self.fake.replies['missing_for'] = {'chests': 2, 'complete': True, 'steps': [], 'missing': {}, 'stations': {}}
+        self.assertEqual(accept.run_case(self.case('missing-for'), self.ctx)['verdict'], accept.SKIPPED)
+
+    def test_plan_materials_fails_when_the_sum_does_not_scale(self):
+        self.fake.replies['prefab_search'] = {'names': ['wood_wall']}
+        seq = iter([{'materials': {'Wood': 2}, 'unknownPrefabs': []}, {'materials': {'Wood': 5}, 'unknownPrefabs': []}, {'materials': {}, 'unknownPrefabs': ['no_such_piece']}])
+        self.fake.replies['plan_materials'] = lambda a: next(seq)
+        self.assertEqual(accept.run_case(self.case('plan-materials'), self.ctx)['verdict'], accept.FAIL)

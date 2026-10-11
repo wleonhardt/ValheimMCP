@@ -238,3 +238,85 @@ public class DayClockTests
         Assert.True(DayClock.NightSkips(0.9, 3, 3)); Assert.False(DayClock.NightSkips(0.9, 3, 2)); Assert.False(DayClock.NightSkips(0.9, 0, 0)); Assert.False(DayClock.NightSkips(0.4, 2, 2));
     }
 }
+
+public class BillTests
+{
+    static RecipeRow R(string item, int amount, string station, int level, params (string, int)[] ing)
+    {
+        var r = new RecipeRow { Item = item, Amount = amount, Station = station, MinLevel = level };
+        foreach (var i in ing) r.Ingredients.Add(new KeyValuePair<string, int>(i.Item1, i.Item2));
+        return r;
+    }
+    static Dictionary<string, List<RecipeRow>> Book(params RecipeRow[] rows)
+    {
+        var d = new Dictionary<string, List<RecipeRow>>();
+        foreach (var r in rows) { if (!d.ContainsKey(r.Item)) d[r.Item] = new List<RecipeRow>(); d[r.Item].Add(r); }
+        return d;
+    }
+    static readonly Dictionary<string, List<RecipeRow>> Bronze = Book(R("Bronze", 2, "forge", 1, ("Copper", 2), ("Tin", 1)), R("BronzeAxe", 1, "forge", 2, ("Bronze", 6), ("Wood", 2)));
+
+    [Fact] public void WholeCraftsOnlyAndWhatIsMadeOverStaysInStock()
+    {
+        var b = Bill.Run("Bronze", 5, new Dictionary<string, int>(), Bronze);
+        var s = b.Steps.Single();
+        Assert.Equal(3, s.Crafts); Assert.Equal(6, s.Makes);                        // 5 wanted, crafts of 2: three crafts
+        Assert.Equal(6, b.Missing["Copper"]); Assert.Equal(3, b.Missing["Tin"]);
+        Assert.False(b.Complete);
+    }
+    [Fact] public void ALongerChainListsIngredientsBeforeWhatTheyMake()
+    {
+        var b = Bill.Run("BronzeAxe", 1, new Dictionary<string, int> { { "Wood", 10 } }, Bronze);
+        Assert.Equal(new[] { "Bronze", "BronzeAxe" }, b.Steps.Select(s => s.Item).ToArray());
+        Assert.Equal(3, b.Steps[0].Crafts); Assert.Equal(6, b.Missing["Copper"]); Assert.Equal(2, b.FromStock["Wood"]);
+        Assert.Equal(2, b.Stations["forge"]);                                        // the axe needs level 2, the bars level 1: the highest counts
+    }
+    [Fact] public void StockIsUsedFirstAndSurplusIsSharedBetweenSiblings()
+    {
+        var book = Book(R("Bronze", 2, "forge", 1, ("Copper", 2), ("Tin", 1)), R("Gadget", 1, "", 1, ("Bronze", 1), ("Bronze", 1)));
+        var b = Bill.Run("Gadget", 1, new Dictionary<string, int>(), book);
+        var bars = b.Steps.Where(s => s.Item == "Bronze").ToList();
+        Assert.Single(bars); Assert.Equal(1, bars[0].Crafts);                           // one craft made two bars: the second need was met from what the first left over
+        Assert.Equal(1, b.FromStock["Bronze"]); Assert.Equal(2, b.Missing["Copper"]);
+    }
+    [Fact] public void EnoughInStockMeansNothingToDo()
+    {
+        var b = Bill.Run("Bronze", 4, new Dictionary<string, int> { { "Bronze", 5 } }, Bronze);
+        Assert.Empty(b.Steps); Assert.True(b.Complete); Assert.Equal(4, b.FromStock["Bronze"]);
+    }
+    [Fact] public void ARecipeThatLoopsIsStopped()
+    {
+        var book = Book(R("A", 1, "", 1, ("B", 1)), R("B", 1, "", 1, ("A", 1)));
+        var b = Bill.Run("A", 1, new Dictionary<string, int>(), book);
+        Assert.False(b.Complete); Assert.NotEmpty(b.Notes);
+    }
+    [Fact] public void TheCheapestRecipeWinsAndUpgradeOnlyOnesAreNotAWayToMakeAnItem()
+    {
+        var book = Book(R("Bronze", 1, "forge", 1, ("Copper", 3), ("Tin", 3)), R("Bronze", 5, "forge", 1, ("Copper", 5), ("Tin", 5)));
+        Assert.Equal(5, Bill.Choose("Bronze", book).Amount);                        // 2 units per bar against 6
+        book["Bronze"][1].UpgradeOnly = true;
+        Assert.Equal(1, Bill.Choose("Bronze", book).Amount);
+    }
+    [Fact] public void AnyOneIngredientTakesTheOneThatIsInStock()
+    {
+        var any = R("Stew", 1, "", 1, ("Meat", 2), ("Fish", 2)); any.OnlyOne = true;
+        var b = Bill.Run("Stew", 1, new Dictionary<string, int> { { "Fish", 5 } }, Book(any));
+        Assert.Equal(2, b.FromStock["Fish"]); Assert.True(b.Complete);
+        var none = Bill.Run("Stew", 1, new Dictionary<string, int>(), Book(any));
+        Assert.Equal(2, none.Missing["Meat"]); Assert.False(none.Missing.ContainsKey("Fish"));         // nothing in stock: the first one
+    }
+    [Fact] public void ARunningTextCanBeRead()
+    {
+        var b = Bill.Run("Bronze", 5, new Dictionary<string, int>(), Bronze);
+        Assert.Equal("Bronze x6: 3 crafts at forge level 1 from 6 Copper + 3 Tin", Bill.Describe(b.Steps[0]));
+    }
+
+    [Fact] public void PieceCostsAddUpAndFreePiecesCostNothing()
+    {
+        var req = new Dictionary<string, List<KeyValuePair<string, int>>> { { "wood_wall", new List<KeyValuePair<string, int>> { new KeyValuePair<string, int>("Wood", 2) } }, { "workbench", new List<KeyValuePair<string, int>> { new KeyValuePair<string, int>("Wood", 10) } } };
+        List<string> unknown;
+        var t = Materials.Sum(new Dictionary<string, int> { { "wood_wall", 10 }, { "workbench", 1 }, { "mystery", 3 } }, req, new HashSet<string> { "workbench" }, out unknown);
+        Assert.Equal(20, t["Wood"]); Assert.Equal(new[] { "mystery" }, unknown.ToArray());
+        var cmp = Materials.Compare(t, new Dictionary<string, int> { { "Wood", 12 } });
+        Assert.Equal(new[] { 20, 12, 8 }, cmp[0].Value);
+    }
+}

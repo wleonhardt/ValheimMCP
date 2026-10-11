@@ -159,6 +159,44 @@ def world_clock(ctx):
     ctx.check('the client sees the same time of day (within 0.03)', abs(client_f - w['dayFraction']) < 0.03 or abs(abs(client_f - w['dayFraction']) - 1) < 0.03, (client_f, w['dayFraction']))
 
 
+def recipes_case(ctx):
+    c = ctx.client('any')
+    r = c.tool('recipe_info', item='Bronze')
+    if r['count'] == 0: raise Skip('no recipe for Bronze in this game')
+    ctx.check('every recipe lists ingredients', all(x['ingredients'] for x in r['recipes']), r['recipes'])
+    ctx.check('the recipes name what they make', all(x['item'] == 'Bronze' for x in r['recipes']))
+    i = c.tool('item_info', name='Bronze')
+    ctx.check('item_info knows where it is made', len(i['madeBy']) >= 1, i['madeBy'])
+    ctx.check('bars do not go through a portal', i['teleportable'] is False, i['teleportable'])
+    u = c.tool('recipe_info', uses='Copper')
+    ctx.check('Copper is used somewhere', u['count'] >= 1, u['count'])
+
+
+def missing_for_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('recipe_info', item='Bronze')
+    if r['count'] == 0: raise Skip('no recipe for Bronze in this game')
+    best = min((x_ for x_ in r['recipes'] if not x_['upgradeOnly']), key=lambda x_: sum(i['amount'] for i in x_['ingredients']) / x_['makes'])
+    m = c.tool('missing_for', item='Bronze', count=5, x=x, z=z, radius=1)
+    if m['chests'] > 0: raise Skip('there are chests within 1 m of the test spot, so the stock is not empty (move HUBNER_TEST_X/Z)')
+    crafts = -(-5 // best['makes'])
+    for ing in best['ingredients']:
+        ctx.check(f"missing {ing['item']} = crafts x amount", m['missing'].get(ing['item']) == crafts * ing['amount'], (m['missing'], crafts, ing))
+    ctx.check('one step, Bronze', [s.split(' x')[0] for s in m['steps']] == ['Bronze'], m['steps'])
+    ctx.check('the station is named', not best['station'] or best['station'] in m['stations'], m['stations'])
+    ctx.check('it is not complete without stock', m['complete'] is False)
+
+
+def plan_materials_case(ctx):
+    c = ctx.client('any')
+    if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
+    one = c.tool('plan_materials', items=[{'prefab': 'wood_wall', 'x': 0, 'y': 0, 'z': 0}])
+    three = c.tool('plan_materials', items=[{'prefab': 'wood_wall', 'x': i * 2, 'y': 0, 'z': 0} for i in range(3)])
+    if not one['materials']: raise Skip('wood_wall is free in this world (NoBuildCost)')
+    ctx.check('three walls cost three times one', all(three['materials'][k] == 3 * v for k, v in one['materials'].items()), (one['materials'], three['materials']))
+    ctx.check('an unknown prefab is listed, not guessed', c.tool('plan_materials', items=[{'prefab': 'no_such_piece', 'x': 0, 'y': 0, 'z': 0}])['unknownPrefabs'] == ['no_such_piece'])
+
+
 # ---------------------------------------------------------------- acting (build their own scenario, remove it again)
 def _spot_pre(ctx):
     if ctx.test_xz == (0.0, 0.0): return 'set HUBNER_TEST_X / HUBNER_TEST_Z to a quiet spot (the case builds three poles there and removes them)'
@@ -225,6 +263,9 @@ CASES = [
     Case('log-collapse', 'log_tail folds repeats and says how many are distinct', log_collapse),
     Case('objects-digest', 'objects digest:true adds up', objects_digest),
     Case('world-clock', 'world_clock agrees with itself and with the client', world_clock),
+    Case('recipes', 'recipe_info and item_info agree about Bronze', recipes_case),
+    Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
+    Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),
     Case('remove-collapse', 'plan_remove refuses to take a foot from under a tower', collapse_case, acts=True, pre=_spot_pre, clean=collapse_clean),

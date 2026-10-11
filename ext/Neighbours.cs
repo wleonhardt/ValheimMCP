@@ -36,6 +36,8 @@ namespace HubnerExt
             _containerH = c; _pieceH = p; _fireH = fi; _tameH = tm; _wardH = w;
         }
 
+        internal static bool IsContainer(int hash) { EnsurePrefabSets(); return _containerH != null && _containerH.Contains(hash); }
+
         static GameObject Prefab(int hash) { EnsurePrefabSets(); return _prefabs.TryGetValue(hash, out var go) ? go : null; }
 
         // ------------------------------------------------------------------ wards
