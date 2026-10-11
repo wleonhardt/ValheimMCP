@@ -38,6 +38,7 @@ namespace HubnerExt
             RecipeTools.Register(r);
             CreatureTools.Register(r);
             SceneTools.Register(r);
+            PlantTools.Register(r);
             WorldEvents.Register(r);
             PlanCheck.Register(r);
             Journal.Load();

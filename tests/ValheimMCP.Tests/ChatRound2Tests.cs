@@ -568,3 +568,46 @@ public class SceneEdgeTests
         scene.Radius = 0; Assert.Single(SceneCheck.Support(scene));
     }
 }
+
+public class PlantRulesTests
+{
+    static readonly PlantFacts Carrot = new PlantFacts { Prefab = "sapling_carrot", GrowRadius = 0.5, BiomeMask = PlantRules.Meadows | PlantRules.BlackForest, NeedCultivated = true };
+    static PlacedPiece Box(string prefab, string layer, double x, double y, double z, double hx, double hy, double hz, string id = "o")
+        => new PlacedPiece { Id = id, Pos = new V3(x, y, z), Geo = new PieceGeo { Prefab = prefab, Colliders = { new ColliderBox { Centre = new V3(0, 0, 0), Half = new V3(hx, hy, hz), Layer = layer } } } };
+    static PlantVerdict J(PlantFacts f, int biome, bool? cult, params PlacedPiece[] others) => PlantRules.Judge(f, new V3(0, 0, 0), biome, cult, others, p => p.Geo.Prefab.StartsWith("sapling"), p => true);
+
+    [Fact] public void AHealthyCarrot() => Assert.Equal("Healthy", J(Carrot, PlantRules.Meadows, true).Status);
+    [Fact] public void TheVerdictFollowsTheGamesOrder()
+    {
+        Assert.Equal("WrongBiome", J(Carrot, PlantRules.Swamp, false).Status);                                  // wrong biome comes before not cultivated
+        Assert.Equal("NotCultivated", J(Carrot, PlantRules.Meadows, false).Status);
+        var tree = Box("Pine", "static_solid", 0, 5, 0, 1, 0.5, 1);                                              // above and in the way
+        Assert.Equal("NoSun", J(Carrot, PlantRules.Meadows, true, tree).Status);
+    }
+    [Fact] public void ColdAndHotBiomesNeedTolerance()
+    {
+        var any = new PlantFacts { BiomeMask = PlantRules.All(), GrowRadius = 0.5 };
+        Assert.Equal("TooHot", J(any, PlantRules.AshLands, null).Status); Assert.Equal("TooCold", J(any, PlantRules.Mountain, null).Status); Assert.Equal("TooCold", J(any, PlantRules.DeepNorth, null).Status);
+        any.TolerateCold = true; any.TolerateHeat = true; Assert.Equal("Healthy", J(any, PlantRules.Mountain, null).Status);
+    }
+    [Fact] public void ARoofIsShadeButAWallBesideItAndTheTerrainAreNot()
+    {
+        Assert.Equal("NoSun", J(Carrot, PlantRules.Meadows, true, Box("wood_floor", "piece", 0, 3, 0, 1, 0.1, 1)).Status);
+        Assert.Equal("Healthy", J(Carrot, PlantRules.Meadows, true, Box("wood_wall", "piece", 3, 1, 0, 0.1, 1, 1)).Status);              // beside, far enough
+        Assert.Equal("Healthy", J(Carrot, PlantRules.Meadows, true, Box("rug", "piece_nonsolid", 0, 3, 0, 1, 0.05, 1)).Status);          // a non-solid piece above casts no shade
+    }
+    [Fact] public void ASolidWithinTheGrowRadiusBlocksAndAHealthyNeighbourPlantToo()
+    {
+        Assert.Equal("NoSpace", J(Carrot, PlantRules.Meadows, true, Box("Rock_3", "static_solid", 0.9, 0, 0, 0.6, 0.5, 0.5)).Status);       // its near face is at 0.3 m
+        Assert.Equal("Healthy", J(Carrot, PlantRules.Meadows, true, Box("Rock_3", "static_solid", 2.0, 0, 0, 0.6, 0.5, 0.5)).Status);
+        var sapling = Box("sapling_carrot", "piece_nonsolid", 0.3, 0, 0, 0.05, 0.1, 0.05);
+        Assert.Equal("NoSpace", J(Carrot, PlantRules.Meadows, true, sapling).Status);
+        var sick = PlantRules.Judge(Carrot, new V3(0, 0, 0), PlantRules.Meadows, true, new[] { sapling }, p => true, p => false);
+        Assert.Equal("Healthy", sick.Status);                                                                    // an unhealthy neighbour does not block
+    }
+    [Fact] public void AnUnknownCultivationIsSaidNotGuessed()
+    {
+        var v = J(Carrot, PlantRules.Meadows, null); Assert.True(v.Unknown); Assert.Equal("Healthy", v.Status);
+    }
+    [Fact] public void ACropGridFitsOnePlantPerRadiusSquare() => Assert.Equal(8 * 6, PlantRules.FitsOn(4, 3, 0.5));
+}

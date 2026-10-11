@@ -310,3 +310,37 @@ class SceneCaseTests(unittest.TestCase):
     def test_is_skipped_when_nothing_is_there(self):
         self.fake.replies['scene_capture'] = {'objects': 0}
         self.assertEqual(accept.run_case(self.case, self.ctx)['verdict'], accept.SKIPPED)
+
+
+class PlantCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = Fake()
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), self.fake.handler())
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.ctx = accept.Ctx(hubner.Client(f'http://127.0.0.1:{self.srv.server_address[1]}/mcp')); self.ctx.test_xz = (5.0, 5.0)
+        self.fake.replies['prefab_search'] = {'names': ['sapling_carrot']}
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def case(self, key): return [c for c in cases.CASES if c.key == key][0]
+
+    def rows(self, *statuses): return {'plants': [{'status': s} for s in statuses], 'errors': ['item 1: wood_wall is not a plant']}
+
+    def test_passes_when_close_carrots_block_and_far_ones_do_not(self):
+        seq = iter([self.rows('Healthy', 'Healthy'), self.rows('NoSpace', 'NoSpace'), self.rows()])
+        self.fake.replies['plant_check'] = lambda a: next(seq)
+        self.assertEqual(accept.run_case(self.case('plant-check'), self.ctx)['verdict'], accept.PASS)
+
+    def test_fails_when_close_carrots_do_not_block(self):
+        seq = iter([self.rows('Healthy', 'Healthy'), self.rows('Healthy', 'Healthy'), self.rows()])
+        self.fake.replies['plant_check'] = lambda a: next(seq)
+        self.assertEqual(accept.run_case(self.case('plant-check'), self.ctx)['verdict'], accept.FAIL)
+
+    def test_is_skipped_on_ground_the_carrot_cannot_use(self):
+        self.fake.replies['plant_check'] = lambda a: self.rows('NotCultivated', 'NotCultivated')
+        self.assertEqual(accept.run_case(self.case('plant-check'), self.ctx)['verdict'], accept.SKIPPED)
+
+    def test_farm_state_fails_when_a_plant_is_ready_before_it_could_be(self):
+        self.fake.replies['farm_state'] = {'total': 1, 'plants': [{'prefab': 'x', 'readyFromSeconds': 500, 'readyBySeconds': 100, 'hadTimeToGrow': False}]}
+        self.assertEqual(accept.run_case(self.case('farm-state'), self.ctx)['verdict'], accept.FAIL)

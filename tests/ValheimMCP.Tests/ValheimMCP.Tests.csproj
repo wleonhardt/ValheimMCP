@@ -31,6 +31,7 @@
     <Compile Include="../../ext/Combat.cs" Link="ext/Combat.cs" />
     <Compile Include="../../ext/TerrainRules.cs" Link="ext/TerrainRules.cs" />
     <Compile Include="../../ext/Scene.cs" Link="ext/Scene.cs" />
+    <Compile Include="../../ext/PlantRules.cs" Link="ext/PlantRules.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

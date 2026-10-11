@@ -266,6 +266,27 @@ def scene_case(ctx):
     ctx.check('the game recorded support for the pieces (WearNTear owners)', info['withRecordedSupport'] >= 0, info)
 
 
+def plant_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    if not _has_prefab(c, 'sapling_carrot'): raise Skip('prefab sapling_carrot not in this game')
+    far = c.tool('plant_check', items=[{'prefab': 'sapling_carrot', 'x': x, 'z': z, 'key': 'a'}, {'prefab': 'sapling_carrot', 'x': x + 3, 'z': z, 'key': 'b'}])
+    first = far['plants'][0]['status']
+    if first in ('WrongBiome', 'NotCultivated', 'TooHot', 'TooCold'): raise Skip(f'the test spot is {first} for a carrot: these checks come before shade and space (use a cultivated meadow spot)')
+    near = c.tool('plant_check', items=[{'prefab': 'sapling_carrot', 'x': x, 'z': z, 'key': 'a'}, {'prefab': 'sapling_carrot', 'x': x + 0.2, 'z': z, 'key': 'b'}])
+    if first != 'NoSpace': ctx.check('two carrots 3 m apart do not block each other', 'NoSpace' not in {p['status'] for p in far['plants']}, far['plants'])
+    ctx.check('two carrots 0.2 m apart block each other', {p['status'] for p in near['plants']} == {'NoSpace'}, near['plants'])
+    ctx.check('a prefab that is not a plant is an error row, not a guess', 'is not a plant' in json.dumps(c.tool('plant_check', items=[{'prefab': 'wood_wall', 'x': x, 'z': z}, {'prefab': 'sapling_carrot', 'x': x, 'z': z}])['errors']))
+
+
+def farm_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('farm_state', x=x, z=z, radius=40)
+    if r['total'] == 0: raise Skip(f'no plant within 40 m of {x},{z}')
+    for p in r['plants']:
+        ctx.check(f"{p['prefab']}: ready-from is never after ready-by", p['readyFromSeconds'] <= p['readyBySeconds'], p)
+        ctx.check(f"{p['prefab']}: hadTimeToGrow agrees with ready-by", p['hadTimeToGrow'] == (p['readyBySeconds'] == 0), p)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -351,6 +372,8 @@ CASES = [
     Case('breeding', 'husbandry_state: why animals are not breeding agrees with their state', breeding_case),
     Case('plan-check-ground', 'plan_check says where its ground came from and can be forced', ground_case),
     Case('scene-capture', 'scene_capture writes a scene that scene_get returns whole', scene_case),
+    Case('plant-check', 'plant_check: two carrots 0.2 m apart block each other', plant_case),
+    Case('farm-state', 'farm_state: ready times and the grown flag agree', farm_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),
