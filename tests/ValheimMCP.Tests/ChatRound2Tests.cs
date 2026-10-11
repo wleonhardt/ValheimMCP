@@ -108,3 +108,20 @@ public class ChatFloodAndLoopTests
         Assert.Null(l.Check(700, "bot", "line 5"));                // the window has passed
     }
 }
+
+public class LogCollapseTests
+{
+    [Fact] public void LinesThatDifferOnlyInNumbersAreOne()
+    {
+        var f = LogCollapse.Fold(new[] { "[Warning] stall at 12.5, 30", "[Info] ready", "[Warning] stall at 99.1, 2", "[Warning] stall at 3, 4" });
+        Assert.Equal(2, f.Count);
+        Assert.Equal(3, f[0].Value); Assert.Equal("[Warning] stall at 12.5, 30", f[0].Key); Assert.Equal(1, f[1].Value);
+        Assert.Equal("[Warning] stall at 12.5, 30  (x3)", LogCollapse.Render(f[0]));
+        Assert.Equal("[Info] ready", LogCollapse.Render(f[1]));
+    }
+    [Fact] public void TheOrderIsTheOrderOfFirstAppearance()
+    {
+        var f = LogCollapse.Fold(new[] { "b 1", "a 1", "b 2", "c" });
+        Assert.Equal(new[] { "b 1", "a 1", "c" }, f.Select(e => e.Key).ToArray());
+    }
+}

@@ -221,4 +221,38 @@ namespace HubnerExt
             return age >= 0 && age <= MaxAgeSeconds;
         }
     }
+
+    /// <summary>Repeated log lines folded to one: the same line with different numbers (a position, a counter) is one line seen N times. A run of 95 identical warnings hides everything else in a tail of 60 lines.</summary>
+    internal static class LogCollapse
+    {
+        public static string Key(string line)
+        {
+            var sb = new System.Text.StringBuilder(line.Length);
+            var inDigits = false;
+            for (var i = 0; i < line.Length; i++)
+            {
+                var c = line[i];
+                if (char.IsDigit(c)) { if (!inDigits) sb.Append('#'); inDigits = true; }
+                else if (inDigits && c == '.' && i + 1 < line.Length && char.IsDigit(line[i + 1])) { /* the point inside a decimal number */ }
+                else { sb.Append(c); inDigits = false; }
+            }
+            return sb.ToString().Trim();
+        }
+
+        /// <summary>The first line of each distinct key, in order of first appearance, with how many lines shared the key.</summary>
+        public static List<KeyValuePair<string, int>> Fold(IEnumerable<string> lines)
+        {
+            var order = new List<string>(); var first = new Dictionary<string, string>(); var count = new Dictionary<string, int>();
+            foreach (var l in lines)
+            {
+                var k = Key(l);
+                if (!count.ContainsKey(k)) { count[k] = 0; first[k] = l; order.Add(k); }
+                count[k]++;
+            }
+            var res = new List<KeyValuePair<string, int>>(); foreach (var k in order) res.Add(new KeyValuePair<string, int>(first[k], count[k]));
+            return res;
+        }
+
+        public static string Render(KeyValuePair<string, int> e) { return e.Value > 1 ? e.Key + "  (x" + e.Value + ")" : e.Key; }
+    }
 }
