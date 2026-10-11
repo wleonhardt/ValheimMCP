@@ -215,6 +215,7 @@ namespace HubnerExt
         public string Prefab; public Vector3 Pos; public Quaternion Rot; public Vector3 Scale; public string Text; public long Creator;
         public string Note;
         public string Tag, Plan, Key, Group, Time;      // v2: plan identity, journal group, UTC time
+        public bool HasAfter; public Vector3 After;     // a modify: where the object stands after the edit (Pos is where undo puts it back); lets a later run find an untagged object
         public Dictionary<string, int> Ints; public Dictionary<string, string> Strings; public Dictionary<string, float> Floats;   // v3: extra ZDO fields a modify changed (door state, fuel ...), so undo restores them
         public long Seq;
         public string World;                   // v5: the world (name#uid) the entry was written in; ids, tags and positions mean nothing in another one
@@ -272,7 +273,7 @@ namespace HubnerExt
                 {
                     var d = FlatJson.Parse(line); if (d == null) { if (line.Trim().Length > 0) SkippedLines++; continue; }
                     if (d.ContainsKey("undone")) { byseq.Remove((long)FlatJson.N(d, "undone")); undone++; continue; }
-                    if (d.ContainsKey("remap")) { var from = FlatJson.S(d, "remap"); var to = FlatJson.S(d, "to"); foreach (var pe in byseq.Values) if (pe.Id == from) pe.Id = to; continue; }
+                    if (d.ContainsKey("remap")) { var from = FlatJson.S(d, "remap"); var to = FlatJson.S(d, "to"); var rb = FlatJson.S(d, "boot"); foreach (var pe in byseq.Values) if (pe.Id == from && (string.IsNullOrEmpty(rb) || pe.Boot == rb)) pe.Id = to; continue; }
                     var e = new JEntry
                     {
                         Seq = (long)FlatJson.N(d, "seq"), Time = FlatJson.S(d, "t"), Kind = FlatJson.S(d, "kind"), Id = FlatJson.S(d, "id"), Prefab = FlatJson.S(d, "prefab"),
@@ -280,6 +281,7 @@ namespace HubnerExt
                         Creator = (long)FlatJson.N(d, "creator"), Boot = FlatJson.S(d, "boot"), World = FlatJson.S(d, "world"), IdPlan = FlatJson.S(d, "ip"), IdKey = FlatJson.S(d, "ik"), Scale = Vector3.one
                     };
                     var p = FlatJson.A(d, "pos"); if (p != null && p.Length >= 3) e.Pos = new Vector3(p[0], p[1], p[2]);
+                    var ap = FlatJson.A(d, "ap"); if (ap != null && ap.Length >= 3) { e.HasAfter = true; e.After = new Vector3(ap[0], ap[1], ap[2]); }
                     var sc = FlatJson.A(d, "scale"); if (sc != null && sc.Length >= 3) e.Scale = new Vector3(sc[0], sc[1], sc[2]);
                     var q = FlatJson.A(d, "rot"); if (q != null && q.Length >= 4) e.Rot = new Quaternion(q[0], q[1], q[2], q[3]); else e.Rot = Quaternion.identity;
                     var ints = FlatJson.O(d, "ints"); if (ints != null) { e.Ints = new Dictionary<string, int>(); foreach (var kv in ints) if (kv.Value is double dv) e.Ints[kv.Key] = (int)dv; }
@@ -340,6 +342,7 @@ namespace HubnerExt
                 + ",\"rot\":[" + U.N5(e.Rot.x) + "," + U.N5(e.Rot.y) + "," + U.N5(e.Rot.z) + "," + U.N5(e.Rot.w) + "],\"text\":" + U.S(e.Text ?? "") + ",\"tag\":" + U.S(e.Tag ?? "") + ",\"plan\":" + U.S(e.Plan ?? "")
                 + ",\"key\":" + U.S(e.Key ?? "") + ",\"creator\":" + e.Creator + ",\"group\":" + U.S(e.Group ?? "") + ",\"note\":" + U.S(e.Note ?? "")
                 + ",\"boot\":" + U.S(e.Boot ?? "") + ",\"world\":" + U.S(e.World ?? "") + ",\"ip\":" + U.S(e.IdPlan ?? "") + ",\"ik\":" + U.S(e.IdKey ?? ""));
+            if (e.HasAfter) sb.Append(",\"ap\":" + U.V(e.After));
             if (e.Scale != Vector3.one && e.Scale != Vector3.zero) sb.Append(",\"scale\":" + U.V(e.Scale));
             if (e.Ints != null && e.Ints.Count > 0) { sb.Append(",\"ints\":{"); bool f = true; foreach (var kv in e.Ints) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + kv.Value.ToString(CultureInfo.InvariantCulture)); } sb.Append('}'); }
             if (e.Floats != null && e.Floats.Count > 0) { sb.Append(",\"floats\":{"); bool f = true; foreach (var kv in e.Floats) { if (!f) sb.Append(','); f = false; sb.Append(U.S(kv.Key) + ":" + U.N(kv.Value)); } sb.Append('}'); }
@@ -374,15 +377,15 @@ namespace HubnerExt
             if (_batch != null) _batch.Append(line); else Write(line);
         }
 
-        /// <summary>Undoing a delete recreates the object under a new id: every other entry that names the old id must follow, or an older spawn/modify of the same object can no longer be undone.</summary>
+        /// <summary>Undoing a delete recreates the object under a new id: every other entry of this world load that names the old id must follow, or an older spawn/modify of the same object can no longer be undone. Entries of another load use the same numbers for other objects and are left alone.</summary>
         public static void Remap(string oldId, string newId)
         {
             if (string.IsNullOrEmpty(oldId) || oldId == newId) return;
-            var any = false;
-            foreach (var x in Entries) if (x.Id == oldId) { x.Id = newId; any = true; }
+            var any = false; var boot = CurrentBoot();
+            foreach (var x in Entries) if (x.Id == oldId && x.Boot == boot) { x.Id = newId; any = true; }
             if (!any) return;
             Version++;
-            var line = "{\"remap\":" + U.S(oldId) + ",\"to\":" + U.S(newId) + "}\n";
+            var line = "{\"remap\":" + U.S(oldId) + ",\"to\":" + U.S(newId) + ",\"boot\":" + U.S(boot) + "}\n";
             if (_batch != null) _batch.Append(line); else Write(line);
         }
     }

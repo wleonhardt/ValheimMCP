@@ -150,7 +150,9 @@ def portals_complete(ctx):
 def world_clock(ctx):
     c = ctx.client('any'); w = c.tool('world_clock')
     ctx.check('the fraction is in 0..1', 0 <= w['dayFraction'] <= 1, w['dayFraction'])
-    ctx.check('day, afternoon and night agree with the fraction', w['isNight'] == (w['dayFraction'] <= 0.25 or w['dayFraction'] >= 0.75) and w['isAfternoon'] == (0.5 <= w['dayFraction'] <= 0.75), w)
+    f = w['dayFraction']
+    if min(abs(f - 0.25), abs(f - 0.5), abs(f - 0.75)) > 0.002:             # the clock moves between the game's read and ours: a phase boundary is not judged
+        ctx.check('day, afternoon and night agree with the fraction', w['isNight'] == (f <= 0.25 or f >= 0.75) and w['isAfternoon'] == (0.5 <= f <= 0.75), w)
     ctx.check('the seconds to dusk and dawn fit in one day', 0 <= w['secondsToDusk'] <= w['dayLengthSec'] and 0 <= w['secondsToDawn'] <= w['dayLengthSec'], (w['secondsToDusk'], w['secondsToDawn']))
     ctx.check('the night skips only when the window is open and everybody is in bed', w['nightSkips'] == (w['sleepWindow'] and w['characters'] > 0 and w['inBed'] == w['characters']), w)
     ctx.check('who is not in bed adds up', len(w['notInBed']) == w['characters'] - w['inBed'], w)
@@ -310,12 +312,14 @@ def threats_case(ctx):
 
 def level_case(ctx):
     c = ctx.client('any'); x, z = ctx.test_xz
+    x, z = round(x), round(z)                                                # terrain vertices lie on whole metres: a fractional centre changes how many a pad holds
     g = _ground(c, x, z)
     if g is None: raise Skip('terrain_info gave no ground height (area not loaded?)')
     r = c.tool('level_check', x=x, z=z, half=4, targetY=round(g, 1))
     ctx.check('a 9 x 9 pad has 81 vertices', r['vertices'] == 81, r['vertices'])
     ctx.check('raised + lowered never exceeds the vertices', r['raised'] + r['lowered'] <= r['vertices'], r)
-    ctx.check('levelling to the ground you stand on is reachable', r['unreachable'] == 0, r)
+    near = c.tool('level_check', x=x, z=z, half=1, targetY=round(g, 1))     # a 3 x 3 pad cannot span the 8 m reach of a slope that a 9 x 9 pad might
+    ctx.check('levelling to the ground you stand on is reachable', near['unreachable'] == 0, near)
     far = c.tool('level_check', x=x, z=z, half=4, targetY=round(g, 1) + 100)
     ctx.check('100 m up is out of reach everywhere', far['unreachable'] == far['vertices'] and far['maxShortfall'] >= 90, far)
     ctx.check('and the note says so', any('8 m' in n for n in far['notes']), far['notes'])

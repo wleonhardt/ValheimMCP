@@ -14,16 +14,15 @@ Readers: `bed_check` tells no roof from too little cover; stations from the wide
 Walker: user-override clock reset per walk; `stuckSeconds` honoured; stall total clears after 10 m of progress; a goal without y stays without it through nav; doors that consume their key are not pressed; a failed install unpatches.
 Runner: a skip never hides a failed check; an unreadable health check fails an acting case; cookers skip when every slot is empty.
 
+## Fixed in the second batch
+
+Walker: `autoRun` decides whether a far walk runs, a tired user-run drops to a walk, `Reroute` keeps the remaining user waypoints and the caller's agent, debug fly is cleared through `Player.ToggleDebugFly`, a portal trigger ahead stops the walk. Journal: a modify entry carries the position after the edit (`ap`); `Remap` touches only entries of the current boot (and the persisted line names the boot). `clear_overlaps` looks `ceil((r + 3.5 + margin) / 4) + 1` cells around each object and checks its inputs; the sweep bounds use `WorldBounds.Limit`. `LocationNoBuildAt` uses 256 m buckets. `verify_plan`: `yawTol`, strict item fields, `extraPlayerBuilt`. `paint_at` takes `[x,z]` and `[x,y,z]`. `objects` filters before it builds records. Env: `time_set` states the time asked for, separate timers, prior debug time restored, release on leaving a world, own hook. `Audit.Sent` locks. The removal collapse check uses the loaded terrain. Live cases: `world_clock` boundary, `level_check` fractional spot.
+
 ## Not fixed (kept here so they are not lost)
 
-- Walker: no portal avoidance on its own route (only after a stall); `Reroute` drops the remaining user waypoints and uses the Humanoid agent; `walk_to` clears the local debug-fly field but not the ZDO value other clients read; `RunRules.WantRun` and `RunStartMetres` are tested but the walker's run rule is inline and differs.
-- `ResolveForUndo`: a modify entry for an untagged object cannot be found after a restart (positions are not trusted for modifies); the message says "gone".
-- Plan adoption treats `UserID == 1` as "not worldgen" but every object loaded from a save has that user key, so old creator-0 pieces are never adoptable after a restart.
-- `clear_overlaps` misses footprints with r over about 8 m; the default sweep covers +-10500 while `InWorld` accepts +-11000; `Remap` rewrites ids by string match across boots.
-- `Wards()` rescans the ZDO table every 10 s while a long job runs; `LocationNoBuildAt` is linear in the number of locations per item.
-- `verify_plan`: `extra` counts only creator-0 objects; description mentions a `yawTol` that does not exist; an item without x or z is read as 0. `paint_at` reads `[x,y,z]` as x,y. `objects digest` still builds a full record per ZDO before filtering.
-- Env: `time_set` returns the state before the next frame; time and weather share one release timer and `DoRelease` clears a human's debug time; nothing releases on leaving a world.
-- Chat: names are still text from the client in `chat_tail` rows beyond cleaning (the `name_suspicious` hint is the only signal); `Audit.Sent` is read without the rows lock; trust by name remains `name_only`.
-- `plan_check`: `CollapseOf` uses the generator ground (edits invisible); a plan's collapse check counts only contacts through the support layers.
+- Plan adoption treats `UserID == 1` as "not worldgen", but every object loaded from a save has that user key, so old creator-0 pieces are never adoptable after a restart. Left as it is on purpose: adopting would also take worldgen trees and rocks, and a later `plan_remove` would delete them. A safe rule needs the journal (adopt only what a spawn entry names) and a live test.
+- `Wards()` still rescans the ZDO table every 10 s while a long job runs (one frame slice per scan on a large server). Needs a measurement in the game before it is worth a cache with invalidation.
+- Chat: names are still text from the client in `chat_tail` rows beyond cleaning (the `name_suspicious` hint is the only signal); trust by name remains `name_only`.
+- `plan_check`: a plan's collapse check counts only contacts through the support layers.
 - Live cases that compare a tool with itself (farm, biome, stations, fuel, base_value) need an independent oracle from the first live session; `world_clock` can fail spuriously within 0.0005 of a phase boundary.
 - Day length: `m_dayLengthSec` is read live; a mod-set value of another type is untested.

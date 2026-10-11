@@ -105,18 +105,15 @@ namespace HubnerExt
                 if (all.Count > 4000) { note = "collapse check skipped: more than 4000 pieces around"; return null; }
             }
             if (!all.Any(p => removed.Contains(p.Id) && Material.Of(p.Geo.Material) != null)) return new List<string>();
-            Func<double, double, double> ground = WorldGenerator.instance != null ? (Func<double, double, double>)((x, z) => WorldGenerator.instance.GetHeight((float)x, (float)z)) : null;
+            Func<double, double, double> ground, normalYAt; Func<string> groundNote;
+            MakeGround(new Dictionary<string, object>(), out ground, out normalYAt, out groundNote);          // the terrain as it is now (edits included), not the generator's
             return RemovalImpact.Collapses(all, removed, ground).Select(p => p.Id + " " + p.Geo.Prefab + " " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z))).ToList();
         }
 
-        // ------------------------------------------------------------------ the tool
-        static ToolOutput Check(Dictionary<string, object> a)
+        /// <summary>The ground a structure check stands on: groundY flat, else the terrain triangles from the loaded terrain (edits included) with the generator behind it, else none. Shared by plan_check and the collapse check of a removal.</summary>
+        static void MakeGround(Dictionary<string, object> a, out Func<double, double, double> ground, out Func<double, double, double> normalYAt, out Func<string> groundNote)
         {
-            var items = McpJson.GetList(a, "items"); if (items == null || items.Count == 0) return ToolOutput.Err("items required");
-            if (items.Count > MaxItems) return ToolOutput.Err("max " + MaxItems + " items per call (the structure model is quadratic): split the plan by building");
-            if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
-            var plan = McpJson.GetStr(a, "plan"); var margin = Math.Max(1, Math.Min(30, U.D(a, "margin", 8))); var maxEx = Math.Max(1, (int)U.D(a, "examples", 10));
-            Func<double, double, double> ground; Func<double, double, double> normalYAt = (x, z) => 1.0; Func<string> groundNote;
+            normalYAt = (x, z) => 1.0;
             var mode = McpJson.GetStr(a, "ground") ?? "auto";
             if (U.Has(a, "groundY")) { var gy = U.D(a, "groundY", 0); ground = (x, z) => gy; var note = "flat ground at y " + U.N(gy); groundNote = () => note; }
             else if (WorldGenerator.instance != null)
@@ -137,6 +134,17 @@ namespace HubnerExt
                 groundNote = () => "terrain triangles from " + fromWorld + " vertex heights of the loaded terrain (edits included) and " + fromGenerator + " from the world generator (which does not know edits)" + (mode == "generator" ? " [ground:generator forced]" : "");
             }
             else { ground = null; groundNote = () => "no ground (nothing is grounded)"; }
+        }
+
+        // ------------------------------------------------------------------ the tool
+        static ToolOutput Check(Dictionary<string, object> a)
+        {
+            var items = McpJson.GetList(a, "items"); if (items == null || items.Count == 0) return ToolOutput.Err("items required");
+            if (items.Count > MaxItems) return ToolOutput.Err("max " + MaxItems + " items per call (the structure model is quadratic): split the plan by building");
+            if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
+            var plan = McpJson.GetStr(a, "plan"); var margin = Math.Max(1, Math.Min(30, U.D(a, "margin", 8))); var maxEx = Math.Max(1, (int)U.D(a, "examples", 10));
+            Func<double, double, double> ground, normalYAt; Func<string> groundNote;
+            MakeGround(a, out ground, out normalYAt, out groundNote);
 
             var planned = new List<PlacedPiece>(); var unknown = new List<string>(); var bad = new List<string>();
             double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; var idx = 0; var unknownKeys = new Dictionary<string, int>(); var missingY = 0;

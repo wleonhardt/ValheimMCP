@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### Second batch of review fixes (0.12.2 extension)
+Compile-checked and unit-tested only; none of it has run in the game.
+- `walk_to`: `autoRun:false` keeps the walk on foot unless `run:true` or a steep bank; a tired caller's `run` drops to a walk under half stamina; a re-route after a stall keeps the remaining waypoints and the agent you chose; a portal trigger on the route stops the walk with `blocked` (`throughPortals:true` walks through on purpose); debug fly is cleared through the game's own toggle.
+- Journal: a modify entry records where the object stands after the edit, so an untagged object can be found again after a restart; undoing a delete renumbers only the entries of the current world load.
+- `clear_overlaps`: footprints of any radius (0..500 m) are matched, inputs must be finite and in the world; `plans`, `plan_stats` and the undo scan cover the same +-11000 m as `InWorld`. The no-build location check uses a bucketed table instead of a scan per item.
+- `verify_plan`: `yawTol` exists (default 2), an item without prefab, x, y or z is an error instead of position 0, `extraPlayerBuilt` counts player-placed extras next to creator-0 ones. `paint_at` accepts `[x,z]` or `[x,y,z]`. `objects` builds a full record only for rows it returns.
+- `time_set` answers with the time asked for (and says the game applies it next frame); time and weather release on their own timers; a debug time a person had set before is put back; both release on leaving the world, driven by a hook on `EnvMan.Update` instead of the walker's patches.
+- `plan_remove` / `zdo_delete` collapse check stands on the terrain as it is now (edits included), like `plan_check`. The chat sent-log is locked.
+- Live cases: `world_clock` skips a phase boundary; `level_check` rounds the spot to whole metres and tests reach on a 3 x 3 pad.
+
 ### Review fixes after the offline code review (0.9.1 core / 0.12.1 extension)
 Three reviewers read the new code against the decompiled game (record: `plans/research/2026-10-offline-code-review.md`). Behaviour you may notice:
 - **Chest contents were read with the wrong type**: a current world keeps them as a byte array. `containers`, `missing_for`, `plan_materials`, `fuel_forecast`, `neighbours`, `death_state` and the journal's chest contents now see real chests; `container_set` writes the key the game reads.

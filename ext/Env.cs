@@ -5,6 +5,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using HarmonyLib;
 using UnityEngine;
 using ValheimMCP;
 
@@ -12,7 +13,10 @@ namespace HubnerExt
 {
     internal static class Env
     {
-        static float _releaseAt = -1f; static bool _timeHeld; static string _weather = "";
+        // time and weather have their own timers: releasing one must not cancel the other, and a debug time a person had set before is put back, not cleared
+        static float _timeUntil = -1f, _weatherUntil = -1f; static bool _timeHeld; static string _weather = "";
+        static bool _hadDebugTime; static float _priorDebugTime; static EnvMan _em;
+        static Harmony _hook; static readonly string HookId = "hubner.ext.env." + Guid.NewGuid().ToString("N");
         const float MaxHoldSeconds = 600f;
 
         static readonly Dictionary<string, float> Presets = new Dictionary<string, float> { { "dawn", 0.20f }, { "morning", 0.30f }, { "noon", 0.50f }, { "day", 0.50f }, { "afternoon", 0.65f }, { "dusk", 0.78f }, { "night", 0.95f }, { "midnight", 0.0f } };
@@ -43,8 +47,10 @@ namespace HubnerExt
             t = Mathf.Repeat(t, 1f);
             var fd = F("m_debugTimeOfDay"); var ft = F("m_debugTime");
             if (fd == null || ft == null) return ToolOutput.Err("EnvMan debug time fields not found in this game version");
-            fd.SetValue(em, true); ft.SetValue(em, t); _timeHeld = true; _releaseAt = Time.time + MaxHoldSeconds;
-            return State(null);
+            Hold(em);
+            if (!_timeHeld) { _hadDebugTime = Convert.ToBoolean(fd.GetValue(em)); _priorDebugTime = Convert.ToSingle(ft.GetValue(em)); }
+            fd.SetValue(em, true); ft.SetValue(em, t); _timeHeld = true; _timeUntil = Time.time + MaxHoldSeconds;
+            return StateWith(t);
         }
 
         static ToolOutput WeatherSet(Dictionary<string, object> a)
@@ -53,7 +59,7 @@ namespace HubnerExt
             var name = McpJson.GetStr(a, "name") ?? "";
             if (name.Length > 0 && !em.m_environments.Any(e => e.m_name == name)) return ToolOutput.Err("unknown environment '" + name + "' (the game would stop updating the sky until it is released): " + string.Join(", ", em.m_environments.Select(e => e.m_name).ToArray()));
             try { em.SetForceEnvironment(name); } catch (Exception ex) { return ToolOutput.Err("SetForceEnvironment failed: " + ex.Message); }
-            _weather = name; if (name.Length > 0) _releaseAt = Time.time + MaxHoldSeconds;
+            _weather = name; if (name.Length > 0) { Hold(em); _weatherUntil = Time.time + MaxHoldSeconds; } else { _weatherUntil = -1f; Unhook(); }
             return State(null);
         }
 
@@ -61,27 +67,65 @@ namespace HubnerExt
 
         static void DoRelease()
         {
-            var em = EnvMan.instance; _releaseAt = -1f;
-            if (em != null)
+            var em = EnvMan.instance;
+            if (em != null && em == _em)                                              // another EnvMan is a new world: the old one's overrides died with it
             {
-                try { var fd = F("m_debugTimeOfDay"); if (fd != null) fd.SetValue(em, false); } catch { }
-                try { if (_weather.Length > 0) em.SetForceEnvironment(""); } catch { }
+                try { var fd = F("m_debugTimeOfDay"); var ft = F("m_debugTime"); if (_timeHeld && fd != null) { fd.SetValue(em, _hadDebugTime); if (_hadDebugTime && ft != null) ft.SetValue(em, _priorDebugTime); } } catch (Exception ex) { U.Once("Env.release.time", ex); }
+                try { if (_weather.Length > 0) em.SetForceEnvironment(""); } catch (Exception ex) { U.Once("Env.release.weather", ex); }
             }
-            _timeHeld = false; _weather = "";
+            _timeHeld = false; _weather = ""; _timeUntil = _weatherUntil = -1f; _em = null; Unhook();
         }
 
-        public static void Tick() { if (_releaseAt > 0f && Time.time >= _releaseAt) DoRelease(); }
+        /// <summary>Own the timers independently of the walker's patches: a Harmony postfix on EnvMan.Update runs only while an override is held.</summary>
+        static void Hold(EnvMan em)
+        {
+            if (_em != null && _em != em) DoRelease();
+            _em = em;
+            if (_hook != null) return;
+            try { _hook = new Harmony(HookId); _hook.Patch(AccessTools.Method(typeof(EnvMan), "Update"), postfix: new HarmonyMethod(typeof(Env).GetMethod("EnvUpdate", BindingFlags.Static | BindingFlags.NonPublic))); }
+            catch (Exception ex) { _hook = null; U.Once("Env.hook", ex); }
+        }
+        static void Unhook() { try { if (_hook != null) _hook.UnpatchSelf(); } catch (Exception ex) { U.Once("Env.unhook", ex); } _hook = null; }
+        static void EnvUpdate() { try { Tick(); } catch (Exception ex) { U.Once("Env.tick", ex); } }
+
+        public static void Tick()
+        {
+            if (!_timeHeld && _weather.Length == 0) return;
+            if (EnvMan.instance == null || EnvMan.instance != _em) { DoRelease(); return; }      // left the world
+            var now = Time.time;
+            if (_timeHeld && _timeUntil > 0f && now >= _timeUntil) ReleaseTime();
+            if (_weather.Length > 0 && _weatherUntil > 0f && now >= _weatherUntil) ReleaseWeather();
+        }
+
+        static void ReleaseTime()
+        {
+            var em = EnvMan.instance;
+            try { var fd = F("m_debugTimeOfDay"); var ft = F("m_debugTime"); if (em != null && fd != null) { fd.SetValue(em, _hadDebugTime); if (_hadDebugTime && ft != null) ft.SetValue(em, _priorDebugTime); } } catch (Exception ex) { U.Once("Env.releaseTime", ex); }
+            _timeHeld = false; _timeUntil = -1f; if (_weather.Length == 0) { _em = null; Unhook(); }
+        }
+
+        static void ReleaseWeather()
+        {
+            try { if (EnvMan.instance != null) EnvMan.instance.SetForceEnvironment(""); } catch (Exception ex) { U.Once("Env.releaseWeather", ex); }
+            _weather = ""; _weatherUntil = -1f; if (!_timeHeld) { _em = null; Unhook(); }
+        }
 
         /// <summary>When the extension unloads (a hot reload) a held time or weather would stay set with nobody left to release it.</summary>
-        public static void Uninstall() { if (_timeHeld || _weather.Length > 0 || _releaseAt > 0f) DoRelease(); }
+        public static void Uninstall() { if (_timeHeld || _weather.Length > 0) DoRelease(); else Unhook(); }
 
-        static ToolOutput State(Dictionary<string, object> a)
+        static ToolOutput State(Dictionary<string, object> a) { return StateWith(float.NaN); }
+
+        static float Until() { var t = _timeHeld ? _timeUntil : -1f; var w = _weather.Length > 0 ? _weatherUntil : -1f; return t > 0f && (w <= 0f || t < w) ? t : w; }
+
+        /// <summary>requested: a time just set. The game applies it on its next frame, so the day fraction read now is still the old one; the answer says what was asked.</summary>
+        static ToolOutput StateWith(float requested)
         {
             var em = EnvMan.instance; if (em == null) return U.Json("{\"world\":false}");
-            float frac = 0f; try { frac = em.GetDayFraction(); } catch { }
+            float frac = 0f; try { frac = float.IsNaN(requested) ? em.GetDayFraction() : requested; } catch { }
             bool day = false, night = false; try { day = EnvMan.IsDay(); night = EnvMan.IsNight(); } catch { }
+            var pending = !float.IsNaN(requested);
             string env = ""; try { var m = typeof(EnvMan).GetMethod("GetCurrentEnvironment", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); var e = m != null ? m.Invoke(em, null) : null; if (e != null) { var f = e.GetType().GetField("m_name"); env = f != null ? Convert.ToString(f.GetValue(e)) : ""; } } catch { }
-            return U.Json("{\"dayFraction\":" + U.N(Math.Round(frac, 3)) + ",\"isDay\":" + (day ? "true" : "false") + ",\"isNight\":" + (night ? "true" : "false") + ",\"environment\":" + U.S(env) + ",\"timeHeld\":" + (_timeHeld ? "true" : "false") + ",\"weatherForced\":" + U.S(_weather) + ",\"autoReleaseSeconds\":" + (_releaseAt > 0 ? U.N(Math.Round(_releaseAt - Time.time)) : "null") + "}");
+            return U.Json("{\"dayFraction\":" + U.N(Math.Round(frac, 3)) + ",\"isDay\":" + (day ? "true" : "false") + ",\"isNight\":" + (night ? "true" : "false") + (pending ? ",\"pending\":true,\"note\":\"dayFraction is the time requested; isDay, isNight and environment show the old time until the next frame\"" : "") + ",\"environment\":" + U.S(env) + ",\"timeHeld\":" + (_timeHeld ? "true" : "false") + ",\"weatherForced\":" + U.S(_weather) + ",\"autoReleaseSeconds\":" + (Until() > 0 ? U.N(Math.Round(Until() - Time.time)) : "null") + "}");
         }
     }
 }

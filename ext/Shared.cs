@@ -153,8 +153,8 @@ namespace HubnerExt
                 "Where has the terrain been edited? Decodes every zone's terrain-compiler data (no heightmap needed). Returns per-zone edit counts, a coarse raster of the largest height change per cell (metres, + = raised), and clustered edited regions with bounding boxes. Use it to know what you must not touch.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"cell\":{\"type\":\"number\",\"description\":\"raster cell size in metres (default 4)\"},\"minDelta\":{\"type\":\"number\",\"description\":\"ignore changes smaller than this (default 0.15)\"},\"raster\":{\"type\":\"boolean\",\"description\":\"include the raster (default true)\"}},\"required\":[\"x0\",\"z0\",\"x1\",\"z1\"]}", Terraform.Map);
             r.Add("verify_plan",
-                "Compare a build plan with the world. items:[{prefab,x,y,z,yaw,text?}] (positions are prefab pivots, as spawned). Reports ok / moved / missing / duplicate / wrong-text counts with examples, and 'extra' objects of plan prefabs inside the plan's box that the plan does not contain, and flipped180 (placed 180 degrees off the plan, which is accepted because some pieces look the same turned; a faced piece such as a wall with an outside face is not the same). tol (default 0.06 m) is the position match, yawTol 2 degrees.",
-                "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"alsoPrefabs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"tol\":{\"type\":\"number\"},\"matchRadius\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Verify.Plan);
+                "Compare a build plan with the world. items:[{prefab,x,y,z,yaw,text?}] (positions are prefab pivots, as spawned). Reports ok / moved / missing / duplicate / wrong-text counts with examples, and 'extra' objects of plan prefabs inside the plan's box that the plan does not contain, and flipped180 (placed 180 degrees off the plan, which is accepted because some pieces look the same turned; a faced piece such as a wall with an outside face is not the same). tol (default 0.06 m) is the position match, yawTol (default 2) the angle match in degrees. 'extra' counts creator-0 objects (placed by tools or the world); 'extraPlayerBuilt' counts the same prefabs placed by a player. Every item needs prefab, x, y and z.",
+                "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"alsoPrefabs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"tol\":{\"type\":\"number\"},\"yawTol\":{\"type\":\"number\"},\"matchRadius\":{\"type\":\"number\"},\"examples\":{\"type\":\"number\"},\"margin\":{\"type\":\"number\"}},\"required\":[\"items\"]}", Verify.Plan);
             r.Add("snapshot", "Record every object in a box under a name (kept in memory; a copy is also written to hubner-ext/snapshots/<name>.jsonl for inspection) so a later snapshot_diff can show exactly what changed. Name: letters, digits, _ - . (max 64).",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"name\",\"x0\",\"z0\",\"x1\",\"z1\"]}", Snap.Take);
             r.Add("snapshot_diff", "Diff the current world against a named snapshot: added, removed, moved/changed objects (limit examples).",
@@ -205,17 +205,19 @@ namespace HubnerExt
             var rows = new List<string>(); var total = 0; var digest = McpJson.GetBool(a, "digest", false); var digestItems = new List<KeyValuePair<string, double[]>>();
             foreach (var z in Zdos.InBox(x0, z0, x1, z1))
             {
-                var rec = Zdos.ToRec(z);
-                if (rec.Prefab.StartsWith("_", StringComparison.Ordinal)) continue;
-                if (U.Has(a, "x") && !U.Has(a, "x0") && Vector2.Distance(new Vector2(rec.Pos.x, rec.Pos.z), new Vector2((float)U.D(a, "x", 0), (float)U.D(a, "z", 0))) > U.D(a, "radius", 20)) continue;
-                if (U.Has(a, "y0") && rec.Pos.y < U.D(a, "y0", -1e9)) continue;
-                if (U.Has(a, "y1") && rec.Pos.y > U.D(a, "y1", 1e9)) continue;
-                if (!U.MatchPrefab(rec.Prefab, filters)) continue;
-                if (bf != null && ((rec.Creator != 0L) != bf.Value)) continue;
+                var prefab = Zdos.NameOf(z.GetPrefab());                 // the filters read these three; the full record (id, rotation, scale, text) is built only for a row that is returned
+                if (prefab.StartsWith("_", StringComparison.Ordinal)) continue;
+                var pos = z.GetPosition();
+                if (U.Has(a, "x") && !U.Has(a, "x0") && Vector2.Distance(new Vector2(pos.x, pos.z), new Vector2((float)U.D(a, "x", 0), (float)U.D(a, "z", 0))) > U.D(a, "radius", 20)) continue;
+                if (U.Has(a, "y0") && pos.y < U.D(a, "y0", -1e9)) continue;
+                if (U.Has(a, "y1") && pos.y > U.D(a, "y1", 1e9)) continue;
+                if (!U.MatchPrefab(prefab, filters)) continue;
+                var creator = z.GetLong("creator", 0L);
+                if (bf != null && ((creator != 0L) != bf.Value)) continue;
                 total++;
-                if (digest) { digestItems.Add(new KeyValuePair<string, double[]>(rec.Prefab, new double[] { rec.Pos.x, rec.Pos.z, rec.Creator != 0L ? 1 : 0 })); continue; }
+                if (digest) { digestItems.Add(new KeyValuePair<string, double[]>(prefab, new double[] { pos.x, pos.z, creator != 0L ? 1 : 0 })); continue; }
                 if (total <= offset || rows.Count >= limit) continue;
-                rows.Add(Zdos.Json(rec));
+                rows.Add(Zdos.Json(Zdos.ToRec(z)));
             }
             if (digest)
             {
@@ -370,14 +372,16 @@ namespace HubnerExt
             if (items == null || items.Count == 0) return ToolOutput.Err("items required");
             var also = McpJson.GetList(a, "alsoPrefabs");     // extra prefab names to consider when looking for stray objects (e.g. pieces removed from the plan)
             var tol = (float)U.D(a, "tol", 0.06); var mr = (float)U.D(a, "matchRadius", 1.0); var maxEx = (int)U.D(a, "examples", 8);
-            var margin = (float)U.D(a, "margin", 1.0);
+            var margin = (float)U.D(a, "margin", 1.0); var yawTol = (float)U.D(a, "yawTol", 2.0);
+            if (!WorldBounds.Finite(tol) || !WorldBounds.Finite(yawTol) || !WorldBounds.Finite(mr)) return ToolOutput.Err("tol, yawTol and matchRadius must be finite numbers");
             float lx = 1e9f, hx = -1e9f, lz = 1e9f, hz = -1e9f;
             var plan = new List<KeyValuePair<string, KeyValuePair<Vector3, KeyValuePair<float, string>>>>();
             var prefabs = new HashSet<string>();
             foreach (var o in items)
             {
                 var d = o as Dictionary<string, object>; if (d == null) continue;
-                var name = McpJson.GetStr(d, "prefab"); var p = new Vector3((float)McpJson.Get(d, "x", 0), (float)McpJson.Get(d, "y", 0), (float)McpJson.Get(d, "z", 0));
+                var name = McpJson.GetStr(d, "prefab"); var p = new Vector3((float)McpJson.Get(d, "x", double.NaN), (float)McpJson.Get(d, "y", double.NaN), (float)McpJson.Get(d, "z", double.NaN));
+                if (string.IsNullOrEmpty(name) || !WorldBounds.InWorld(p.x, p.y, p.z)) return ToolOutput.Err("item " + plan.Count + ": prefab and finite x, y, z inside the world are required (a missing coordinate would be read as 0)");
                 plan.Add(new KeyValuePair<string, KeyValuePair<Vector3, KeyValuePair<float, string>>>(name, new KeyValuePair<Vector3, KeyValuePair<float, string>>(p, new KeyValuePair<float, string>((float)McpJson.Get(d, "yaw", 0), McpJson.GetStr(d, "text")))));
                 prefabs.Add(name);
                 lx = Math.Min(lx, p.x); hx = Math.Max(hx, p.x); lz = Math.Min(lz, p.z); hz = Math.Max(hz, p.z);
@@ -424,16 +428,17 @@ namespace HubnerExt
                 }
                 if (exact.Count > 1) { dup++; if (exDup.Count < maxEx) { var ids = new List<string>(); foreach (var i in exact) ids.Add(U.S(recs[i].Id)); exDup.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"ids\":[" + string.Join(",", ids.ToArray()) + "]}"); } }
                 var r0 = recs[exact[0]];
-                if (Zdos.AngDiff(r0.Yaw, yaw) > 2f && Math.Abs(Mathf.DeltaAngle(r0.Yaw, yaw + 180f)) <= 2f) { flipped++; if (exFlip.Count < maxEx) exFlip.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"planYaw\":" + U.N(yaw) + ",\"worldYaw\":" + U.N(Math.Round(r0.Yaw, 1)) + ",\"id\":" + U.S(r0.Id) + "}"); }
-                if (Zdos.AngDiff(r0.Yaw, yaw) > 2f && Math.Abs(Mathf.DeltaAngle(r0.Yaw, yaw + 180f)) > 2f) { badYaw++; if (exYaw.Count < maxEx) exYaw.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"planYaw\":" + U.N(yaw) + ",\"worldYaw\":" + U.N(Math.Round(r0.Yaw, 1)) + ",\"id\":" + U.S(r0.Id) + "}"); }
+                if (Zdos.AngDiff(r0.Yaw, yaw) > yawTol && Math.Abs(Mathf.DeltaAngle(r0.Yaw, yaw + 180f)) <= yawTol) { flipped++; if (exFlip.Count < maxEx) exFlip.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"planYaw\":" + U.N(yaw) + ",\"worldYaw\":" + U.N(Math.Round(r0.Yaw, 1)) + ",\"id\":" + U.S(r0.Id) + "}"); }
+                if (Zdos.AngDiff(r0.Yaw, yaw) > yawTol && Math.Abs(Mathf.DeltaAngle(r0.Yaw, yaw + 180f)) > yawTol) { badYaw++; if (exYaw.Count < maxEx) exYaw.Add("{\"prefab\":" + U.S(name) + ",\"pos\":" + U.V(pos) + ",\"planYaw\":" + U.N(yaw) + ",\"worldYaw\":" + U.N(Math.Round(r0.Yaw, 1)) + ",\"id\":" + U.S(r0.Id) + "}"); }
                 if (text != null && r0.Text != text) { badText++; if (exText.Count < maxEx) exText.Add("{\"id\":" + U.S(r0.Id) + ",\"want\":" + U.S(text) + ",\"have\":" + U.S(r0.Text) + "}"); }
                 ok++;
             }
-            var extra = 0; var exExtra = new List<string>();
+            var extra = 0; var extraPlayer = 0; var exExtra = new List<string>();
             for (int i = 0; i < recs.Count; i++)
-                if (!used[i] && recs[i].Creator == 0 && recs[i].Pos.x >= lx - 0.5f && recs[i].Pos.x <= hx + 0.5f && recs[i].Pos.z >= lz - 0.5f && recs[i].Pos.z <= hz + 0.5f)
+                if (!used[i] && recs[i].Creator != 0 && recs[i].Pos.x >= lx - 0.5f && recs[i].Pos.x <= hx + 0.5f && recs[i].Pos.z >= lz - 0.5f && recs[i].Pos.z <= hz + 0.5f) extraPlayer++;
+                else if (!used[i] && recs[i].Creator == 0 && recs[i].Pos.x >= lx - 0.5f && recs[i].Pos.x <= hx + 0.5f && recs[i].Pos.z >= lz - 0.5f && recs[i].Pos.z <= hz + 0.5f)
                 { extra++; if (exExtra.Count < maxEx) exExtra.Add(Zdos.Json(recs[i])); }
-            return U.Json("{\"planned\":" + plan.Count + ",\"ok\":" + ok + ",\"moved\":" + moved + ",\"missing\":" + missing + ",\"duplicates\":" + dup + ",\"wrongYaw\":" + badYaw + ",\"flipped180\":" + flipped + ",\"wrongText\":" + badText + ",\"extraOfPlanPrefabs\":" + extra +
+            return U.Json("{\"planned\":" + plan.Count + ",\"ok\":" + ok + ",\"moved\":" + moved + ",\"missing\":" + missing + ",\"duplicates\":" + dup + ",\"wrongYaw\":" + badYaw + ",\"flipped180\":" + flipped + ",\"wrongText\":" + badText + ",\"extraOfPlanPrefabs\":" + extra + ",\"extraPlayerBuilt\":" + extraPlayer +
                 ",\"examples\":{\"missing\":[" + string.Join(",", exMiss.ToArray()) + "],\"moved\":[" + string.Join(",", exMoved.ToArray()) + "],\"duplicates\":[" + string.Join(",", exDup.ToArray()) + "],\"wrongYaw\":[" + string.Join(",", exYaw.ToArray()) + "],\"flipped180\":[" + string.Join(",", exFlip.ToArray()) + "],\"wrongText\":[" + string.Join(",", exText.ToArray()) + "],\"extra\":[" + string.Join(",", exExtra.ToArray()) + "]}}");
         }
     }

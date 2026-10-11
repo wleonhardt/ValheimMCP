@@ -149,18 +149,18 @@ namespace HubnerExt
             return new[] { x0 - 2f, z0 - 2f, x1 + 2f, z1 + 2f };
         }
 
-        static readonly float[] World = { -10500f, -10500f, 10500f, 10500f };
+        static readonly float[] World = { -WorldBounds.Limit, -WorldBounds.Limit, WorldBounds.Limit, WorldBounds.Limit };
         static int Hash(string prefab) { return prefab.GetStableHashCode(); }
 
         // ------------------------------------------------------------------ journal helpers
-        static void Log(string group, string kind, ZDO z, string prefab, Vector3 pos, Quaternion rot, string text, string tag, string plan, string key, long creator, Dictionary<string, int> ints = null, Dictionary<string, float> floats = null, Dictionary<string, string> strings = null)
+        static void Log(string group, string kind, ZDO z, string prefab, Vector3 pos, Quaternion rot, string text, string tag, string plan, string key, long creator, Dictionary<string, int> ints = null, Dictionary<string, float> floats = null, Dictionary<string, string> strings = null, Vector3? after = null)
         {
             if (kind == "delete")                                                       // what a delete throws away and a plain respawn cannot bring back: chest contents
             {
                 var items = ContainerData.ToBase64(z);
                 if (items.Length > 0) { strings = strings != null ? new Dictionary<string, string>(strings) : new Dictionary<string, string>(); strings["items"] = items; }
             }
-            Journal.Add(new JEntry { Kind = kind, Id = U.Id(z), Prefab = prefab, Pos = pos, Rot = rot, Text = text, Tag = tag, Plan = plan, Key = key, Creator = creator, Group = group, Scale = z.GetVec3("scale", Vector3.one), Ints = ints, Floats = floats, Strings = strings, IdPlan = z.GetString(PlanHash, ""), IdKey = z.GetString(ItemHash, "") });
+            Journal.Add(new JEntry { Kind = kind, Id = U.Id(z), Prefab = prefab, Pos = pos, Rot = rot, Text = text, Tag = tag, Plan = plan, Key = key, Creator = creator, Group = group, Scale = z.GetVec3("scale", Vector3.one), Ints = ints, Floats = floats, Strings = strings, IdPlan = z.GetString(PlanHash, ""), IdKey = z.GetString(ItemHash, ""), HasAfter = kind == "modify", After = after ?? pos });
         }
 
         static readonly Dictionary<string, float> _fuel = new Dictionary<string, float>();
@@ -384,7 +384,7 @@ namespace HubnerExt
                             if (needText) z.Set("text", text);
                             if (needTag) z.Set("tag", tag);
                             z.Set(PlanKey, plan); z.Set(ItemKey, key); if (needExtras) { ApplyExtras(z, it, out oi, out of, out os); extrasSet++; }
-                            Log(group, "modify", z, prefab, cur, cr, oldText, oldTag, oldPlan, oldKey, z.GetLong("creator", 0L), oi, of, os);
+                            Log(group, "modify", z, prefab, cur, cr, oldText, oldTag, oldPlan, oldKey, z.GetLong("creator", 0L), oi, of, os, needMove ? pos : cur);
                             continue;
                         }
                         // spawn
@@ -481,13 +481,17 @@ namespace HubnerExt
             if (!Zdos.Ready) return ToolOutput.Err("world not ready");
             var items = McpJson.GetList(a, "items"); if (items == null || items.Count == 0) return ToolOutput.Err("items required");
             float margin = (float)McpJson.Get(a, "margin", 0.3); bool dry = McpJson.GetBool(a, "dry", false); var group = McpJson.GetStr(a, "group") ?? "clear_overlaps"; int maxEx = (int)McpJson.Get(a, "examples", 10);
-            var fp = new List<float[]>(); float x0 = 1e9f, z0 = 1e9f, x1 = -1e9f, z1 = -1e9f;
+            var fp = new List<float[]>(); float x0 = 1e9f, z0 = 1e9f, x1 = -1e9f, z1 = -1e9f, maxR = 0f;
+            float pad = 3.5f + Math.Max(0f, margin);                                    // the widest natural radius plus the margin: how far past a footprint an object's centre can lie and still overlap
             foreach (var o in items)
             {
                 var it = o as Dictionary<string, object>; if (it == null) continue;
                 float x = (float)McpJson.Get(it, "x", 0), z = (float)McpJson.Get(it, "z", 0), y0 = (float)McpJson.Get(it, "y0", -1e4), y1 = (float)McpJson.Get(it, "y1", 1e4), r = (float)McpJson.Get(it, "r", 1);
-                fp.Add(new[] { x, z, y0, y1, r }); x0 = Math.Min(x0, x - r - 6); x1 = Math.Max(x1, x + r + 6); z0 = Math.Min(z0, z - r - 6); z1 = Math.Max(z1, z + r + 6);
+                if (!WorldBounds.InWorld(x, 0, z) || !WorldBounds.Finite(r) || !WorldBounds.Finite(y0) || !WorldBounds.Finite(y1) || r < 0f || r > 500f) return ToolOutput.Err("each footprint needs finite x and z inside the world and r between 0 and 500");
+                fp.Add(new[] { x, z, y0, y1, r }); maxR = Math.Max(maxR, r); x0 = Math.Min(x0, x - r - pad); x1 = Math.Max(x1, x + r + pad); z0 = Math.Min(z0, z - r - pad); z1 = Math.Max(z1, z + r + pad);
             }
+            if (fp.Count == 0) return ToolOutput.Err("items required");
+            int span = (int)Math.Ceiling((maxR + pad) / 4f) + 1;                       // cells a footprint's centre can lie from an object it overlaps
             var grid = new Dictionary<long, List<int>>(); Func<int, int, long> key = (gx, gz) => ((long)gx << 32) ^ (uint)gz;
             for (int i = 0; i < fp.Count; i++) { int gx = (int)Math.Floor(fp[i][0] / 4f), gz = (int)Math.Floor(fp[i][1] / 4f); var k = key(gx, gz); if (!grid.TryGetValue(k, out var l)) grid[k] = l = new List<int>(); l.Add(i); }
             int hit = 0, deleted = 0, living = 0; var ex = new List<string>(); var byPrefab = new Dictionary<string, int>();
@@ -501,8 +505,8 @@ namespace HubnerExt
                     if (name.Length == 0 || name[0] == '_' || name[0] == '#' || U.IsForbidden(name) || KeepNames.Any(k => name.StartsWith(k, StringComparison.OrdinalIgnoreCase))) continue;
                     var p = z.GetPosition(); float rad = NaturalRadius(name) + margin; bool over = false;
                     int cx = (int)Math.Floor(p.x / 4f), cz = (int)Math.Floor(p.z / 4f);
-                    for (int dx = -3; dx <= 3 && !over; dx++)
-                        for (int dz = -3; dz <= 3 && !over; dz++)
+                    for (int dx = -span; dx <= span && !over; dx++)
+                        for (int dz = -span; dz <= span && !over; dz++)
                             if (grid.TryGetValue(key(cx + dx, cz + dz), out var l))
                                 foreach (var i in l)
                                 {
@@ -700,7 +704,7 @@ namespace HubnerExt
                         var ints = McpJson.GetObj(e, "ints"); if (ints != null) { oi = new Dictionary<string, int>(); foreach (var kv in ints) oi[kv.Key] = z.GetInt(kv.Key, 0); }
                         var fl = McpJson.GetObj(e, "floats"); if (fl != null) { of = new Dictionary<string, float>(); foreach (var kv in fl) of[kv.Key] = z.GetFloat(kv.Key, 0f); }
                         var sd = McpJson.GetObj(e, "strings"); if (sd != null) { os = new Dictionary<string, string>(); foreach (var kv in sd) os[kv.Key] = z.GetString(kv.Key, ""); }
-                        Log(group, "modify", z, prefab, pos, rot, z.GetString("text", ""), z.GetString("tag", ""), z.GetString(PlanHash, ""), z.GetString(ItemHash, ""), z.GetLong("creator", 0L), oi, of, os);
+                        Log(group, "modify", z, prefab, pos, rot, z.GetString("text", ""), z.GetString("tag", ""), z.GetString(PlanHash, ""), z.GetString(ItemHash, ""), z.GetLong("creator", 0L), oi, of, os, np);
                         Own(z);
                         if (np != pos || nr != rot) { z.SetPosition(np); z.SetRotation(nr); ApplyToInstance(z, np, nr); movedSet.Add(z); }
                         var text = McpJson.GetStr(e, "text"); if (text != null) z.Set("text", text);
@@ -917,6 +921,7 @@ namespace HubnerExt
             problem = null;
             var boot = Journal.CurrentBoot();
             var cands = new List<ObjFacts>();
+            var at = e.Kind == "modify" && e.HasAfter ? e.After : e.Pos;                 // a modify stands where the edit put it, not where undo will put it back
             var sameLoad = !string.IsNullOrEmpty(e.Boot) && e.Boot == boot;
             if (sameLoad) { var z0 = U.FindZdo(e.Id); if (z0 != null) cands.Add(FactsOf(z0)); }
             else if (!string.IsNullOrEmpty(e.IdPlan) && !string.IsNullOrEmpty(e.IdKey))
@@ -934,12 +939,12 @@ namespace HubnerExt
                 }
                 List<ZDO> hit; if (_undoIndex.TryGetValue(e.IdPlan + "\n" + e.IdKey, out hit)) foreach (var z in hit) if (z.IsValid()) cands.Add(FactsOf(z));
             }
-            else foreach (var z in Zdos.InBox(e.Pos.x - 2f, e.Pos.z - 2f, e.Pos.x + 2f, e.Pos.z + 2f)) cands.Add(FactsOf(z));
-            var m = Identity.Find(e.Boot, boot, e.Id, e.Prefab, e.IdPlan, e.IdKey, e.Pos.x, e.Pos.y, e.Pos.z, e.Kind == "spawn", cands, out var found);
-            var loaded = ZNet.instance != null && (ZNet.instance.IsServer() || (ZoneSystem.instance != null && ZoneSystem.instance.IsZoneLoaded(e.Pos)));      // the server knows every object; a client only those of zones it has been near
+            else foreach (var z in Zdos.InBox(at.x - 2f, at.z - 2f, at.x + 2f, at.z + 2f)) cands.Add(FactsOf(z));
+            var m = Identity.Find(e.Boot, boot, e.Id, e.Prefab, e.IdPlan, e.IdKey, at.x, at.y, at.z, e.Kind == "spawn" || (e.Kind == "modify" && e.HasAfter), cands, out var found);
+            var loaded = ZNet.instance != null && (ZNet.instance.IsServer() || (ZoneSystem.instance != null && ZoneSystem.instance.IsZoneLoaded(at)));      // the server knows every object; a client only those of zones it has been near
             m = Identity.Judge(m, e.World, Journal.CurrentWorld(), loaded);
             if (m == Match.OtherWorld) problem = "this entry was written in the world " + e.World + " and this is " + Journal.CurrentWorld() + ": not touched";
-            else if (m == Match.Unloaded) problem = "cannot tell whether it is gone: the area at " + U.V(e.Pos) + " is not loaded here (go there and undo again); the entry is kept";
+            else if (m == Match.Unloaded) problem = "cannot tell whether it is gone: the area at " + U.V(at) + " is not loaded here (go there and undo again); the entry is kept";
             else if (m == Match.Ambiguous) problem = "the game renumbered its objects since this entry was written and more than one object matches it: not touched";
             return m == Match.Found ? (ZDO)found.Handle : null;
         }

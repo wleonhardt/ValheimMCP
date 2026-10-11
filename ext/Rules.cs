@@ -582,8 +582,8 @@ namespace HubnerExt
     {
         public double Window = 120;
         private readonly List<KeyValuePair<double, string>> _sent = new List<KeyValuePair<double, string>>();
-        public void Add(double now, string text) { _sent.Add(new KeyValuePair<double, string>(now, ChatRules.Norm(text))); _sent.RemoveAll(e => now - e.Key > Window); }
-        public bool IsOurs(double now, string text) { var n = ChatRules.Norm(text); return n.Length > 0 && _sent.Any(e => now - e.Key <= Window && e.Value == n); }
+        public void Add(double now, string text) { var n = ChatRules.Norm(text); lock (_sent) { _sent.Add(new KeyValuePair<double, string>(now, n)); _sent.RemoveAll(e => now - e.Key > Window); } }      // chat arrives on the network thread, sends on the main thread
+        public bool IsOurs(double now, string text) { var n = ChatRules.Norm(text); if (n.Length == 0) return false; lock (_sent) return _sent.Any(e => now - e.Key <= Window && e.Value == n); }
     }
 
     internal sealed class BreedingSpec

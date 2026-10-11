@@ -111,15 +111,37 @@ namespace HubnerExt
         public static string LocationNoBuildAt(Vector3 p)
         {
             var zs = ZoneSystem.instance; if (zs == null) return null;
+            var cell = LocationCells(zs);
+            List<ZoneSystem.LocationInstance> near;
+            for (int cx = (int)Math.Floor((p.x - 400f) / CellM); cx <= (int)Math.Floor((p.x + 400f) / CellM); cx++)
+                for (int cz = (int)Math.Floor((p.z - 400f) / CellM); cz <= (int)Math.Floor((p.z + 400f) / CellM); cz++)
+                {
+                    if (!cell.TryGetValue(((long)cx << 32) ^ (uint)cz, out near)) continue;
+                    foreach (var inst in near)
+                    {
+                        var loc = inst.m_location; if (loc == null) continue;
+                        var dx = inst.m_position.x - p.x; var dz = inst.m_position.z - p.z;
+                        if (dx * dx + dz * dz > 400f * 400f) continue;
+                        var f = FactsOf(loc);
+                        if (LocationRules.NoBuildHere(f, Math.Sqrt(dx * dx + dz * dz))) return f.Known ? loc.m_prefabName : loc.m_prefabName + "?";
+                    }
+                }
+            return null;
+        }
+
+        // a plan of thousands of items asks once per item: the location table (thousands of entries) is bucketed once, and rebuilt when its size changes
+        const float CellM = 256f;
+        static Dictionary<long, List<ZoneSystem.LocationInstance>> _locCells; static int _locCellsCount = -1;
+        static Dictionary<long, List<ZoneSystem.LocationInstance>> LocationCells(ZoneSystem zs)
+        {
+            if (_locCells != null && _locCellsCount == zs.m_locationInstances.Count) return _locCells;
+            var d = new Dictionary<long, List<ZoneSystem.LocationInstance>>();
             foreach (var inst in zs.m_locationInstances.Values)
             {
-                var loc = inst.m_location; if (loc == null) continue;
-                var dx = inst.m_position.x - p.x; var dz = inst.m_position.z - p.z;
-                if (dx * dx + dz * dz > 400f * 400f) continue;
-                var f = FactsOf(loc);
-                if (LocationRules.NoBuildHere(f, Math.Sqrt(dx * dx + dz * dz))) return f.Known ? loc.m_prefabName : loc.m_prefabName + "?";
+                var key = ((long)(int)Math.Floor(inst.m_position.x / CellM) << 32) ^ (uint)(int)Math.Floor(inst.m_position.z / CellM);
+                List<ZoneSystem.LocationInstance> l; if (!d.TryGetValue(key, out l)) d[key] = l = new List<ZoneSystem.LocationInstance>(); l.Add(inst);
             }
-            return null;
+            _locCells = d; _locCellsCount = zs.m_locationInstances.Count; return d;
         }
 
         // ------------------------------------------------------------------ the Protected extension

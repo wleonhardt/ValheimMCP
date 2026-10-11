@@ -31,7 +31,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}}}", BedCheck);
             Reg.Add(r, "headroom", "Clear height above a walking path in ONE call: points:[[x,y,z],...] (y = floor/foot height), step metres (default 0.5), min (flag threshold, default 2.6). Casts straight up from each sample; reports min clearance, the lowest points with the piece overhead, and every sample below min. Use on stairs, doorways and tunnels.",
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"step\":{\"type\":\"number\"},\"min\":{\"type\":\"number\"}},\"required\":[\"points\"]}", HeadroomTool);
-            Reg.Add(r, "paint_at", "Terrain paint (dirt, cultivated, paved, vegetation weights 0..1) at points: points:[[x,z],...] (max 500). Read-only. null where the heightmap is not loaded.",
+            Reg.Add(r, "paint_at", "Terrain paint (dirt, cultivated, paved, vegetation weights 0..1) at points: points:[[x,z],...] or [[x,y,z],...] (max 500). Read-only. null where the heightmap is not loaded.",
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}},\"required\":[\"points\"]}", Paint);
         }
 
@@ -281,8 +281,9 @@ namespace HubnerExt
         {
             var pts = Pts(a); if (pts.Count > 500) return ToolOutput.Err("max 500 points"); var rows = new List<string>();
             var fh = typeof(Heightmap).GetMethod("FindHeightmap", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector3) }, null);
-            foreach (var p in pts)
+            foreach (var pt in pts)
             {
+                var p = new[] { pt[0], pt.Length >= 3 ? pt[2] : pt[1] };            // [x,z] or [x,y,z]: the second number of a triple is a height, not z
                 try
                 {
                     var pos = new Vector3(p[0], 0f, p[1]); var hm = fh == null ? null : fh.Invoke(null, new object[] { pos }) as Heightmap;
