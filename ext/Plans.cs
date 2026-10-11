@@ -71,14 +71,14 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"margin\":{\"type\":\"number\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"examples\":{\"type\":\"number\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"items\"]}", a => Guard(a, ClearOverlaps, true), W);
             r.Add("plan_stats", "What the plans have put in the world, from the ZDOs: per plan id and per ctag (generator label): piece count, bounding box and centre; plus 'foreign': objects built by players (creator != 0, no hub_plan) inside each plan's box - things someone added or left behind. Optional box x0,z0,x1,z1 and ctagDepth (how many ':' segments of the ctag to group by, default 2).",
                 "{\"type\":\"object\",\"properties\":{\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"ctagDepth\":{\"type\":\"number\"}}}", PlanStats);
-            r.Add("plan_remove", "Delete objects tagged with a plan id inside the box (default: everywhere known). Filters: ctag (prefix of the generator label sent as item ctag, e.g. 'decor:Kitchen'), prefab (prefix); plan:'*' or all:true spans every plan (needs ctag or prefab). dry=true counts only. Journaled.",
-                "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"ctag\":{\"type\":\"string\"},\"prefab\":{\"type\":\"string\"},\"all\":{\"type\":\"boolean\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"dry\":{\"type\":\"boolean\"},\"confirm\":{\"type\":\"string\"}}}", a => Guard(a, Remove, true), W);
+            r.Add("plan_remove", "Delete objects tagged with a plan id inside the box (default: everywhere known). Filters: ctag (prefix of the generator label sent as item ctag, e.g. 'decor:Kitchen'), prefab (prefix); plan:'*' or all:true spans every plan (needs ctag or prefab). dry=true counts only and reports wouldCollapse (pieces outside the removal that rest on it and would be destroyed by WearNTear); a removal that would bring pieces down is refused unless allowCollapse:true. Journaled.",
+                "{\"type\":\"object\",\"properties\":{\"allowCollapse\":{\"type\":\"boolean\"},\"plan\":{\"type\":\"string\"},\"ctag\":{\"type\":\"string\"},\"prefab\":{\"type\":\"string\"},\"all\":{\"type\":\"boolean\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"dry\":{\"type\":\"boolean\"},\"confirm\":{\"type\":\"string\"}}}", a => Guard(a, Remove, true), W);
             r.Add("container_set", "Put items into containers by id, through the game's Inventory class: edits:[{id, items:[{name, count, quality}], replace}] (max 200 edits). Item names are item prefab names (Wood, Raspberry, TrophyBoar ...); unknown names and full chests are reported. Refuses non-containers, chests a player has open and player-built chests (creator!=0) unless force=true AND forceConfirm:'player-built'. Journaled (undo restores the old contents). Takes ownership; server write.",
                 "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"edits\"]}", a => Guard(a, ContainerSet), W);
             r.Add("zdo_set", "Server-side/ZDO-level edit by id, no instantiation needed: {id, x,y,z, yaw|rot:[rx,ry,rz], text, tag, strings:{k:v}, ints:{k:v} (e.g. door state 0=closed), floats:{k:v} (fuel)}. edits:[...] (max 500). Takes ownership first. Refuses terrain/internal prefabs, Player, creatures and player-built objects (creator!=0) unless force=true AND forceConfirm:'player-built'. Journaled under group; undo restores the changed fields.",
                 "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"edits\"]}", a => Guard(a, ZSet), W);
-            r.Add("zdo_delete", "Delete objects by id at ZDO level (any role, no instantiation). ids:[...] (max 2000). Refuses Player, terrain/internal prefabs, creatures/tamed/ships/carts/items and player-built objects (creator!=0) unless force=true AND forceConfirm:'player-built' (every forced object is logged). Journaled under group.",
-                "{\"type\":\"object\",\"properties\":{\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"ids\"]}", a => Guard(a, ZDelete), W);
+            r.Add("zdo_delete", "Delete objects by id at ZDO level (any role, no instantiation). ids:[...] (max 2000). Refuses Player, terrain/internal prefabs, creatures/tamed/ships/carts/items and player-built objects (creator!=0) unless force=true AND forceConfirm:'player-built' (every forced object is logged). A deletion that would bring down pieces resting on the deleted ones (WearNTear) is refused unless allowCollapse:true. Journaled under group.",
+                "{\"type\":\"object\",\"properties\":{\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"allowCollapse\":{\"type\":\"boolean\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"ids\"]}", a => Guard(a, ZDelete), W);
             r.Add("doors", "Doors and gates (prefab name contains door/gate) in a box x0,z0,x1,z1 or x,z,radius, with open/closed state read from the ZDO: id, prefab, pos, state (0 closed, nonzero open), plan. Optional openOnly=true. Read-only.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"openOnly\":{\"type\":\"boolean\"},\"limit\":{\"type\":\"number\"}}}", DoorsList, false);
             r.Add("doors_set", "Open or close every door/gate in a box (same selectors as doors): state 0 = closed (default), 1 = open. Only doors whose state differs are written. Journaled (undo restores the state). Server role needs the write gate + confirm.",
@@ -562,24 +562,34 @@ namespace HubnerExt
             if (all && string.IsNullOrEmpty(ctag) && string.IsNullOrEmpty(pfx)) return ToolOutput.Err("all-plans removal needs a ctag or prefab filter");
             var bl = McpJson.GetList(a, "box");
             float[] b = bl != null && bl.Count >= 4 ? new[] { (float)U.At(bl, 0), (float)U.At(bl, 1), (float)U.At(bl, 2), (float)U.At(bl, 3) } : World;
-            int n = 0; var byPlan = new Dictionary<string, int>();
-            Journal.Begin();
-            try
+            int n = 0; var byPlan = new Dictionary<string, int>(); var victims = new List<ZDO>();
+            foreach (var z in Zdos.InBox(b[0], b[1], b[2], b[3]).ToList())
             {
-                foreach (var z in Zdos.InBox(b[0], b[1], b[2], b[3]).ToList())
-                {
-                    var pl = z.GetString(PlanHash, ""); if (string.IsNullOrEmpty(pl)) continue;
-                    if (!all && pl != plan) continue;
-                    if (ctag != null && !z.GetString(CtagHash, "").StartsWith(ctag, StringComparison.Ordinal)) continue;
-                    var prefab = Zdos.NameOf(z.GetPrefab());
-                    if (pfx != null && !prefab.StartsWith(pfx, StringComparison.Ordinal)) continue;
-                    n++; byPlan[pl] = (byPlan.TryGetValue(pl, out var c) ? c : 0) + 1; if (dry) continue;
-                    Log("remove:" + pl, "delete", z, prefab, z.GetPosition(), z.GetRotation(), z.GetString("text", ""), z.GetString("tag", ""), pl, z.GetString(ItemHash, ""), z.GetLong("creator", 0L));
-                    Destroy(z);
-                }
+                var pl = z.GetString(PlanHash, ""); if (string.IsNullOrEmpty(pl)) continue;
+                if (!all && pl != plan) continue;
+                if (ctag != null && !z.GetString(CtagHash, "").StartsWith(ctag, StringComparison.Ordinal)) continue;
+                var prefab = Zdos.NameOf(z.GetPrefab());
+                if (pfx != null && !prefab.StartsWith(pfx, StringComparison.Ordinal)) continue;
+                n++; byPlan[pl] = (byPlan.TryGetValue(pl, out var c) ? c : 0) + 1; victims.Add(z);
             }
-            finally { Journal.End(); }
-            return U.Json("{\"plan\":" + U.S(plan ?? "*") + ",\"removed\":" + n + ",\"dry\":" + (dry ? "true" : "false") + ",\"byPlan\":{" + string.Join(",", byPlan.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "}}");
+            var allowCollapse = McpJson.GetBool(a, "allowCollapse", false); string collapseNote = ""; List<string> falls = null;
+            if (!allowCollapse || dry) falls = PlanCheck.CollapseOf(victims, out collapseNote);
+            if (falls != null && falls.Count > 0 && !dry && !allowCollapse) return ToolOutput.Err("refused: removing these " + n + " objects would bring down " + falls.Count + " pieces that rest on them (WearNTear destroys a piece that loses its support), e.g. " + string.Join("; ", falls.Take(5).ToArray()) + ". Remove them as well, or pass allowCollapse:true.");
+            if (!dry)
+            {
+                Journal.Begin();
+                try
+                {
+                    foreach (var z in victims)
+                    {
+                        var prefab = Zdos.NameOf(z.GetPrefab()); var pl = z.GetString(PlanHash, "");
+                        Log("remove:" + pl, "delete", z, prefab, z.GetPosition(), z.GetRotation(), z.GetString("text", ""), z.GetString("tag", ""), pl, z.GetString(ItemHash, ""), z.GetLong("creator", 0L));
+                        Destroy(z);
+                    }
+                }
+                finally { Journal.End(); }
+            }
+            return U.Json("{\"plan\":" + U.S(plan ?? "*") + ",\"removed\":" + n + ",\"dry\":" + (dry ? "true" : "false") + ",\"byPlan\":{" + string.Join(",", byPlan.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "},\"wouldCollapse\":" + (falls == null ? "null" : falls.Count.ToString(CultureInfo.InvariantCulture)) + ",\"collapseNote\":" + U.S(collapseNote) + ",\"collapseExamples\":[" + (falls == null ? "" : string.Join(",", falls.Take(8).Select(U.S).ToArray())) + "]}");
         }
 
         // ------------------------------------------------------------------ zdo_set / zdo_delete / zdo_dump
@@ -739,22 +749,37 @@ namespace HubnerExt
             var ids = McpJson.GetList(a, "ids"); if (ids == null || ids.Count == 0) return ToolOutput.Err("ids required");
             if (ids.Count > 2000) return ToolOutput.Err("max 2000 ids per call");
             var group = McpJson.GetStr(a, "group") ?? "zdo_delete";
-            int done = 0; var errs = new List<string>();
+            int done = 0; var errs = new List<string>(); var victims = new List<ZDO>();
+            foreach (var o in ids)
+            {
+                var id = Convert.ToString(o, CultureInfo.InvariantCulture);
+                try
+                {
+                    var z = U.FindZdo(id); if (z == null) { errs.Add(id + ": not found"); continue; }
+                    var prefab = Zdos.NameOf(z.GetPrefab());
+                    if (Protected(z, prefab, a, out var why)) { errs.Add(id + ": " + why); continue; }
+                    victims.Add(z);
+                }
+                catch (Exception ex) { errs.Add(id + ": " + ex.Message); }
+            }
+            var allowCollapse = McpJson.GetBool(a, "allowCollapse", false);
+            if (!allowCollapse && victims.Count > 0)
+            {
+                string cnote; var falls = PlanCheck.CollapseOf(victims, out cnote);
+                if (falls != null && falls.Count > 0) return ToolOutput.Err("refused: deleting these " + victims.Count + " objects would bring down " + falls.Count + " pieces that rest on them (WearNTear destroys a piece that loses its support), e.g. " + string.Join("; ", falls.Take(5).ToArray()) + ". Delete them as well, or pass allowCollapse:true.");
+            }
             Journal.Begin();
             try
             {
-                foreach (var o in ids)
+                foreach (var z in victims)
                 {
-                    var id = Convert.ToString(o, CultureInfo.InvariantCulture);
                     try
                     {
-                        var z = U.FindZdo(id); if (z == null) { errs.Add(id + ": not found"); continue; }
                         var prefab = Zdos.NameOf(z.GetPrefab());
-                        if (Protected(z, prefab, a, out var why)) { errs.Add(id + ": " + why); continue; }
                         Log(group, "delete", z, prefab, z.GetPosition(), z.GetRotation(), z.GetString("text", ""), z.GetString("tag", ""), z.GetString(PlanHash, ""), z.GetString(ItemHash, ""), z.GetLong("creator", 0L));
                         Destroy(z); done++;
                     }
-                    catch (Exception ex) { errs.Add(id + ": " + ex.Message); }
+                    catch (Exception ex) { errs.Add(U.Id(z) + ": " + ex.Message); }
                 }
             }
             finally { Journal.End(); }

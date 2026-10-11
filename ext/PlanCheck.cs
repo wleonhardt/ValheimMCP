@@ -80,6 +80,32 @@ namespace HubnerExt
 
         static V3 V(Vector3 v) { return new V3(v.x, v.y, v.z); }
 
+        // ------------------------------------------------------------------ removal safety
+        public const int CollapseCheckMax = 800;
+
+        /// <summary>The pieces that would lose their support if these objects were removed. Null: not checked (too many objects, or none of them is a structure). The check runs on the world generator's ground, which does not know terrain edits; it only counts pieces that stand now and fall after, so a wrong ground cannot invent a collapse.</summary>
+        public static List<string> CollapseOf(IList<ZDO> victims, out string note)
+        {
+            note = "";
+            if (victims.Count == 0 || !Zdos.Ready) return null;
+            if (victims.Count > CollapseCheckMax) { note = "collapse check skipped: more than " + CollapseCheckMax + " objects"; return null; }
+            double x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9;
+            foreach (var v in victims) { var p = v.GetPosition(); x0 = Math.Min(x0, p.x); x1 = Math.Max(x1, p.x); z0 = Math.Min(z0, p.z); z1 = Math.Max(z1, p.z); }
+            var removed = new HashSet<string>(victims.Select(v => U.Id(v)));
+            var all = new List<PlacedPiece>(); const double margin = 12;
+            foreach (var z in Zdos.InBox((float)(x0 - margin), (float)(z0 - margin), (float)(x1 + margin), (float)(z1 + margin)))
+            {
+                var name = Zdos.NameOf(z.GetPrefab()); if (name.StartsWith("_", StringComparison.Ordinal)) continue;
+                var geo = Geo(name); if (geo == null || geo.Colliders.Count == 0) continue;
+                var p = z.GetPosition();
+                all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false });
+            }
+            if (all.Count > 4000) { note = "collapse check skipped: " + all.Count + " pieces around"; return null; }
+            if (!all.Any(p => removed.Contains(p.Id) && Material.Of(p.Geo.Material) != null)) return new List<string>();
+            Func<double, double, double> ground = WorldGenerator.instance != null ? (Func<double, double, double>)((x, z) => WorldGenerator.instance.GetHeight((float)x, (float)z)) : null;
+            return RemovalImpact.Collapses(all, removed, ground).Select(p => p.Id + " " + p.Geo.Prefab + " " + U.V(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z))).ToList();
+        }
+
         // ------------------------------------------------------------------ the tool
         static ToolOutput Check(Dictionary<string, object> a)
         {

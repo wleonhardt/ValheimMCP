@@ -309,3 +309,32 @@ public class FireRulesTests
     [Fact] public void ASwitchedOffFireDoesNotBurnWhateverItHolds() { Assert.False(FireRules.Burning(0, 5, false)); Assert.False(FireRules.Burning(0, 0, true)); }
     [Fact] public void FuelToFullRoundsDownBecauseTheGameRefusesAboveMaxMinusOne() { Assert.Equal(7, FireRules.FuelToFull(2.5, 10, false)); Assert.Equal(0, FireRules.FuelToFull(0, 10, true)); }
 }
+
+public class RemovalImpactTests
+{
+    static PieceGeo Post() => new PieceGeo { Prefab = "post", Material = "Wood", Supports = true, ComOffset = new V3(0, 1, 0), Colliders = { new ColliderBox { Centre = new V3(0, 1, 0), Half = new V3(0.2, 1, 0.2), Layer = "piece" } } };
+    static PlacedPiece At(double x, double y, string id) => new PlacedPiece { Id = id, Geo = Post(), Pos = new V3(x, y, 0) };
+    static readonly Func<double, double, double> Flat = (x, z) => 0.0;
+
+    [Fact] public void RemovingTheFootOfATowerBringsDownWhatRestsOnIt()
+    {
+        var all = new List<PlacedPiece> { At(0, -0.05, "a"), At(0, 1.95, "b"), At(0, 3.95, "c") };
+        var falls = RemovalImpact.Collapses(all, new HashSet<string> { "a" }, Flat);
+        Assert.Equal(new[] { "b", "c" }, falls.Select(p => p.Id).OrderBy(i => i).ToArray());
+    }
+    [Fact] public void RemovingTheTopBringsDownNothing()
+    {
+        var all = new List<PlacedPiece> { At(0, -0.05, "a"), At(0, 1.95, "b"), At(0, 3.95, "c") };
+        Assert.Empty(RemovalImpact.Collapses(all, new HashSet<string> { "c" }, Flat));
+    }
+    [Fact] public void ARemovalFarAwayChangesNothing()
+    {
+        var all = new List<PlacedPiece> { At(0, -0.05, "a"), At(0, 1.95, "b"), At(20, -0.05, "x") };
+        Assert.Empty(RemovalImpact.Collapses(all, new HashSet<string> { "x" }, Flat));
+    }
+    [Fact] public void APieceThatAlreadyFallsIsNotBlamedOnTheRemoval()
+    {
+        var all = new List<PlacedPiece> { At(0, 1.95, "floating"), At(5, -0.05, "a") };            // nothing under "floating"
+        Assert.Empty(RemovalImpact.Collapses(all, new HashSet<string> { "a" }, Flat));
+    }
+}

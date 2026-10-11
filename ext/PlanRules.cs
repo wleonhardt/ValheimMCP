@@ -324,6 +324,24 @@ namespace HubnerExt
         }
     }
 
+    /// <summary>What a removal brings down: the pieces that hold now and fall once the removed ones are gone (WearNTear destroys a piece whose support drops under its material minimum).</summary>
+    internal static class RemovalImpact
+    {
+        public static List<PlacedPiece> Collapses(IList<PlacedPiece> all, ISet<string> removedIds, Func<double, double, double> ground)
+        {
+            var before = SupportModel.Run(all, ground, null);
+            var rest = all.Where(p => !removedIds.Contains(p.Id)).ToList();
+            var after = SupportModel.Run(rest, ground, null);
+            var res = new List<PlacedPiece>();
+            foreach (var p in rest)
+            {
+                SupportResult b, a;
+                if (before.TryGetValue(p, out b) && b.Holds && after.TryGetValue(p, out a) && !a.Holds) res.Add(p);
+            }
+            return res;
+        }
+    }
+
     internal sealed class PlanProblem
     {
         public string Rule, Severity, Piece, Detail;
