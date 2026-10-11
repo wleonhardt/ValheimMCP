@@ -1,15 +1,15 @@
 """Python client for the Hubner ValheimMCP extension tools.
 
 Two ways to use it:
-  from hubner import *                     # module functions bound to the default client (URL from HUBNER_URL / mcp.URL, 8731 = sandbox client)
+  from hubner import *                     # module functions bound to the default client (URL from HUBNER_URL / hubner_mcp.URL, 8731 = sandbox client)
   from hubner import Client, sandbox, twin # explicit clients: sandbox (client role, renders, walks) and twin (dedicated server, ZDO writes behind the gate)
   with twin.writes(): twin.plan_apply('castle-x', items)           # opens the server's ALLOW_SERVER_WRITES flag over ssh for the block, big plans run as sliced jobs
 
 Coordinates are world x,z (y up). Tool errors raise RuntimeError with the tool's message.
 """
-import json, os, subprocess, time
-import mcp
-from mcp import save_images
+import json, os, re, shlex, subprocess, time
+import hubner_mcp as mcp
+from hubner_mcp import save_images
 
 SERVER_HOST = os.environ.get('HUBNER_SERVER_SSH', '')                      # user@host of the dedicated server (needed for writes()/ensure_agent), e.g. 'root@10.0.0.5'
 GATE_FLAG = os.environ.get('HUBNER_GATE_FLAG', '')                        # the flag file the server twin checks before any write, e.g. /srv/valheim/BepInEx/hubner-ext/ALLOW_SERVER_WRITES
@@ -18,16 +18,18 @@ JOB_THRESHOLD = int(os.environ.get('HUBNER_JOB_THRESHOLD', '300'))          # pl
 
 
 def ensure_agent(host=None, wait=45):
-    """Make sure `ssh host` works non-interactively. The Bitwarden SSH agent stops answering when its app is closed: open it and wait. Raises with a clear message."""
+    """Make sure `ssh host` works non-interactively. If it does not and HUBNER_SSH_AGENT_OPEN names a command (for example the one that starts your
+    password manager's SSH agent), run it once and keep trying for `wait` seconds. Raises with a clear message."""
     host = host or SERVER_HOST
     if not host: raise RuntimeError('HUBNER_SERVER_SSH is not set (user@host of the dedicated server)')
     t0 = time.time(); opened = False
     while True:
         r = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', host, 'echo ok'], capture_output=True, text=True)
         if r.returncode == 0: return True
-        if not opened and ('agent' in r.stderr or 'Permission denied' in r.stderr or 'publickey' in r.stderr):
-            subprocess.run(['open', '-a', 'Bitwarden'], capture_output=True); opened = True
-        if time.time() - t0 > wait: raise RuntimeError(f'ssh {host} not available after {wait}s (Bitwarden SSH agent?): {r.stderr.strip()[:200]}')
+        opener = os.environ.get('HUBNER_SSH_AGENT_OPEN')
+        if opener and not opened and ('agent' in r.stderr or 'Permission denied' in r.stderr or 'publickey' in r.stderr):
+            subprocess.run(shlex.split(opener), capture_output=True); opened = True
+        if time.time() - t0 > wait: raise RuntimeError(f'ssh {host} not available after {wait}s: {r.stderr.strip()[:200]}')
         time.sleep(3)
 
 
@@ -42,16 +44,16 @@ class server_writes:
     """with server_writes(): ...  opens the server write gate (flag file, hubner.writeFlagMinutes) and ALWAYS removes it again, also on errors and Ctrl-C."""
     def __enter__(self):
         if not GATE_FLAG: raise RuntimeError('HUBNER_GATE_FLAG is not set (path of ALLOW_SERVER_WRITES on the dedicated server)')
-        ensure_agent(); _ssh(f'touch {GATE_FLAG}'); return self
+        ensure_agent(); _ssh(f'touch {shlex.quote(GATE_FLAG)}'); return self
     def __exit__(self, *exc):
         for _ in range(3):
-            try: _ssh(f'rm -f {GATE_FLAG}'); break
+            try: _ssh(f'rm -f {shlex.quote(GATE_FLAG)}'); break
             except Exception: ensure_agent()
         return False
 
 
 class Client:
-    """One MCP endpoint. url=None follows mcp.URL at call time (so the old `with on(url):` pattern keeps working)."""
+    """One MCP endpoint. url=None follows hubner_mcp.URL at call time (so the old `with on(url):` pattern keeps working)."""
     def __init__(self, url=None, token=None, timeout=60, server=False):
         self.url, self.token, self.timeout, self.server = url, token or os.environ.get('HUBNER_TOKEN'), timeout, server
 
@@ -100,6 +102,7 @@ class Client:
     def zdo_set(self, edits, **kw): return self.tool('zdo_set', **self.confirm(dict(edits=edits, **kw)))
     def zdo_delete(self, ids, **kw): return self.tool('zdo_delete', **self.confirm(dict(ids=ids, **kw)))
     def zdo_dump(self, id): return self.tool('zdo_dump', id=id)
+    def container_set(self, edits, **kw): return self.tool('container_set', **self.confirm(dict(edits=edits, **kw)))
     def doors_set(self, state, **kw): return self.tool('doors_set', **self.confirm(dict(state=state, **kw)))
     def undo_group(self, group=None, count=None): return self.tool('undo_group', **self.confirm({'group': group} if group else {'count': count}))
     def journal_groups(self, limit=40): return self.tool('journal_groups', limit=limit)
@@ -137,6 +140,7 @@ class Client:
     def log_tail(self, lines=60, **kw): return self.tool('log_tail', lines=lines, **kw)
     def job_start(self, tool_name, args=None): return self.tool('job_start', tool=tool_name, args=args or {})
     def job_status(self, id=None): return self.tool('job_status', **({'id': id} if id is not None else {}))
+    def job_cancel(self, id): return self.tool('job_cancel', **self.confirm(dict(id=id)))
     def nav_path(self, to_x, to_z, from_x=None, from_z=None, agent='Humanoid'):
         kw = {'toX': to_x, 'toZ': to_z, 'agent': agent}
         if from_x is not None: kw.update(fromX=from_x, fromZ=from_z)
@@ -244,13 +248,14 @@ class Client:
             time.sleep(poll)
 
     def ensure_client(self, timeout=300):
-        """Make sure the sandbox client is in the world: if the MCP endpoint is dead (the game crashed or was closed), run the script named in HUBNER_LAUNCH (default launch-client.sh next to this file) and wait for ready_state."""
+        """Make sure the sandbox client is in the world: if the MCP endpoint is dead (the game crashed or was closed), run the command named in HUBNER_LAUNCH and wait for ready_state."""
         def up():
             try: return bool(self.tool('ready_state').get('player'))
             except Exception: return False
         if up(): return True
-        here = os.path.dirname(os.path.abspath(__file__))
-        r = subprocess.run([os.environ.get('HUBNER_LAUNCH') or os.path.join(here, 'launch-client.sh')], capture_output=True, text=True)
+        launch = os.environ.get('HUBNER_LAUNCH')
+        if not launch: raise RuntimeError('the sandbox client is not up and HUBNER_LAUNCH (a script that starts it) is not set')
+        r = subprocess.run(shlex.split(launch), capture_output=True, text=True)
         if r.returncode: raise RuntimeError('client launch script failed: ' + (r.stdout + r.stderr)[-200:])
         t0 = time.time()
         while time.time() - t0 < timeout:
@@ -318,21 +323,26 @@ class Client:
     def peer(self, x, z, minutes=20, name='py', wait=12): return Client.vpeer(self, x, z, minutes, name, wait)
 
     # ---- terrain paint through World Edit Commands (client role; paint only, never height)
-    _HEIGHT_WORDS = ('level', 'raise', 'lower', 'slope', 'void', 'reset', 'delta', 'min', 'max', 'smooth', 'step', 'to=')
+    _TOKEN = re.compile(r'^[A-Za-z0-9_.,:=*-]+$')
 
     def terrain_paint(self, x, z, paint='dirt', circle=None, rect=None, blockcheck=None, ids=None, ignore=None, chance=None, verify_box=None):
-        """PAINT-ONLY terrain edit through World Edit Commands: refuses any height keyword, handles the devcommands toggle (authenticates when the console says Unauthorized),
-        and checks afterwards that no terrain height changed (terraform_map over verify_box = (x0,z0,x1,z1), default a box around the target). Returns the console text."""
+        """PAINT-ONLY terrain edit through World Edit Commands. The command is built from fixed keys (paint, from, circle, rect, blockcheck, id, ignore, chance);
+        every value must be one plain token (no spaces), so no height keyword can be smuggled in as an extra argument. Afterwards terraform_map over verify_box
+        = (x0,z0,x1,z1), default a box around the target, must show the same number of edited height nodes. Handles the devcommands toggle (authenticates when
+        the console says Unauthorized). Returns the console text."""
         def run(t): return self.text(self.raw('run_command', {'text': t}))
-        parts = [f'terrain paint={paint}', f'from={x},{z}']
-        if circle is not None: parts.append(f'circle={circle}')
-        if rect is not None: parts.append(f'rect={rect}')
-        if blockcheck: parts.append(f'blockcheck={blockcheck}')
-        if ids: parts.append('id=' + (ids if isinstance(ids, str) else ','.join(ids)))
-        if ignore: parts.append('ignore=' + (ignore if isinstance(ignore, str) else ','.join(ignore)))
-        if chance is not None: parts.append(f'chance={chance}')
+        def tok(name, v):
+            v = v if isinstance(v, str) else ','.join(map(str, v)) if isinstance(v, (list, tuple)) else str(v)
+            if not self._TOKEN.match(v): raise ValueError(f'terrain_paint: {name}={v!r} must be a single plain token')
+            return v
+        parts = [f'terrain paint={tok("paint", paint)}', f'from={float(x)},{float(z)}']
+        if circle is not None: parts.append(f'circle={tok("circle", circle)}')
+        if rect is not None: parts.append(f'rect={tok("rect", rect)}')
+        if blockcheck: parts.append(f'blockcheck={tok("blockcheck", blockcheck)}')
+        if ids: parts.append('id=' + tok('ids', ids))
+        if ignore: parts.append('ignore=' + tok('ignore', ignore))
+        if chance is not None: parts.append(f'chance={tok("chance", chance)}')
         cmd = ' '.join(parts)
-        if any(w in cmd.replace('paint=', '') for w in self._HEIGHT_WORDS): raise ValueError('terrain_paint refuses height edits: ' + cmd)
         vb = verify_box or (x - 30, z - 30, x + 30, z + 30)
         before = self.tool('terraform_map', x0=vb[0], z0=vb[1], x1=vb[2], z1=vb[3], cell=4, minDelta=0.01, raster=False)['modifiedHeightNodes']
         out = run(cmd)
@@ -347,7 +357,7 @@ class Client:
 
 
 # ---- the three clients
-default = Client()                                                           # follows mcp.URL (HUBNER_URL); what `from hubner import *` binds to
+default = Client()                                                           # follows hubner_mcp.URL (HUBNER_URL); what `from hubner import *` binds to
 sandbox = Client('http://127.0.0.1:8731/mcp')
 twin = Client(SERVER_URL, server=True)
 
@@ -359,7 +369,7 @@ def tool(_name, /, **args): return default.tool(_name, **args)
 for _n in ('terrain_info', 'terrain_grid', 'terrain_profile', 'surface_probe', 'raycast', 'objects', 'object_info', 'prefab_info', 'prefab_search', 'world_state', 'zone_state',
            'stability_scan', 'walk_check', 'terraform_map', 'snapshot', 'snapshot_diff', 'validate_placement', 'verify_plan', 'find_text', 'portals', 'player_state', 'containers',
            'locations', 'creatures', 'paint_at', 'status', 'selftest', 'zdo_audit', 'log_tail', 'job_start', 'job_status', 'nav_path', 'spawn', 'modify', 'delete', 'undo',
-           'plan_apply', 'plan_remove', 'plans', 'plan_stats', 'zdo_dump', 'undo_group', 'journal_groups', 'journal', 'render', 'room_view', 'render_map', 'render_section',
+           'plan_apply', 'plan_remove', 'container_set', 'job_cancel', 'plans', 'plan_stats', 'zdo_dump', 'undo_group', 'journal_groups', 'journal', 'render', 'room_view', 'render_map', 'render_section',
            'walk', 'ensure_client', 'verify_plan_file', 'validate_plan_file', 'terrain_paint'):
     globals()[_n] = (lambda n: (lambda *a, **k: getattr(default, n)(*a, **k)))(_n)
 del _n

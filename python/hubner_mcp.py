@@ -1,5 +1,6 @@
-"""Tiny MCP-over-HTTP client for the ValheimMCP endpoint. URL is the module default (HUBNER_URL); call(url=...) overrides it per call."""
-import base64, json, os, sys, urllib.request
+"""Tiny MCP-over-HTTP client for the ValheimMCP endpoint. URL is the module default (HUBNER_URL); call(url=...) overrides it per call.
+(Not named mcp.py: that would shadow the PyPI package `mcp`, the official MCP SDK.)"""
+import base64, json, os, sys, urllib.error, urllib.request
 URL = os.environ.get('HUBNER_URL', 'http://127.0.0.1:8731/mcp')   # 8731 = sandbox client; the dedicated-server twin is usually tunnelled to 8741
 
 
@@ -9,7 +10,14 @@ def rpc(method, params=None, id=1, url=None, token=None, timeout=60):
     tok = token or os.environ.get('HUBNER_TOKEN')
     if tok: hdr['Authorization'] = 'Bearer ' + tok                     # server.token in valheimmcp.yml (optional)
     req = urllib.request.Request(url or URL, body, hdr)
-    with urllib.request.urlopen(req, timeout=timeout) as r: return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r: return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # the server explains a refusal in the body ({"ok":false,"error":...}): 401 token, 403 Origin/Host, 413 size, 503 busy
+        try: msg = json.loads(e.read()).get('error') or e.reason
+        except Exception: msg = e.reason
+        finally: e.close()
+        raise RuntimeError(f'HTTP {e.code} from {url or URL}: {msg}') from None
 
 
 def call(name, args=None, url=None, token=None, timeout=60):
@@ -22,7 +30,8 @@ def save_images(result, prefix):
     n = 0
     for c in result.get('content', []):
         if c.get('type') == 'image':
-            open(f'{prefix}{n}.png', 'wb').write(base64.b64decode(c['data'])); n += 1
+            with open(f'{prefix}{n}.png', 'wb') as f: f.write(base64.b64decode(c['data']))
+            n += 1
     return n
 
 

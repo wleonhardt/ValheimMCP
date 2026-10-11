@@ -1,5 +1,5 @@
 """time_set / weather_set / env_release round trip on the sandbox client (visual override only)."""
-import sys, time; sys.path.insert(0, '..')
+import os, sys, time; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from hubner import *
 ok = True
 def check(n, c, x=''):

@@ -2,7 +2,7 @@
 Run with the server twin tunnel up and the sandbox client in the world:  HUBNER_SERVER_SSH=user@host HUBNER_GATE_FLAG=/path/ALLOW_SERVER_WRITES python3 plan_extras_test.py"""
 import sys, os, time; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from hubner import twin, sandbox
-X, Z, Y = -250.0, -380.0, 45.0
+X, Z, Y = (float(os.environ.get(k, d)) for k, d in (('HUBNER_TEST_X', -250.0), ('HUBNER_TEST_Z', -380.0), ('HUBNER_TEST_Y', 45.0)))      # a quiet spot in your world
 items = [{'prefab': 'darkwood_gate', 'x': X, 'y': Y, 'z': Z, 'yaw': 0, 'ctag': 'scratch:gate', 'ints': {'state': 1}, 'key': 'scratch:gate:1'},
          {'prefab': 'piece_chest_blackmetal', 'x': X + 6, 'y': Y, 'z': Z, 'yaw': 0, 'ctag': 'scratch:chest', 'label': 'TEST\nLABEL', 'key': 'scratch:chest:1'},
          {'prefab': 'piece_groundtorch', 'x': X + 3, 'y': Y, 'z': Z + 2, 'yaw': 0, 'ctag': 'scratch:torch', 'key': 'scratch:torch:1'}]
