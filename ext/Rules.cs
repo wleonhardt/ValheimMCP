@@ -218,11 +218,11 @@ namespace HubnerExt
         private static string Clean(string text, int maxLen, bool stripPrefix)
         {
             var s = text ?? "";
-            try { s = s.Normalize(System.Text.NormalizationForm.FormKC); } catch (ArgumentException) { }
+            try { s = s.Normalize(System.Text.NormalizationForm.FormKC); } catch (ArgumentException) { /* allow: text with lone surrogates cannot be normalised; it is used as it is */ }
             var sb = new System.Text.StringBuilder(s.Length);
             foreach (var c in s) sb.Append(c == '\n' || c == '\r' || c == '\t' ? ' ' : (Invisible(c) ? '\0' : c));
             s = sb.ToString().Replace("\0", "");
-            try { s = Tags.Replace(s, ""); s = Urls.Replace(s, ""); } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { s = ""; }
+            try { s = Tags.Replace(s, ""); s = Urls.Replace(s, ""); } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { s = ""; /* allow: a line that makes the cleaner time out is dropped, which is the safe answer */ }
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
             while (stripPrefix && s.Length > 0 && "/\\!#".IndexOf(s[0]) >= 0) s = s.Substring(1).TrimStart();      // a leading / \ ! # would make the game (or a bot) treat the line as a command
             if (s.Length > maxLen)
@@ -244,7 +244,7 @@ namespace HubnerExt
             var s = Clean(text ?? "", 2000, false);       // keep a leading / or !: that is what makes a line a command
             var raw = text ?? "";
             try { if (Manipulation.IsMatch(s) || (raw != s && Manipulation.IsMatch(Fold(raw)))) hints.Add("manipulation"); }
-            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { hints.Add("manipulation"); }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { hints.Add("manipulation"); /* allow: a line built to stall the matcher is flagged */ }
             if (s.Length > 200 || s.StartsWith("{") || s.StartsWith("[") || s.Contains("tool_use") || CountDigits(s) >= 6 && s.Contains("=")) hints.Add("machine");
             if (s.Length >= 8 && Letters(s) < s.Length * 0.4) hints.Add("noise");
             return hints;
