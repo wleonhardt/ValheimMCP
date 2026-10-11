@@ -21,6 +21,19 @@ Everything below compiles and the game-free parts are unit-tested, but none of i
 13. `players` shows no host by default; whispers do not appear in `chat_tail`.
 14. `snapshot` with name `../journal` is refused.
 
+### Adoption backlog from the ClaudeNJevHeim review (queued)
+
+Details and sources: `research/2026-10-clauden-jevheim-review.md`. Do these first, in this order, each as its own commit with tests:
+
+1. Journal identity across restarts (ZDO ids are renumbered on load): boot id plus plan/key, resolve by tag, refuse when ambiguous.
+2. Walker: skip ward-locked and key doors, open only doors on the route, drop `SetLookDir`, user override with a 1.5 s yield.
+3. `tools/call` without an id must not run.
+4. Retire queued calls of a reloaded extension; bind check before unloading the old extension (verify on the game's Mono).
+5. Extend `Plans.Protected`: tombstones, wards, private chests, creator-0 structures of other tools; no-build location circles in `plan_apply`.
+6. Reload ledger for interrupted jobs, typed job outcomes, atomic state-file writes, main-thread stall watchdog, build stamp.
+7. CI lints: silent catch with baseline, tool/docs sync, write-API allowlist.
+8. Chat hardening for `chat_send` / `chat_tail`.
+
 ### Other
 
 - Decide whether `log_tail` (file) and `get_log` (ring buffer) should merge, and whether `Render.Ex` should share the core's camera (see open questions).
