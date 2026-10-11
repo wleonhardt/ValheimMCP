@@ -40,7 +40,7 @@ Implemented with game-free tests (see CHANGELOG 0.6.0 / 0.9.0); none of it has r
 
 - Fix the 78 silent catches over time (`python3 scripts/lint_catch.py --list`), lowering the baseline as you go.
 - From the review but skipped on purpose: the design generator, work fronts and stands, the lease, the Jev judge (see `research/2026-10-clauden-jevheim-review.md`).
-- Plan how to read the rest of the friend's repository (`research/2026-10-clauden-jevheim-inspection-plan.md`).
+- Read the rest of the friend's repository: done 2026-10-11, see `research/2026-10-clauden-jevheim-synthesis.md` (defects in our own code A1-A26, ranked candidates, check-first facts, test infrastructure). Next: verify the check-first facts in the decompile, then Tier 1 of that file.
 
 ### Other
 
