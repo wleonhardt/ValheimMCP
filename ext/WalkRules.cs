@@ -8,10 +8,11 @@ namespace HubnerExt
     internal static class WalkFacts
     {
         public const float CapsuleRadius = 0.49f, CapsuleHeight = 1.85f;     // the player's character controller
-        public const float StepUp = 0.45f;                                    // lips up to this are walked over
+        public const float StepUp = 0.45f;                                    // lips up to this are walked over (an assumption taken from another harness: nobody has measured the controller's real step limit)
         public const float SlideDeg = 38f;                                    // a walker slips on terrain steeper than this unless running and moving
         public const float RunClimbMaxDeg = 60f;                              // measured: banks up to 57.5 degrees are run up; over this it is a wall
-        public const float HopMin = 0.40f, HopMax = 1.2f;                     // a jump clears a top this high (apex 2.21 m, planning clearance 1.2 m on flat ground)
+        public const float HopMin = 0.40f, HopMax = 1.2f;                     // a jump clears a top this high (apex 2.21 m measured on flat ground; 1.2 m is a planning figure with margin, and it falls on a slope)
+        public const float StandReach = 2.0f;                                 // the goal counts as reached only within this height of it: a stand a storey away is not the goal
         public const float StallSeconds = 2.0f;                               // no progress this long = a stall
         public const float ProgressMetres = 0.2f;                             // progress = the route ahead shrank this much and the feet moved this much
         public const int GiveUpStallsAtOneSpot = 4;
@@ -33,10 +34,16 @@ namespace HubnerExt
         /// <param name="slopeDeg">slope of the ground under the feet in degrees</param>
         public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes)
         {
+            return Pick(stallsAtSpot, stallsTotal, riseAhead, slopeDeg, routeGoesUp, inWater, hazardAhead, staminaFrac, running, sideSteps, reroutes, true);
+        }
+
+        /// <param name="regenerates">false while the body cannot get stamina back (an encumbered player regenerates none): resting would wait for ever, so the walk gives up</param>
+        public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates)
+        {
             if (stallsAtSpot >= WalkFacts.GiveUpStallsAtOneSpot || stallsTotal >= WalkFacts.GiveUpStallsTotal) return StallAction.GiveUp;
             if (!inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= WalkFacts.HopMax && staminaFrac > 0.15f) return StallAction.Hop;
             if (routeGoesUp && slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && staminaFrac > WalkFacts.RunMinStamina && !running) return StallAction.RunUp;
-            if (staminaFrac < 0.3f) return StallAction.Rest;
+            if (staminaFrac < 0.3f) return regenerates ? StallAction.Rest : StallAction.GiveUp;
             if (sideSteps < 2) return StallAction.SideStep;
             if (reroutes < 2) return StallAction.Reroute;
             return StallAction.GiveUp;
@@ -97,8 +104,45 @@ namespace HubnerExt
         }
     }
 
+    internal enum ArriveState { Far, Arrived, WrongStorey }
+
+    internal static class Ledge
+    {
+        /// <summary>
+        ///     Height of a top ahead above the ground the feet stand on. A top measured from the feet includes the slope itself: on a plain 30 degree bank the ground one metre ahead is 0.58 m higher,
+        ///     which is not a ledge. <paramref name="slopeRisePerMetre" /> is the ground's rise per metre along the walking direction.
+        /// </summary>
+        public static double Rise(double topAboveFeet, double distanceAhead, double slopeRisePerMetre) { return topAboveFeet - distanceAhead * Math.Max(0, slopeRisePerMetre); }
+
+        /// <summary>Rise per metre along a direction on ground with this normal (positive uphill).</summary>
+        public static double SlopeAlong(double nx, double ny, double nz, double dirX, double dirZ)
+        {
+            if (ny < 1e-6) return double.PositiveInfinity;
+            var len = Math.Sqrt(dirX * dirX + dirZ * dirZ); if (len < 1e-9) return 0;
+            return -(nx * dirX + nz * dirZ) / len / ny;
+        }
+
+        /// <summary>The side to step to when blocked: away from a hazard (a portal trigger, a lit fire) first, then toward the side with more room. +1 left, -1 right.</summary>
+        public static int SideStepSide(double clearLeft, double clearRight, bool hazardLeft, bool hazardRight)
+        {
+            if (hazardLeft != hazardRight) return hazardLeft ? -1 : 1;
+            return clearLeft >= clearRight ? 1 : -1;
+        }
+    }
+
     internal static class Pursuit
     {
+        /// <summary>
+        ///     The goal is reached when the feet are within <paramref name="radius" /> flat of it AND within <paramref name="height" /> of its height. A stand five metres below a bed is not the bed;
+        ///     without the height test the walker arrived "under the floor" and spun in place. A NaN dy (the goal came without a y) or a height of 0 skips the height test.
+        /// </summary>
+        public static ArriveState Arrival(double flat, double dy, double radius, double height)
+        {
+            if (flat >= radius) return ArriveState.Far;
+            if (height <= 0 || double.IsNaN(dy)) return ArriveState.Arrived;
+            return Math.Abs(dy) <= height ? ArriveState.Arrived : ArriveState.WrongStorey;
+        }
+
         /// <summary>How far ahead on the line the body aims: more at speed, never a raw waypoint. clamp(0.9 + 0.3 v, 1.0, 2.4) metres.</summary>
         public static double LookAhead(double speed) { return Math.Max(1.0, Math.Min(2.4, 0.9 + 0.3 * speed)); }
 

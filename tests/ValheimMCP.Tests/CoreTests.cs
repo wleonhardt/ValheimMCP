@@ -788,3 +788,40 @@ public class HusbandryMathTests
     [Fact] public void NeverFedIsHungry() => Assert.True(Husbandry.Hungry(1000 * S, 0, 30));
     [Fact] public void TamenessGrowsAsTheTimerRunsDown() { Assert.Equal(0, Husbandry.TamenessPercent(1800, 1800)); Assert.Equal(50, Husbandry.TamenessPercent(900, 1800)); Assert.Equal(100, Husbandry.TamenessPercent(0, 1800)); Assert.Equal(100, Husbandry.TamenessPercent(-5, 1800)); }
 }
+
+public class WalkerRound2Tests
+{
+    [Fact] public void AStandAStoreyBelowTheGoalIsNotTheGoal()
+    {
+        Assert.Equal(ArriveState.WrongStorey, Pursuit.Arrival(0.9, -5.5, 1.0, 2.0));           // the bed bug: 0.9 m flat, 5.5 m below
+        Assert.Equal(ArriveState.Arrived, Pursuit.Arrival(0.9, -1.0, 1.0, 2.0));
+        Assert.Equal(ArriveState.Far, Pursuit.Arrival(3, 0, 1.0, 2.0));
+    }
+    [Fact] public void ARouteWithoutAYOrAZeroHeightSkipsTheHeightTest()
+    {
+        Assert.Equal(ArriveState.Arrived, Pursuit.Arrival(0.5, double.NaN, 1.0, 2.0));
+        Assert.Equal(ArriveState.Arrived, Pursuit.Arrival(0.5, -9, 1.0, 0));
+    }
+    [Fact] public void APlainBankIsNotALedge()
+    {
+        // 30 degree bank climbing along the walking direction: the ground 1 m ahead is 0.577 m higher, and that is the slope, not a step
+        var slope = Ledge.SlopeAlong(-0.5, 0.866, 0, 1, 0);
+        Assert.Equal(0.577, slope, 2);
+        Assert.Equal(0.0, Ledge.Rise(0.577, 1.0, slope), 2);
+        Assert.Equal(0.6, Ledge.Rise(1.177, 1.0, slope), 2);                                   // a real 0.6 m lip on top of the bank is still seen
+    }
+    [Fact] public void GroundSlopingAwayDoesNotHideALedge() => Assert.Equal(0.5, Ledge.Rise(0.5, 1.0, -0.3), 6);
+    [Fact] public void StepAwayFromAPortalTriggerEvenIfTheOtherSideIsTighter()
+    {
+        Assert.Equal(-1, Ledge.SideStepSide(2.5, 1.0, true, false));
+        Assert.Equal(1, Ledge.SideStepSide(1.0, 2.5, false, true));
+        Assert.Equal(1, Ledge.SideStepSide(2.0, 1.0, false, false));
+        Assert.Equal(-1, Ledge.SideStepSide(1.0, 2.0, false, false));
+    }
+    [Fact] public void AnEncumberedBodyThatCannotRegenerateGivesUpInsteadOfResting()
+    {
+        Assert.Equal(StallAction.Rest, StallLadder.Pick(1, 1, float.NaN, 0, false, false, false, 0.1f, false, 0, 0));
+        Assert.Equal(StallAction.GiveUp, StallLadder.Pick(1, 1, float.NaN, 0, false, false, false, 0.1f, false, 0, 0, false));
+        Assert.Equal(StallAction.SideStep, StallLadder.Pick(1, 1, float.NaN, 0, false, false, false, 0.9f, false, 0, 0, false));
+    }
+}

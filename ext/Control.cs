@@ -27,9 +27,9 @@ namespace HubnerExt
         {
             r.Add("player_state", "The sandbox character: position, grounded, god mode, flying, in water, health, and whether a walk is running.",
                 "{\"type\":\"object\",\"properties\":{}}", State);
-            r.Add("walk_to", "Walk the character with the game's real movement (gravity, collisions, doors opened on the way). points:[[x,z]|[x,y,z],...] waypoints, run:bool, timeout seconds (default 120), arrive radius (default 0.8). Starts the walk and returns at once: poll walk_status. A walk fails with the blocking object when the character makes no progress for stuckSeconds (default 4) after jump attempts.",
-                "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"run\":{\"type\":\"boolean\"},\"timeout\":{\"type\":\"number\"},\"arrive\":{\"type\":\"number\"},\"stuckSeconds\":{\"type\":\"number\"},\"nav\":{\"type\":\"boolean\"},\"agent\":{\"type\":\"string\"},\"openDoors\":{\"type\":\"boolean\"},\"jump\":{\"type\":\"boolean\"}},\"required\":[\"points\"]}", WalkTo, true);
-            r.Add("walk_status", "State of the current/last walk: running, waypoint index, position, result (arrived | blocked | timeout | stopped), blocking object, trace of positions (every 1 s with grounded flag).",
+            r.Add("walk_to", "Walk the character with the game's real movement (gravity, collisions, doors opened on the way). points:[[x,z]|[x,y,z],...] waypoints, run:bool, timeout seconds (default 120), arrive radius (default 0.8). Starts the walk and returns at once: poll walk_status. The last point counts as reached only within arriveHeight (default 2 m, 0 ignores it) of its y when you gave one: a stand a storey away ends the walk as wrong_storey. A walk fails with the blocking object when the character makes no progress for stuckSeconds (default 4) after jump attempts; an overloaded character that cannot regenerate stamina ends as blocked (encumbered).",
+                "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"run\":{\"type\":\"boolean\"},\"timeout\":{\"type\":\"number\"},\"arrive\":{\"type\":\"number\"},\"arriveHeight\":{\"type\":\"number\"},\"stuckSeconds\":{\"type\":\"number\"},\"nav\":{\"type\":\"boolean\"},\"agent\":{\"type\":\"string\"},\"openDoors\":{\"type\":\"boolean\"},\"jump\":{\"type\":\"boolean\"}},\"required\":[\"points\"]}", WalkTo, true);
+            r.Add("walk_status", "State of the current/last walk: running, waypoint index, position, result (arrived | wrong_storey | teleported | blocked | timeout | stopped), blocking object, trace of positions (every 1 s with grounded flag).",
                 "{\"type\":\"object\",\"properties\":{\"trace\":{\"type\":\"boolean\"}}}", WalkStatus);
             r.Add("walk_stop", "Cancel the running walk.", "{\"type\":\"object\",\"properties\":{}}", WalkStop, true);
             r.Add("menu_join", "Main-menu only: pick a character profile and join a dedicated server by host:port. {profile, host, port}. Uses the game's own FejdStartup join path, so no clicks are needed. The server password is never a tool argument (it would end up in the model's context): set the environment variable HUBNER_AUTOJOIN_PASSWORD before starting the game. Also runs at startup when the game is launched with -hubner-autojoin host:port,profile.",
@@ -157,7 +157,7 @@ namespace HubnerExt
             }
             try { if (U.IsSandbox(Player.m_localPlayer)) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
             try { if (FDebugFly != null) FDebugFly.SetValue(Player.m_localPlayer, false); } catch (Exception ex) { U.Once("m_debugFly.set", ex); }
-            _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
+            _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
         }
 
@@ -292,13 +292,14 @@ namespace HubnerExt
             int _doorPresses, _doorOpens; string _lockedDoor = "";
             readonly Dictionary<int, float> _pressedAt = new Dictionary<int, float>(); readonly Dictionary<int, float> _pending = new Dictionary<int, float>(); float _nextDoorLook;
             float _yielded;
+            public float ArriveHeight = WalkFacts.StandReach; float _wrongStoreySince = -1f;
 
             public void Start(List<Vector3> pts, bool run, float timeout, float arrive, float stuck, bool doors)
             {
                 _pts = pts; _i = 0; _userRun = run; Run = run; _timeout = timeout; _arrive = arrive; _stuckSecs = stuck; _doors = doors;
                 _t0 = Time.time; _result = "walking"; _blocker = ""; _doorPresses = 0; _doorOpens = 0; _lockedDoor = ""; _trace.Clear(); _nextTrace = 0f;
                 _stallsTotal = 0; _spotStalls = 0; _sideSteps = 0; _reroutes = 0; _lastStall = ""; _strafeUntil = 0; _restUntil = 0; _runUntil = 0; _yielded = 0;
-                _pressedAt.Clear(); _pending.Clear();
+                _pressedAt.Clear(); _pending.Clear(); _wrongStoreySince = -1f;
                 var p = Player.m_localPlayer; _lastProg = p.transform.position; _prevPos = _lastProg; _spotPos = _lastProg; _lastProgT = Time.time; _lastTick = Time.time; Active = true;
                 BuildLine(_lastProg);
             }
@@ -348,7 +349,17 @@ namespace HubnerExt
 
                 var tgt = _pts[_i];
                 var flat = new Vector3(tgt.x - pos.x, 0f, tgt.z - pos.z);
-                if (flat.magnitude < _arrive)
+                var last = _i >= _pts.Count - 1;
+                var arrival = Pursuit.Arrival(flat.magnitude, last ? tgt.y - pos.y : double.NaN, _arrive, ArriveHeight);          // the height of the goal counts only at the end, and only when the caller gave a y
+                if (arrival == ArriveState.WrongStorey)
+                {
+                    MoveDir = Vector3.zero;
+                    if (_wrongStoreySince < 0f) _wrongStoreySince = now;
+                    else if (now - _wrongStoreySince > 3f) { _blocker = "the feet are within " + U.N(Math.Round(flat.magnitude, 2)) + " m of the goal but " + U.N(Math.Round(Math.Abs(tgt.y - pos.y), 1)) + " m " + (tgt.y > pos.y ? "below" : "above") + " it: another storey, or the goal's y is wrong (arriveHeight:0 ignores the height)"; Stop("wrong_storey"); }
+                    return;
+                }
+                _wrongStoreySince = -1f;
+                if (arrival == ArriveState.Arrived)
                 {
                     _i++;
                     if (_i >= _pts.Count) { Stop("arrived"); return; }
@@ -390,7 +401,7 @@ namespace HubnerExt
                 if ((pos - _spotPos).magnitude > WalkFacts.SameSpotRadius) { _spotPos = pos; _spotStalls = 0; }
                 _spotStalls++; _stallsTotal++;
                 var rise = NoJump ? float.NaN : RiseAhead(p, dir);
-                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes);
+                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes, !p.IsEncumbered());
                 _lastStall = act + " (rise " + (float.IsNaN(rise) ? "none" : U.N(Math.Round(rise, 2))) + ", slope " + U.N(Math.Round(slope)) + ")";
                 _lastProgT = now;
                 switch (act)
@@ -404,7 +415,7 @@ namespace HubnerExt
                             var o2 = pos + Vector3.up * 1.0f; var perp = Vector3.Cross(Vector3.up, dir); RaycastHit hh;
                             var cl = Physics.Raycast(o2, (dir + perp * 0.6f).normalized, out hh, 2.5f, ~0, QueryTriggerInteraction.Ignore) ? hh.distance : 2.5f;
                             var cr = Physics.Raycast(o2, (dir - perp * 0.6f).normalized, out hh, 2.5f, ~0, QueryTriggerInteraction.Ignore) ? hh.distance : 2.5f;
-                            _strafeSide = cl >= cr ? 1f : -1f; _strafeUntil = now + 0.6f; break;
+                            _strafeSide = Ledge.SideStepSide(cl, cr, HazardAhead(pos, (dir + perp).normalized), HazardAhead(pos, (dir - perp).normalized)); _strafeUntil = now + 0.6f; break;
                         }
                     case StallAction.Reroute:
                         {
@@ -414,21 +425,29 @@ namespace HubnerExt
                             _pts = new List<Vector3>(leg); _i = 0; BuildLine(pos); _lastProg = pos; break;
                         }
                     default:
-                        _blocker = !string.IsNullOrEmpty(_lockedDoor) ? "locked door: " + _lockedDoor + " (ward or missing key); " + Blocker(p, dir) : Blocker(p, dir);
+                        _blocker = p.IsEncumbered() && stam < 0.3f ? "encumbered with no stamina: an overloaded character regenerates none and cannot move (drop weight)" : !string.IsNullOrEmpty(_lockedDoor) ? "locked door: " + _lockedDoor + " (ward or missing key); " + Blocker(p, dir) : Blocker(p, dir);
                         Stop("blocked"); break;
                 }
             }
 
-            /// <summary>Height of the top just ahead of the feet (a ledge, a log, a step), measured with rays down from 1.5 m over the feet; NaN when there is none.</summary>
+            static int _bodyMask;
+
+            /// <summary>
+            ///     Height of the top just ahead of the feet (a ledge, a log, a step) above the ground they stand on, measured with rays down from 1.5 m over the feet; NaN when there is none.
+            ///     The slope of the ground is taken off (a plain bank is not a ledge) and only layers the body collides with count: not saplings, crops, dropped items or animals.
+            /// </summary>
             static float RiseAhead(Player p, Vector3 dir)
             {
+                if (_bodyMask == 0) _bodyMask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain", "vehicle");
                 var feet = p.transform.position; float best = float.NaN;
+                var n = p.GetLastGroundNormal(); var slope = (float)Ledge.SlopeAlong(n.x, n.y, n.z, dir.x, dir.z);
+                if (float.IsInfinity(slope)) slope = 0f;
                 foreach (var d in new[] { 0.4f, 0.7f, 1.0f })
                 {
                     var o = feet + dir * d + Vector3.up * 1.5f; RaycastHit h;
-                    if (!Physics.Raycast(o, Vector3.down, out h, 1.6f, ~0, QueryTriggerInteraction.Ignore)) continue;
+                    if (!Physics.Raycast(o, Vector3.down, out h, 1.6f + Mathf.Max(0f, slope) * d, _bodyMask, QueryTriggerInteraction.Ignore)) continue;
                     if (h.collider.GetComponentInParent<Player>() != null) continue;
-                    var rise = h.point.y - feet.y;
+                    var rise = (float)Ledge.Rise(h.point.y - feet.y, d, slope);
                     if (rise > 0.05f && (float.IsNaN(best) || rise > best)) best = rise;
                 }
                 return best;
