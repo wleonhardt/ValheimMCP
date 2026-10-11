@@ -30,8 +30,15 @@ jobs:
 
       - name: Python client compiles and its offline tests pass
         run: |
-          python3 -m compileall -q python
+          python3 -m compileall -q python scripts
           python3 -m unittest discover -s python/tests
+
+      - name: Lints (silent catch against its baseline, write APIs only in their files, tool catalogue current)
+        run: |
+          python3 -m unittest discover -s scripts/tests
+          python3 scripts/lint_catch.py
+          python3 scripts/lint_writes.py
+          python3 scripts/lint_tools.py
 
       - name: Project and config files parse
         run: |

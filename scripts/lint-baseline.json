@@ -1,0 +1,21 @@
+{
+ "ext/Audit.cs": 9,
+ "ext/ClientTools.cs": 4,
+ "ext/Common.cs": 6,
+ "ext/Control.cs": 8,
+ "ext/Env.cs": 6,
+ "ext/FlatJson.cs": 1,
+ "ext/Geo.cs": 4,
+ "ext/Insight.cs": 5,
+ "ext/Plans.cs": 10,
+ "ext/Shared.cs": 2,
+ "ext/VirtualPeers.cs": 3,
+ "ext/WorldEvents.cs": 1,
+ "src/ValheimMCP/BindCheck.cs": 3,
+ "src/ValheimMCP/BuildStamp.cs": 1,
+ "src/ValheimMCP/HttpServer.cs": 4,
+ "src/ValheimMCP/LogWatch.cs": 1,
+ "src/ValheimMCP/MainThreadDispatcher.cs": 3,
+ "src/ValheimMCP/McpServer.cs": 6,
+ "src/ValheimMCP/SafeRegex.cs": 1
+}
