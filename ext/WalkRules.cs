@@ -190,13 +190,18 @@ namespace HubnerExt
 
     internal static class RunRules
     {
-        /// <summary>Run when the end is far and stamina is fresh, hold it down to 8 m left, drop it under half stamina; always run a steep bank the route climbs.</summary>
-        public static bool WantRun(bool wasRunning, double metresLeft, double staminaFrac, double slopeDeg, bool routeGoesUp, bool userAskedRun)
+        /// <summary>
+        ///     The walker's run decision. Always run a steep bank the route climbs; never run under half stamina (it comes back by walking); run when the caller asked for it; with autoRun also when
+        ///     the end is far (start above 20 m, hold it down to 8 m left).
+        /// </summary>
+        public static bool WantRun(bool wasRunning, double metresLeft, double staminaFrac, double slopeDeg, bool routeGoesUp, bool userAskedRun, bool autoRun = true)
         {
             if (slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && routeGoesUp && staminaFrac > WalkFacts.RunMinStamina) return true;
             if (staminaFrac < WalkFacts.RunMinStamina) return false;
+            if (userAskedRun) return true;
+            if (!autoRun) return false;
             if (wasRunning) return metresLeft > 8;
-            return userAskedRun || metresLeft > WalkFacts.RunStartMetres;
+            return metresLeft > WalkFacts.RunStartMetres;
         }
     }
 }

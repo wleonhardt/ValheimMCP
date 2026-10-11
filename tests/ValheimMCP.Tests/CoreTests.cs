@@ -528,7 +528,8 @@ public class WalkGuardTests
     [Fact]
     public void RunDecisions()
     {
-        Assert.True(RunRules.WantRun(false, 30, 0.9, 0, false, false));          // far and fresh
+        Assert.True(RunRules.WantRun(false, 30, 0.9, 0, false, false));          // far and fresh (auto-run)
+        Assert.False(RunRules.WantRun(false, 30, 0.9, 0, false, false, false));  // ... but only when auto-run is on
         Assert.False(RunRules.WantRun(false, 10, 0.9, 0, false, false));         // not far enough to start
         Assert.True(RunRules.WantRun(true, 10, 0.9, 0, false, false));           // hold it down to 8 m
         Assert.False(RunRules.WantRun(true, 6, 0.9, 0, false, false));
@@ -536,6 +537,8 @@ public class WalkGuardTests
         Assert.True(RunRules.WantRun(false, 3, 0.9, 50, true, false));           // a steep bank the route climbs is always run
         Assert.False(RunRules.WantRun(false, 3, 0.4, 50, true, false));          // ... unless there is no stamina
         Assert.True(RunRules.WantRun(false, 3, 0.9, 0, false, true));            // the caller asked for run
+        Assert.True(RunRules.WantRun(true, 3, 0.9, 0, false, true, false));      // ... and it stays on to the end
+        Assert.False(RunRules.WantRun(true, 30, 0.4, 0, false, true));           // ... unless the stamina is under half
     }
 
     [Fact] public void CapsuleNumbersAreThePlayersNotAGuess() { Assert.Equal(0.49f, WalkFacts.CapsuleRadius); Assert.Equal(1.85f, WalkFacts.CapsuleHeight); Assert.Equal(0.45f, WalkFacts.StepUp); Assert.Equal(38f, WalkFacts.SlideDeg); }

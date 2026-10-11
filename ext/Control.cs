@@ -27,8 +27,8 @@ namespace HubnerExt
         {
             r.Add("player_state", "The sandbox character: position, grounded, god mode, flying, in water, health, and whether a walk is running.",
                 "{\"type\":\"object\",\"properties\":{}}", State);
-            r.Add("walk_to", "Walk the character with the game's real movement (gravity, collisions, doors opened on the way). points:[[x,z]|[x,y,z],...] waypoints, run:bool, timeout seconds (default 120), arrive radius (default 0.8). Starts the walk and returns at once: poll walk_status. The last point counts as reached only within arriveHeight (default 2 m, 0 ignores it) of its y when you gave one: a stand a storey away ends the walk as wrong_storey. A walk fails with the blocking object when the character makes no progress for stuckSeconds (default 4) after jump attempts; an overloaded character that cannot regenerate stamina ends as blocked (encumbered).",
-                "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"run\":{\"type\":\"boolean\"},\"timeout\":{\"type\":\"number\"},\"arrive\":{\"type\":\"number\"},\"arriveHeight\":{\"type\":\"number\"},\"stuckSeconds\":{\"type\":\"number\"},\"nav\":{\"type\":\"boolean\"},\"agent\":{\"type\":\"string\"},\"openDoors\":{\"type\":\"boolean\"},\"jump\":{\"type\":\"boolean\"}},\"required\":[\"points\"]}", WalkTo, true);
+            r.Add("walk_to", "Walk the character with the game's real movement (gravity, collisions, doors opened on the way). points:[[x,z]|[x,y,z],...] waypoints, run:bool, timeout seconds (default 120), arrive radius (default 0.8). Starts the walk and returns at once: poll walk_status. autoRun:true also runs when the end is more than 20 m away (otherwise it runs only when run:true or on a steep bank, and not under half stamina). A portal trigger on the route stops the walk (blocked) unless throughPortals:true. A re-route after a stall keeps the remaining waypoints and the agent you chose. The last point counts as reached only within arriveHeight (default 2 m, 0 ignores it) of its y when you gave one: a stand a storey away ends the walk as wrong_storey. A walk fails with the blocking object when the character makes no progress for stuckSeconds (default 4) after jump attempts; an overloaded character that cannot regenerate stamina ends as blocked (encumbered).",
+                "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"run\":{\"type\":\"boolean\"},\"timeout\":{\"type\":\"number\"},\"arrive\":{\"type\":\"number\"},\"arriveHeight\":{\"type\":\"number\"},\"stuckSeconds\":{\"type\":\"number\"},\"nav\":{\"type\":\"boolean\"},\"agent\":{\"type\":\"string\"},\"openDoors\":{\"type\":\"boolean\"},\"jump\":{\"type\":\"boolean\"},\"autoRun\":{\"type\":\"boolean\"},\"throughPortals\":{\"type\":\"boolean\"}},\"required\":[\"points\"]}", WalkTo, true);
             r.Add("walk_status", "State of the current/last walk: running, waypoint index, position, result (arrived | wrong_storey | teleported | blocked | timeout | stopped), blocking object, trace of positions (every 1 s with grounded flag).",
                 "{\"type\":\"object\",\"properties\":{\"trace\":{\"type\":\"boolean\"}}}", WalkStatus);
             r.Add("walk_stop", "Cancel the running walk.", "{\"type\":\"object\",\"properties\":{}}", WalkStop, true);
@@ -149,6 +149,7 @@ namespace HubnerExt
                 list.Add(v);
             }
             if (list.Count == 0) return ToolOutput.Err("no valid points");
+            var userWps = new List<Vector3>(list);                                   // the caller's own waypoints, kept for a re-route
             var goalHasY = !float.IsNaN(list[list.Count - 1].y);                     // whether the caller gave the goal a height: a navmesh route has a y everywhere, which must not turn into 'the caller asked for this storey'
             if (McpJson.GetBool(a, "nav", false))                                   // replace the straight legs by the game's own navmesh route
             {
@@ -162,8 +163,8 @@ namespace HubnerExt
                 list = nav;
             }
             try { if (U.IsSandbox(Player.m_localPlayer)) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
-            try { if (FDebugFly != null) FDebugFly.SetValue(Player.m_localPlayer, false); } catch (Exception ex) { U.Once("m_debugFly.set", ex); }
-            _walker.GoalHasY = goalHasY; _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
+            try { if (Flying(Player.m_localPlayer)) Player.m_localPlayer.ToggleDebugFly(); } catch (Exception ex) { U.Once("ToggleDebugFly", ex); }          // ToggleDebugFly sets the field AND the ZDO value other clients read
+            _walker.ThroughPortals = McpJson.GetBool(a, "throughPortals", false); _walker.GoalHasY = goalHasY; _walker.AutoRun = McpJson.GetBool(a, "autoRun", false); _walker.Agent = McpJson.GetStr(a, "agent") ?? "Humanoid"; _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true), userWps);
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
         }
 
@@ -298,10 +299,11 @@ namespace HubnerExt
             int _doorPresses, _doorOpens; string _lockedDoor = "";
             readonly Dictionary<int, float> _pressedAt = new Dictionary<int, float>(); readonly Dictionary<int, float> _pending = new Dictionary<int, float>(); float _nextDoorLook;
             float _yielded, _stallSecs = WalkFacts.StallSeconds;
-            public float ArriveHeight = WalkFacts.StandReach; public bool GoalHasY = true; float _wrongStoreySince = -1f;
+            public float ArriveHeight = WalkFacts.StandReach; public bool GoalHasY = true, AutoRun, ThroughPortals; float _nextPortalLook; public string Agent = "Humanoid"; List<Vector3> _userWps = new List<Vector3>(); int _wpDone; float _wrongStoreySince = -1f;
 
-            public void Start(List<Vector3> pts, bool run, float timeout, float arrive, float stuck, bool doors)
+            public void Start(List<Vector3> pts, bool run, float timeout, float arrive, float stuck, bool doors, List<Vector3> userWaypoints = null)
             {
+                _userWps = userWaypoints ?? new List<Vector3>(pts); _wpDone = 0;
                 _pts = pts; _i = 0; _userRun = run; Run = run; _timeout = timeout; _arrive = arrive; _stuckSecs = stuck; _doors = doors;
                 _t0 = Time.time; _result = "walking"; _blocker = ""; _doorPresses = 0; _doorOpens = 0; _lockedDoor = ""; _trace.Clear(); _nextTrace = 0f;
                 _stallsTotal = 0; _spotStalls = 0; _sideSteps = 0; _reroutes = 0; _lastStall = ""; _strafeUntil = 0; _restUntil = 0; _runUntil = 0; _yielded = 0;
@@ -368,6 +370,7 @@ namespace HubnerExt
                 if (arrival == ArriveState.Arrived)
                 {
                     _i++;
+                    while (_wpDone < _userWps.Count && Mathf.Sqrt((tgt.x - _userWps[_wpDone].x) * (tgt.x - _userWps[_wpDone].x) + (tgt.z - _userWps[_wpDone].z) * (tgt.z - _userWps[_wpDone].z)) < 3f) _wpDone++;          // the caller's waypoint just reached (a nav leg ends within 2.5 m of it)
                     if (_i >= _pts.Count) { Stop("arrived"); return; }
                     _lastProg = pos; _lastProgT = now; return;
                 }
@@ -385,8 +388,14 @@ namespace HubnerExt
                 var stam = p.GetMaxStamina() > 0.01f ? p.GetStamina() / p.GetMaxStamina() : 1f;
                 var slope = Vector3.Angle(p.GetLastGroundNormal(), Vector3.up);
                 var goesUp = RouteGoesUp(pos, new Vector3((float)ax, pos.y, (float)az));
-                var bank = goesUp && slope > WalkFacts.SlideDeg && slope <= WalkFacts.RunClimbMaxDeg && stam > WalkFacts.RunMinStamina;
-                Run = (_userRun && stam > 0.1f) || bank || now < _runUntil;
+                Run = now < _runUntil || RunRules.WantRun(Run, Remaining(), stam, slope, goesUp, _userRun, AutoRun);          // the same rule the tests cover
+
+                if (!ThroughPortals && now >= _nextPortalLook)
+                {
+                    _nextPortalLook = now + 0.1f;
+                    var tw = PortalAhead(pos, dir);
+                    if (tw != null) { _blocker = "a portal at " + U.V(tw.transform.position) + " is on the route: walking into it teleports the character (throughPortals:true to walk through on purpose)"; Stop("blocked"); return; }
+                }
 
                 if (_doors) DoorTick(p, pos, dir, now);
 
@@ -426,9 +435,15 @@ namespace HubnerExt
                     case StallAction.Reroute:
                         {
                             _reroutes++;
-                            string err; var leg = NavLeg(pos, _pts[_pts.Count - 1], "Humanoid", out err);
-                            if (leg == null) { _blocker = "re-route failed: " + err + "; " + Blocker(p, dir); Stop("blocked"); return; }
-                            _pts = new List<Vector3>(leg); _i = 0; BuildLine(pos); _lastProg = pos; break;
+                            // from here through every waypoint the caller gave that is still ahead (not straight to the last one), with the agent the caller chose
+                            var route = new List<Vector3>(); var from = pos; string err = null;
+                            for (var w = Math.Min(_wpDone, _userWps.Count - 1); w < _userWps.Count && err == null; w++)
+                            {
+                                var leg = NavLeg(from, _userWps[w], Agent, out err);
+                                if (leg != null) { route.AddRange(leg); from = _userWps[w]; }
+                            }
+                            if (err != null || route.Count == 0) { _blocker = "re-route failed: " + err + "; " + Blocker(p, dir); Stop("blocked"); return; }
+                            _pts = route; _i = 0; BuildLine(pos); _lastProg = pos; break;
                         }
                     default:
                         _blocker = p.IsEncumbered() && stam < 0.3f ? "encumbered with no stamina: an overloaded character regenerates none and cannot move (drop weight)" : !string.IsNullOrEmpty(_lockedDoor) ? "locked door: " + _lockedDoor + " (ward or missing key); " + Blocker(p, dir) : Blocker(p, dir);
@@ -457,6 +472,19 @@ namespace HubnerExt
                     if (rise > 0.05f && (float.IsNaN(best) || rise > best)) best = rise;
                 }
                 return best;
+            }
+
+            /// <summary>A portal's trigger just ahead (2.5 m) that the character is not yet inside: stepping into it teleports at once.</summary>
+            static TeleportWorld PortalAhead(Vector3 pos, Vector3 dir)
+            {
+                foreach (var c in Physics.OverlapSphere(pos + dir * 1.8f + Vector3.up * 0.5f, 1.3f, ~0, QueryTriggerInteraction.Collide))
+                {
+                    if (!c.isTrigger) continue;
+                    var tw = c.GetComponentInParent<TeleportWorld>(); if (tw == null) continue;
+                    var to = tw.transform.position - pos; to.y = 0f;
+                    if (to.sqrMagnitude > 0.01f && Vector3.Dot(dir, to.normalized) > 0.3f) return tw;
+                }
+                return null;
             }
 
             /// <summary>A burning fire or a portal trigger within a metre ahead: never jump toward them.</summary>
