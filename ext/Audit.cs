@@ -147,7 +147,7 @@ namespace HubnerExt
             return U.Json("{\"last\":" + last + ",\"count\":" + rows.Count + ",\"messages\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
-        static void SceneTick() { try { RunJobs(); } catch (Exception ex) { U.Once("SceneTick", ex); } }
+        static void SceneTick() { try { RunJobs(); } catch (Exception ex) { U.Once("SceneTick", ex); } WorldEvents.Tick(); }
 
         // ------------------------------------------------------------------ sector helpers
         static List<ZDO>[] Lists()

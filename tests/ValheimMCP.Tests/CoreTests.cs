@@ -578,3 +578,78 @@ public class LocationRulesTests
     [Fact] public void AnInteriorWidensTheRadius() { Assert.Equal(80, LocationRules.MaxRadius(true, 40, 80)); Assert.Equal(40, LocationRules.MaxRadius(false, 40, 80)); }
     [Fact] public void CountByCreator() { var d = OwnershipSummary.CountByCreator(new long[] { 0, 5, 5, 0, 0 }); Assert.Equal(3, d[0]); Assert.Equal(2, d[5]); }
 }
+
+public class StructureDetectorTests
+{
+    static PieceSeen P(double t, long session, double x, double z, string prefab = "woodwall") => new PieceSeen { T = t, Session = session, X = x, Z = z, Prefab = prefab };
+
+    [Fact]
+    public void PiecesOfOneCreatorCloseTogetherBecomeOneStructureOnceQuiet()
+    {
+        var d = new StructureDetector();
+        d.Add(P(0, 7, 0, 0)); d.Add(P(1, 7, 2, 0)); d.Add(P(2, 7, 4, 0, "woodfloor")); d.Add(P(3, 7, 6, 0));
+        Assert.Empty(d.Flush(10));                                      // still being built
+        var ev = d.Flush(30);
+        var e = Assert.Single(ev);
+        Assert.Equal(4, e.Count); Assert.Equal(7, e.Session); Assert.Equal(3.0, e.CentreX); Assert.Equal("woodwall", e.Top[0].Key); Assert.Equal(3, e.Top[0].Value);
+        Assert.Empty(d.Flush(60));                                      // reported once
+    }
+
+    [Fact] public void LoadedFromTheSaveIsNeverAnEvent() { var d = new StructureDetector(); for (var i = 0; i < 20; i++) d.Add(P(i, 1, i, 0)); Assert.Empty(d.Flush(1000)); Assert.Equal(0, d.OpenClusters); }
+
+    [Fact]
+    public void TwoCreatorsAreTwoStructures()
+    {
+        var d = new StructureDetector();
+        for (var i = 0; i < 3; i++) { d.Add(P(i, 7, i, 0)); d.Add(P(i, 8, i + 1, 0)); }
+        var ev = d.Flush(100);
+        Assert.Equal(2, ev.Count); Assert.Equal(new long[] { 7, 8 }, ev.Select(e => e.Session).OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
+    public void FarApartPiecesOfOneCreatorAreSeparate()
+    {
+        var d = new StructureDetector();
+        for (var i = 0; i < 3; i++) { d.Add(P(i, 7, i, 0)); d.Add(P(i, 7, 500 + i, 0)); }
+        Assert.Equal(2, d.Flush(100).Count);
+    }
+
+    [Fact] public void TooFewPiecesAreDropped() { var d = new StructureDetector(); d.Add(P(0, 7, 0, 0)); d.Add(P(1, 7, 1, 0)); Assert.Empty(d.Flush(100)); Assert.Equal(0, d.OpenClusters); }
+
+    [Fact]
+    public void ABurstWithinTwoSecondsIsMarkedAsSpawnedAtOnce()
+    {
+        var d = new StructureDetector();
+        for (var i = 0; i < 50; i++) d.Add(P(10 + i * 0.01, 7, i * 0.5, 0));
+        Assert.True(d.Flush(100)[0].SpawnedAtOnce);
+        var slow = new StructureDetector();
+        for (var i = 0; i < 5; i++) slow.Add(P(i * 10, 7, i, 0));
+        Assert.False(slow.Flush(200)[0].SpawnedAtOnce);
+    }
+}
+
+public class EventLogTests
+{
+    [Fact]
+    public void QueryReturnsTheNewestAfterTheCursor()
+    {
+        var log = new EventLog(100);
+        for (var i = 0; i < 10; i++) log.Add(i, i % 2 == 0 ? "a" : "b", "{}");
+        Assert.Equal(10, log.Last);
+        Assert.Equal(new long[] { 9, 10 }, log.Query(7, 2, null).Select(r => r.Seq).ToArray());
+        Assert.Equal(5, log.Query(0, 100, "a").Count);
+        Assert.Empty(log.Query(10, 5, null));
+    }
+
+    [Fact] public void TheLogIsBounded() { var log = new EventLog(3); for (var i = 0; i < 10; i++) log.Add(i, "k", "{}"); Assert.Equal(new long[] { 8, 9, 10 }, log.Query(0, 100, null).Select(r => r.Seq).ToArray()); }
+}
+
+public class PresenceTests
+{
+    [Fact]
+    public void ArrivedAndLeft()
+    {
+        Presence.Diff(new[] { "a", "b" }, new[] { "b", "c" }, out var arrived, out var left);
+        Assert.Equal(new[] { "c" }, arrived); Assert.Equal(new[] { "a" }, left);
+    }
+}

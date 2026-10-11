@@ -19,6 +19,7 @@ namespace HubnerExt
         {
             Audit.Uninstall();
             VirtualPeers.Uninstall();
+            WorldEvents.Uninstall();
 #if !SERVER
             Control.Uninstall();
 #endif
@@ -32,6 +33,7 @@ namespace HubnerExt
             InsightShared.Register(r);
             VirtualPeers.Register(r);
             Neighbours.Register(r);
+            WorldEvents.Register(r);
             Journal.Load();
             ClientTools.Register(r);                                    // on the server only the whitelisted physics/read tools register (see Reg.cs)
 #if !SERVER
