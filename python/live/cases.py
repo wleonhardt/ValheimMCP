@@ -187,6 +187,16 @@ def missing_for_case(ctx):
     ctx.check('it is not complete without stock', m['complete'] is False)
 
 
+def stations_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('stations', x=x, z=z, radius=150)
+    if not r['stations']: raise Skip(f'no crafting station within 150 m of {x},{z}')
+    for s in r['stations']:
+        ctx.check(f"{s['prefab']}: level = 1 + extensions", s['level'] == 1 + len(s['extensions']), s)
+        ctx.check(f"{s['prefab']}: every extension is inside its own range", all(e['distance'] < 12 for e in s['extensions']), s['extensions'])
+        ctx.check(f"{s['prefab']}: the build range is at least the base range", s['buildRange'] >= 10, s['buildRange'])
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -265,6 +275,7 @@ CASES = [
     Case('world-clock', 'world_clock agrees with itself and with the client', world_clock),
     Case('recipes', 'recipe_info and item_info agree about Bronze', recipes_case),
     Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
+    Case('stations', 'stations: level is 1 + the extensions that count', stations_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

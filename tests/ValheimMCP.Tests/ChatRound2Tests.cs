@@ -320,3 +320,43 @@ public class BillTests
         Assert.Equal(new[] { 20, 12, 8 }, cmp[0].Value);
     }
 }
+
+public class StationMathTests
+{
+    static StationFact St(string id, double x, double z, string name = "$piece_workbench") => new StationFact { Id = id, Name = name, Prefab = "workbench", X = x, Z = z, RangeBuild = 20, ExtraRange = 4 };
+    static ExtensionFact Ex(string id, double x, double z, string prefab = "chopping_block", bool stack = false, double max = 5) => new ExtensionFact { Id = id, Station = "$piece_workbench", Prefab = prefab, X = x, Z = z, Stack = stack, MaxDistance = max };
+
+    [Fact] public void LevelIsOnePlusTheLinkedExtensionsAndTheRangeGrowsWithThem()
+    {
+        List<KeyValuePair<ExtensionFact, string>> un;
+        var l = StationMath.Link(new[] { St("s", 0, 0) }, new[] { Ex("a", 3, 0, "chopping_block"), Ex("b", 0, 4, "tanning_rack"), Ex("c", 9, 0, "forge_cooler") }, out un).Single();
+        Assert.Equal(3, l.Level); Assert.Equal(28, l.BuildRange, 6);
+        Assert.Equal("c", un.Single().Key.Id); Assert.Contains("within 5", un.Single().Value);
+    }
+    [Fact] public void TwoOfOneKindCountOnceUnlessItStacks()
+    {
+        List<KeyValuePair<ExtensionFact, string>> un;
+        var once = StationMath.Link(new[] { St("s", 0, 0) }, new[] { Ex("a", 2, 0), Ex("b", 0, 2) }, out un).Single();
+        Assert.Equal(2, once.Level); Assert.Contains("does not stack", un.Single().Value);
+        var stack = StationMath.Link(new[] { St("s", 0, 0) }, new[] { Ex("a", 2, 0, "x", true), Ex("b", 0, 2, "x", true) }, out un).Single();
+        Assert.Equal(3, stack.Level); Assert.Empty(un);
+    }
+    [Fact] public void AnExtensionOfAnotherStationKindNeverLinks()
+    {
+        List<KeyValuePair<ExtensionFact, string>> un;
+        var other = new ExtensionFact { Id = "f", Station = "$piece_forge", Prefab = "forge_cooler", X = 1, Z = 0 };
+        var l = StationMath.Link(new[] { St("s", 0, 0) }, new[] { other }, out un).Single();
+        Assert.Equal(1, l.Level); Assert.Contains("no $piece_forge in the area", un.Single().Value);
+    }
+    [Fact] public void AnExtensionBetweenTwoStationsCountsForBoth()
+    {
+        List<KeyValuePair<ExtensionFact, string>> un;
+        var ls = StationMath.Link(new[] { St("s1", 0, 0), St("s2", 6, 0) }, new[] { Ex("a", 3, 0) }, out un);
+        Assert.Equal(new[] { 2, 2 }, ls.Select(l => l.Level).ToArray()); Assert.Empty(un);
+    }
+    [Fact] public void TheRangeIsTheExtensionsOwnNotTheStations()
+    {
+        List<KeyValuePair<ExtensionFact, string>> un;
+        Assert.Equal(1, StationMath.Link(new[] { St("s", 0, 0) }, new[] { Ex("a", 3, 0, "x", false, 2) }, out un).Single().Level);       // 3 m away, its own range is 2
+    }
+}

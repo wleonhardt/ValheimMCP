@@ -122,4 +122,44 @@ namespace HubnerExt
             return need.OrderByDescending(n => n.Value).Select(n => { int have; stock.TryGetValue(n.Key, out have); return new KeyValuePair<string, int[]>(n.Key, new[] { n.Value, have, Math.Max(0, n.Value - have) }); }).ToList();
         }
     }
+
+    internal sealed class StationFact { public string Id = "", Name = "", Prefab = ""; public double X, Y, Z, RangeBuild = 10, ExtraRange; public bool NeedsRoof, NeedsFire; }
+    internal sealed class ExtensionFact { public string Id = "", Station = "", Prefab = ""; public double X, Y, Z, MaxDistance = 5; public bool Stack; }
+
+    internal sealed class StationLink
+    {
+        public StationFact Station; public List<ExtensionFact> Linked = new List<ExtensionFact>();
+        public int Level { get { return 1 + Linked.Count; } }
+        public double BuildRange { get { return Station.RangeBuild + Linked.Count * Station.ExtraRange; } }
+    }
+
+    /// <summary>Which extensions count for which station (StationExtension.FindExtensions, decompiled): pivot to pivot closer than the extension's own range, the station name matches, and one extension per kind unless it stacks.</summary>
+    internal static class StationMath
+    {
+        public static List<StationLink> Link(IList<StationFact> stations, IList<ExtensionFact> extensions, out List<KeyValuePair<ExtensionFact, string>> unlinked)
+        {
+            var links = new List<StationLink>(); var linkedAny = new HashSet<ExtensionFact>(); var rejected = new Dictionary<ExtensionFact, string>();
+            foreach (var s in stations)
+            {
+                var l = new StationLink { Station = s }; var kinds = new HashSet<string>();
+                foreach (var e in extensions)
+                {
+                    if (e.Station != s.Name) continue;
+                    var d = Math.Sqrt((e.X - s.X) * (e.X - s.X) + (e.Y - s.Y) * (e.Y - s.Y) + (e.Z - s.Z) * (e.Z - s.Z));
+                    if (d >= e.MaxDistance) continue;
+                    if (!e.Stack && !kinds.Add(e.Prefab)) { if (!rejected.ContainsKey(e)) rejected[e] = "a " + e.Prefab + " already counts for this station and it does not stack"; continue; }
+                    l.Linked.Add(e); linkedAny.Add(e);
+                }
+                links.Add(l);
+            }
+            unlinked = new List<KeyValuePair<ExtensionFact, string>>();
+            foreach (var e in extensions)
+            {
+                if (linkedAny.Contains(e)) continue;
+                var hasKind = stations.Any(s => s.Name == e.Station);
+                unlinked.Add(new KeyValuePair<ExtensionFact, string>(e, rejected.ContainsKey(e) ? rejected[e] : hasKind ? "no " + e.Station + " within " + e.MaxDistance + " m (pivot to pivot)" : "no " + e.Station + " in the area"));
+            }
+            return links;
+        }
+    }
 }

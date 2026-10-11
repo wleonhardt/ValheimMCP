@@ -19,6 +19,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}", ItemInfo);
             r.Add("missing_for", "What it takes to have count of an item from what the chests round a point hold: x,z,radius (default 40, max 150) or box x0,z0,x1,z1. Walks the recipe chain (depth 4): whole crafts only, what a craft makes over is reused, stock first. Returns the steps in order (ingredients before what they make), what is missing (nothing makes it: it has to be gathered), the stations and levels needed, and what stock was used. The world's NoCraftCost key is reported: with it the ingredients are not charged. Read-only.",
                 "{\"type\":\"object\",\"properties\":{\"item\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"item\"]}", MissingFor);
+            r.Add("stations", "Crafting stations round a point or in a box (ZDO table, works on the server): prefab, position, level (1 + the extensions that count for it: pivot to pivot closer than the extension's own range, one per kind unless it stacks), the extensions with distances, the build range (m_rangeBuild + m_extraRangePerLevel per extension, measured flat from the player), whether it needs a roof or a fire to craft, and what the next extension would unlock (recipes of the next level). Also the extensions that count for no station here, with the reason. The roof and fire themselves need the physics and are judged by bed_check / plan_check style tools, not here.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}}}", Stations);
             r.Add("plan_materials", "The bill of materials of a plan: items:[{prefab,...}] as for plan_apply. Sums Piece.m_resources per item, the crafting stations the pieces need (by name, in range of whoever builds by hand), pieces the world makes free (NoBuildCost; items and feasts use NoCraftCost), unknown prefabs, and, with x,z,radius or a box, what the chests there hold and what is missing. standing:true leaves out items that already stand within 0.35 m. Read-only.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"standing\":{\"type\":\"boolean\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"items\"]}", PlanMaterials);
         }
@@ -116,6 +118,38 @@ namespace HubnerExt
                 if (chests >= 400) break;
             }
             return stock;
+        }
+
+        static ToolOutput Stations(Dictionary<string, object> a)
+        {
+            Build(); if (_rows == null) return ToolOutput.Err("ObjectDB not ready");
+            if (!Zdos.Ready) return ToolOutput.Err("world not ready");
+            float x0, z0, x1, z1; string err;
+            if (!Box(a, out x0, out z0, out x1, out z1, out err)) return ToolOutput.Err(err ?? "give x,z[,radius] or x0,z0,x1,z1");
+            const float reach = 12f;                                                       // an extension up to this far outside the box can still belong to a station inside it
+            var stations = new List<StationFact>(); var exts = new List<ExtensionFact>(); var cache = new Dictionary<int, GameObject>();
+            foreach (var z in Zdos.InBox(x0 - reach, z0 - reach, x1 + reach, z1 + reach))
+            {
+                var h = z.GetPrefab(); GameObject go;
+                if (!cache.TryGetValue(h, out go)) cache[h] = go = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(h) : null;
+                if (go == null) continue;
+                var cs = go.GetComponent<CraftingStation>(); var se = go.GetComponent<StationExtension>();
+                if (cs == null && se == null) continue;
+                var p = z.GetPosition();
+                if (cs != null && p.x >= x0 && p.x <= x1 && p.z >= z0 && p.z <= z1) stations.Add(new StationFact { Id = U.Id(z), Name = cs.m_name, Prefab = go.name, X = p.x, Y = p.y, Z = p.z, RangeBuild = cs.m_rangeBuild, ExtraRange = cs.m_extraRangePerLevel, NeedsRoof = cs.m_craftRequireRoof, NeedsFire = cs.m_craftRequireFire });
+                if (se != null && se.m_craftingStation != null) exts.Add(new ExtensionFact { Id = U.Id(z), Station = se.m_craftingStation.m_name, Prefab = go.name, X = p.x, Y = p.y, Z = p.z, MaxDistance = se.m_maxStationDistance, Stack = se.m_stack });
+            }
+            List<KeyValuePair<ExtensionFact, string>> unlinked;
+            var links = StationMath.Link(stations, exts, out unlinked);
+            var rows = links.Select(l =>
+            {
+                var s = l.Station;
+                var next = _rows.Where(r => r.Station == s.Prefab && r.RequiredStationLevel == l.Level + 1 && !r.UpgradeOnly).Select(r => r.Item).Distinct().Take(8).ToList();
+                return "{\"id\":" + U.S(s.Id) + ",\"prefab\":" + U.S(s.Prefab) + ",\"pos\":[" + U.N(Math.Round(s.X, 1)) + "," + U.N(Math.Round(s.Y, 1)) + "," + U.N(Math.Round(s.Z, 1)) + "],\"level\":" + l.Level + ",\"buildRange\":" + U.N(l.BuildRange) + ",\"needsRoof\":" + B(s.NeedsRoof) + ",\"needsFire\":" + B(s.NeedsFire) +
+                    ",\"extensions\":[" + string.Join(",", l.Linked.Select(e => "{\"prefab\":" + U.S(e.Prefab) + ",\"id\":" + U.S(e.Id) + ",\"distance\":" + U.N(Math.Round(Math.Sqrt((e.X - s.X) * (e.X - s.X) + (e.Y - s.Y) * (e.Y - s.Y) + (e.Z - s.Z) * (e.Z - s.Z)), 1)) + "}").ToArray()) + "],\"nextLevelUnlocks\":[" + string.Join(",", next.Select(U.S).ToArray()) + "]}";
+            }).ToList();
+            var un = unlinked.Where(u => u.Key.X >= x0 && u.Key.X <= x1 && u.Key.Z >= z0 && u.Key.Z <= z1).Take(40).Select(u => "{\"prefab\":" + U.S(u.Key.Prefab) + ",\"id\":" + U.S(u.Key.Id) + ",\"why\":" + U.S(u.Value) + "}");
+            return U.Json("{\"stations\":[" + string.Join(",", rows.ToArray()) + "],\"extensionsCountingForNothing\":[" + string.Join(",", un.ToArray()) + "]}");
         }
 
         static string CostKeys()
