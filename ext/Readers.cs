@@ -21,7 +21,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{}}", NetPeers);
             r.Add("active_area", "Is a place simulated? points:[[x,z],...] (max 100) or x,z. A zone is simulated only within 1.5 zones (96 m, Chebyshev, from the zone centre; with near distance 2 also under 112 m Euclidean) of a connected peer's reference position (ZNetScene.PointInsideActiveArea). Returns per point the zone, whether any peer covers it, and how many do. Crops, animals, fires, smelters and wear all stop outside it.",
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}}}", ActiveAreaTool);
-            r.Add("producers", "Fermenters (barrels), beehives and sap collectors in a box (x,z,radius or x0,z0,x1,z1): content and seconds left to ready for a barrel (the timer restarts while its roof check point has no roof or under 70% cover, checked every 10 s while loaded), honey/sap level, units per interval, seconds to full, biome allowed for a hive (a hive also needs under 25% cover), the ancient root a sap collector drains and its level. Server and client.",
+            r.Add("producers", "Fermenters (barrels), beehives and sap collectors in a box (x,z,radius or x0,z0,x1,z1): content and seconds left to ready for a barrel (the timer restarts while its roof check point has no roof or under 70% cover, checked every 10 s while loaded), honey/sap level, units per interval, seconds to full, biome allowed for a hive (a hive also needs cover under its m_maxCover, 0.6 on the piece_beehive prefab here), the ancient root a sap collector drains and its level. Server and client.",
                 BoxSchema, Producers);
             r.Add("loot_near", "Items lying on the ground in a box, with their age and what the owner does about them: a floor item older than 3600 s is destroyed unless it is inside a base above y 28, a player is within 25 m, it lies in tar, or it is a piece (ItemDrop.TimedDestruction). Returns name, stack, quality, durability, age, seconds left and why it is kept. Tar is not read.",
                 BoxSchema, LootNear);
@@ -31,8 +31,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"toolTier\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", ResourceNodes);
             r.Add("spawners_near", "Creature spawners and spawn areas in a box: the creature, its respawn time, the trigger distance, whether the creature it made is still alive and the minutes until it may spawn again (CreatureSpawner keeps 'alive_time'), the global keys it needs or is blocked by and whether they are set. Spawn areas (SpawnArea) list the creatures, caps and trigger distance. A spawner only runs with a player within its trigger distance and its zone active.",
                 BoxSchema, SpawnersNear);
-            r.Add("wear_risk", "What slowly damages the pieces in a box (WearNTear.UpdateWear): rain on unroofed pieces that wear (5% of max health per minute while wet, never below half health), the biome rules (Ashlands ash and lava, Deep North snow, pieces outside the biome they need), pieces already damaged, and the roof state from a model of the game's roof cast. No weather is read: a dedicated server has none. Needs the pieces' prefabs; max 600 pieces.",
-                BoxSchema, WearRisk);
+            r.Add("wear_risk", "What slowly damages the pieces in a box (WearNTear.UpdateWear): rain on unroofed pieces that wear (5% of max health per minute while wet, never below half health), the biome rules (Ashlands ash and lava, Deep North snow, pieces outside the biome they need), pieces already damaged, and the roof state from a model of the game's roof cast. No weather is read: a dedicated server has none. Needs the pieces' prefabs; judges up to `pieces` (default 600, max 1500) of the box, every piece in it can be a roof.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"},\"pieces\":{\"type\":\"number\"}}}", WearRisk);
             r.Add("absence_forecast", "What happens in a box while nobody is there for hours (hours, default 8): fires and cookers that run dry, smelters (the game catches up at most 3600 s of work), barrels that finish, hives and sap collectors that fill, pickables that come back, floor items that despawn. Everything stops when no peer is near (see active_area); this describes what the game catches up from timestamps when someone returns.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"hours\":{\"type\":\"number\"}}}", AbsenceForecast);
         }
@@ -292,11 +292,13 @@ namespace HubnerExt
                 var p = z.GetPosition(); var q = z.GetRotation();
                 var pp = new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = new Quat(q.x, q.y, q.z, q.w), Planned = false };
                 pieces.Add(pp); zdos[pp] = z; gos[pp] = s.All[h].GetComponent<WearNTear>();
-                if (pieces.Count >= 600) break;
+                if (pieces.Count >= 4000) break;
             }
+            var all = pieces; var cap = (int)Math.Max(50, Math.Min(1500, U.D(a, "pieces", 600)));        // every piece in the box is a possible roof; only the first `cap` are judged
+            pieces = all.Take(cap).ToList();
             var solids = new List<CoverSolid>();
-            var allPieces = pieces;                                            // roofs outside the box matter little: only the pieces counted above
-            foreach (var pp in allPieces) foreach (var c in pp.Geo.Colliders.Where(c => Layers.InCover(c.Layer))) foreach (var b in pp.BoxesOf(new[] { c })) solids.Add(new CoverSolid { Box = b, Leaky = c.Leaky });
+            var allPieces = pieces;
+            foreach (var pp in all) foreach (var c in pp.Geo.Colliders.Where(c => Layers.InCover(c.Layer))) foreach (var b in pp.BoxesOf(new[] { c })) solids.Add(new CoverSolid { Box = b, Leaky = c.Leaky });
             double ashDamage = 0; try { if (Game.instance != null) ashDamage = Game.instance.m_ashDamage; } catch (Exception ex) { U.Once("wear_risk.ash", ex); }
             var rain = 0; var ash = 0; var outside = 0; var damaged = 0; var rows = new List<string>(); var roofless = 0;
             foreach (var pp in allPieces)
@@ -312,7 +314,7 @@ namespace HubnerExt
                 if (frac < 0.999) damaged++;
                 if ((why.Count > 0 || frac < 0.5) && rows.Count < lim) rows.Add("{\"id\":" + U.S(pp.Id) + ",\"prefab\":" + U.S(pp.Geo.Prefab) + ",\"pos\":" + U.V(zdos[pp].GetPosition()) + ",\"healthFraction\":" + U.N(Math.Round(frac, 2)) + ",\"roofed\":" + B(roofed) + ",\"biome\":" + U.S(biome.ToString()) + ",\"risks\":[" + string.Join(",", why.Select(U.S).ToArray()) + "]}");
             }
-            return U.Json("{\"pieces\":" + allPieces.Count + ",\"damaged\":" + damaged + ",\"rainExposed\":" + rain + ",\"withoutARoof\":" + roofless + ",\"ashExposed\":" + ash + ",\"outsideRequiredBiome\":" + outside + ",\"ashDamageSetting\":" + N(ashDamage) + ",\"returned\":" + rows.Count + ",\"rows\":[" + string.Join(",", rows.ToArray()) + "],\"note\":\"rain never takes a piece below half health; the roof is a model of the game's roof cast on the pieces in the box (trees and rocks are not in it); lava paint and deep-north snow are not read; a shield generator cancels all of it\"}");
+            return U.Json("{\"piecesInBox\":" + all.Count + ",\"pieces\":" + allPieces.Count + ",\"damaged\":" + damaged + ",\"rainExposed\":" + rain + ",\"withoutARoof\":" + roofless + ",\"ashExposed\":" + ash + ",\"outsideRequiredBiome\":" + outside + ",\"ashDamageSetting\":" + N(ashDamage) + ",\"returned\":" + rows.Count + ",\"rows\":[" + string.Join(",", rows.ToArray()) + "],\"note\":\"rain never takes a piece below half health; the roof is a model of the game's roof cast on the pieces in the box (trees and rocks are not in it); lava paint and deep-north snow are not read; a shield generator cancels all of it\"}");
         }
 
         // ------------------------------------------------------------------ absence_forecast
@@ -334,7 +336,7 @@ namespace HubnerExt
                 else if (s.Smelt.Contains(h))
                 {
                     var sm = go.GetComponent<Smelter>(); if (sm == null) continue;
-                    var queued = z.GetInt(ZDOVars.s_queued, 0); if (queued <= 0 && sm.m_maxOre != 0) continue;
+                    var queued = z.GetInt(ZDOVars.s_queued, 0); if (queued <= 0) continue;                // no queue, no work to catch up (a windmill or kiln with nothing in it)
                     smelters++; var fuel = z.GetFloat(ZDOVars.s_fuel, 0f); var bake = z.GetFloat(ZDOVars.s_bakeTimer, 0f);
                     var spec = new SmelterSpec { MaxFuel = sm.m_maxFuel, MaxOre = sm.m_maxOre, SecPerProduct = sm.m_secPerProduct, FuelPerProduct = sm.m_fuelPerProduct, RequiresRoof = sm.m_requiresRoof };
                     var work = SmelterMath.WorkDoneWhileAway(away, SmelterMath.SecondsToEmpty(spec, queued, bake, 1), sm.m_maxFuel > 0 ? SmelterMath.FuelSecondsLeft(spec, fuel, 1) : double.PositiveInfinity);

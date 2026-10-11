@@ -305,6 +305,7 @@ def plant_case(ctx):
     far = c.tool('plant_check', items=[{'prefab': 'sapling_carrot', 'x': x, 'z': z, 'key': 'a'}, {'prefab': 'sapling_carrot', 'x': x + 3, 'z': z, 'key': 'b'}])
     first = far['plants'][0]['status']
     if first in ('WrongBiome', 'NotCultivated', 'TooHot', 'TooCold'): raise Skip(f'the test spot is {first} for a carrot: these checks come before shade and space (use a cultivated meadow spot)')
+    if first == 'NoSun': raise Skip('the test spot has a roof above it (' + str(far['plants'][0].get('why')) + '): shade comes before space, so two plants cannot be told apart here')
     near = c.tool('plant_check', items=[{'prefab': 'sapling_carrot', 'x': x, 'z': z, 'key': 'a'}, {'prefab': 'sapling_carrot', 'x': x + 0.2, 'z': z, 'key': 'b'}])
     if first != 'NoSpace': ctx.check('two carrots 3 m apart do not block each other', 'NoSpace' not in {p['status'] for p in far['plants']}, far['plants'])
     ctx.check('two carrots 0.2 m apart block each other', {p['status'] for p in near['plants']} == {'NoSpace'}, near['plants'])

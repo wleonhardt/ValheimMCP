@@ -87,6 +87,7 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 47. `producers` over a barrel in the middle of a brew (seconds left against the real timer), a hive (level, seconds to full) and a sap collector on an ancient root.
 48. `loot_near` with an item dropped an hour ago away from players; `harvest_near` over a berry field; `resource_nodes` over a big rock partly mined; `spawners_near` at a camp.
 49. `wear_risk` in a rainy meadow and in the Ashlands (read `ashDamageSetting`); `absence_forecast` for 8 hours against the real state after leaving a base for that long.
+50. Live run 2026-10-11 (server twin 0.14.0, client 0.14.0, world AxGardDeepNorth, read-only `accept.py --dry-run`): 28 pass, 0 fail, 8 skipped at the base; the readers answered on real data (smelters, 25 producers, 760 pickables, spawners, 11 floor items). Found and fixed: `wear_risk` judged roofs only from the first 600 pieces; `absence_forecast` counted an empty smelter as finished; the runner counted every skip as a failure when run as a script; `plant_check` case on a roofed spot. The beehive prefab's `m_maxCover` is 0.6, not 0.25.
 
 ### Next candidates (not done)
 

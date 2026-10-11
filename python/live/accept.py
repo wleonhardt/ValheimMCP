@@ -138,6 +138,7 @@ def git_sha():
 
 
 def main(argv=None):
+    sys.modules.setdefault('accept', sys.modules[__name__])      # run as a script this module is __main__: cases.py imports 'accept', and a second copy would have its own Skip class (every skip would count as a failure)
     import cases as case_table
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--list', action='store_true'); ap.add_argument('--json', action='store_true'); ap.add_argument('--dry-run', action='store_true'); ap.add_argument('--only')
