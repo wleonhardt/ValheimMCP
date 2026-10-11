@@ -51,11 +51,25 @@ Everything below compiled and passed game-free tests; none of it has run in the 
 19. `tool_stats` after a session: the slow tools come first; `log_tail` folds repeats; `objects digest:true` over a base.
 20. `Env` hold released on hot reload: `time_set` then rebuild the extension: the time is free again.
 
+### Live verification of the Tier 2 readers and the acceptance runner (0.8.0 core / 0.11.0 extension)
+
+Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot> python3 python/live/accept.py` first: it covers most of the below. What it cannot judge:
+
+21. The runner itself: `--dry-run` skips the acting cases and says why; a wrong world name gives BLOCKED; every case that skips says what it needs. Fix the cases, not the expectations, when one fails.
+22. `world_clock` on the dedicated server against the client's `env_state` at dusk; sleep with one of two players in bed (`nightSkips` stays false and names who is out).
+23. `recipe_info`/`missing_for` for Bronze and a bronze axe with real chests: compare the steps with what the crafting UI asks. `plan_materials` against the build UI for a small house. The chest decode (`Inventory.Load`) on a chest with every kind of item.
+24. `stations`: a workbench with 2 extensions at 4 and 6 m: the second does not count. Compare the level with the crafting UI.
+25. `smelters`: queue 10 ore, watch `secondsToEmpty` and `fuelNeeded` against the real smelter; a kiln burns no fuel; `fuelPressesAllowed` against how many presses the game accepts.
+26. `creature_info` for Boar, Troll, Greydwarf: modifiers and attack reach against the in-game wiki; the `againstPlayer` hit against a real hit with known armour.
+27. `base_value` beside a fire, a workbench and a ward: compare `value` with the base value the character reports (`charactersNearby`); the bounding-sphere approximation for box areas.
+28. `husbandry_state` with two tame boars: a breeding blocker disappears when the partner comes within 3 m; the expected time against a stopwatch.
+29. `plan_check` ground: over an edited pad (flattened by a hoe) the heights are the pad's, not the generator's; tilt on a steep bank uses the triangle.
+
 ### Next candidates (not done)
 
 - Fix the 78 silent catches over time (`python3 scripts/lint_catch.py --list`), lowering the baseline as you go.
 - From the review but skipped on purpose: the design generator, work fronts and stands, the lease, the Jev judge (see `research/2026-10-clauden-jevheim-review.md`).
-- Tier 1 of `research/2026-10-clauden-jevheim-synthesis.md` is done (decompile check in `decisions/0003-decompile-check-results.md`). Not done from it: A14 (plan_check on edited ground), A16 (mesh colliders), A23 (speaker id check against the connection), A24 (`world_state` positions without a source), A26 (Dvergr wards enabled); Tier 2 readers; Tier 4 test infrastructure (`accept.py`, `live_guard`, `smoke.py`, scene capture).
+- Tier 1 of `research/2026-10-clauden-jevheim-synthesis.md` is done (decompile check in `decisions/0003-decompile-check-results.md`). Not done from it: A14 (plan_check on edited ground), A16 (mesh colliders), A23 (speaker id check against the connection), A24 (`world_state` positions without a source), A26 (Dvergr wards enabled); Tier 2 not yet built: farm and plant checks, `threats_near`/`biome_threats`/`raid_state`, cookers, upkeep forecast, terrain `level_check`/`terrain_deltas`, `explored_at`, `loot_near`, `situation`; Tier 4 not yet built: scene capture and replay, the differential support test against the game, walk bench and slope probe, chat injection hook.
 
 ### Other
 

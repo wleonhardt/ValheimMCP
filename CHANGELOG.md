@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### 0.8.0 core / 0.11.0 extension (Tier 2 readers and Tier 4 test tooling of the ClaudeNJevHeim review)
+New readers, all on the server and the client, all checked against the decompile first (nothing has run in the game yet):
+- `world_clock`: the game's day fraction (raw 0.15..0.85 is rescaled to 0.25..0.75), seconds to dusk and dawn, the sleep window, who holds up the night skip (it needs EVERY character in bed).
+- `recipe_info`, `item_info`, `missing_for`, `plan_materials`: every recipe (not only the first), upgrade costs and station levels, the recipe chain from what the chests hold (whole crafts, surplus reused), the bill of a plan with free pieces and stations.
+- `stations`: level (1 + the extensions that count), build range, what the next level unlocks, extensions that count for nothing and why. `smelters`: queue, fuel and the presses the game still accepts, fuel needed, time to finish, why one stands still.
+- `creature_info`: faction, health and damage by star, damage modifiers, senses, attacks, taming, drops, and what a hit does to a player of given armour. `base_value`: PlayerBase areas in reach of a point for raids.
+- `husbandry_state` says why an animal is not breeding (hungry, alerted, population cap, ready partners) or when young are due.
+- `plan_check` takes its ground from the terrain collider's triangles where the zone is loaded (edits included) and says where each height came from; the tilt is the triangle's normal.
+
+Test tooling
+- `python/live/accept.py` with 24 cases (`--list`, `--dry-run`, `--only`; pass / fail / skipped / blocked; acting cases clean up and are checked for dropped calls, stalls and journal errors) and `hubner.live_guard()` (endpoint explicit, game in a world, world on `HUBNER_LIVE_WORLDS`).
+- `scripts/check.py` (all checks, `--changed`), `scripts/lint_docs.py` (links, paths and tool names in the documents), a chat corpus with a holdout set.
+
 ### 0.7.0 core / 0.10.0 extension (decompile check and Tier 1 of the ClaudeNJevHeim module reviews)
 The facts behind these changes were checked in our own decompile first: `plans/decisions/0003-decompile-check-results.md`. None of the game-touching code has run in the game yet (see the live checklist in `plans/next-up.md`).
 
