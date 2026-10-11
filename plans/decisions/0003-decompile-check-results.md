@@ -31,3 +31,7 @@ The module reviews (`plans/research/2026-10-clauden-jevheim-synthesis.md`) rest 
 ## Decision
 
 Build Tier 1 on the confirmed facts above. Where a rule depends on a placement surface (`notOnWood`, `notOnFloor`, `inCeilingOnly`), `plan_check` has no ghost ray, so those rules warn with the game's status name instead of failing the plan.
+
+## Addendum (2026-10-11): session-only ZDO values
+
+`ZDOVars.s_sessionHashes` (alert, haveTarget, inUse, support, velocities, lookTarget, noise, tiltrot) are session-only: `ZDOExtraData` never writes them to the world file. Consequences: `scene_capture` finds a recorded `support` only for pieces whose owner ran its support update in this game session (the area must have been loaded by a player or a virtual peer); `threats_near` sees `alert` / `haveTarget` only for creatures active now; `containers` in use are not remembered across a restart. The ZDO keys the extension reads were all checked against `ZDOVars` and the game's own `Get*("key")` calls: no misspelled key.
