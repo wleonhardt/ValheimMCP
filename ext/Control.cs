@@ -19,6 +19,8 @@ namespace HubnerExt
         static AutoJoin _auto;
         static Walker _walker;
         internal static string Mode = "data";
+        /// <summary>Who has the controls: the walker yields to the human for 1.5 s after any input and stops its clocks meanwhile.</summary>
+        internal static readonly UserOverride User = new UserOverride();
         internal static string PendingPw;      // answered by AutoJoin when the server asks for it
 
         public static void Register(ToolRegistry r)
@@ -51,7 +53,12 @@ namespace HubnerExt
                 {
                     _h = new Harmony(HarmonyId);
                     var m = typeof(Player).GetMethod("SetControls", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (m != null) _h.Patch(m, prefix: new HarmonyMethod(typeof(Control).GetMethod("SetControlsPrefix", BindingFlags.Static | BindingFlags.NonPublic)));
+                    if (m != null)
+                    {
+                        // capture what the human really pressed before anyone writes (First), write the walker's input after every other mod has had its say (Last)
+                        _h.Patch(m, prefix: new HarmonyMethod(typeof(Control).GetMethod("CapturePrefix", BindingFlags.Static | BindingFlags.NonPublic)) { priority = Priority.First });
+                        _h.Patch(m, prefix: new HarmonyMethod(typeof(Control).GetMethod("SetControlsPrefix", BindingFlags.Static | BindingFlags.NonPublic)) { priority = Priority.Last });
+                    }
                     var fu = typeof(Player).GetMethod("FixedUpdate", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     if (fu != null) _h.Patch(fu, postfix: new HarmonyMethod(typeof(Control).GetMethod("PlayerTick", BindingFlags.Static | BindingFlags.NonPublic)));
                     var zn = typeof(ZNet).GetMethod("Update", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);          // exists while connecting: answers the password dialog
@@ -93,10 +100,17 @@ namespace HubnerExt
         static bool Flying(Player p) { try { return FDebugFly != null && (bool)FDebugFly.GetValue(p); } catch (Exception ex) { U.Once("m_debugFly", ex); return false; } }
 
         // Harmony prefix: Player.SetControls(Vector3 movedir, bool attack, ..., bool jump, bool crouch, bool run, ...) - replace move/jump/run while walking.
+        static void CapturePrefix(Player __instance, Vector3 movedir, bool attack, bool secondaryAttack, bool block, bool jump, bool crouch, bool dodge)
+        {
+            if (__instance != Player.m_localPlayer) return;
+            if (movedir.sqrMagnitude > 0.0001f || attack || secondaryAttack || block || jump || crouch || dodge) User.Touch(Time.time);
+        }
+
         static void SetControlsPrefix(Player __instance, ref Vector3 movedir, ref bool jump, ref bool run)
         {
             var w = _walker;
             if (w == null || !w.Active || __instance != Player.m_localPlayer) return;
+            if (User.Active(Time.time)) return;                                    // the human is driving
             // SetControls takes the move direction relative to the character's look yaw; convert our world direction
             Quaternion yaw = Quaternion.identity;
             try { if (FLookYaw != null) yaw = (Quaternion)FLookYaw.GetValue(__instance); } catch (Exception ex) { U.Once("m_lookYaw", ex); }
@@ -266,14 +280,45 @@ namespace HubnerExt
         {
             public bool Active; public Vector3 MoveDir; public bool Jump, Run, NoJump;                       // NoJump: the walker never jumps, so a route that needs a hop to get over something fails (accessibility test)
             List<Vector3> _pts = new List<Vector3>(); int _i; float _t0, _timeout, _arrive, _stuckSecs; bool _doors;
-            string _result = "idle", _blocker = ""; int _doorOpens; float _strafeUntil, _strafeSide; Vector3 _lastProg; float _lastProgT; int _jumps;
+            string _result = "idle", _blocker = ""; float _strafeUntil, _strafeSide, _restUntil, _runUntil; bool _userRun;
             readonly List<string> _trace = new List<string>(); float _nextTrace;
+
+            // route and progress: the body steers at a point a little ahead ON the line (Pursuit), never at a raw waypoint
+            List<double[]> _line = new List<double[]>(); int _seg; double _segT;
+            Vector3 _lastProg; float _lastProgT, _lastRemain, _lastTick; Vector3 _prevPos;
+            // stall ladder
+            int _stallsTotal, _spotStalls, _sideSteps, _reroutes; Vector3 _spotPos; string _lastStall = "";
+            // doors
+            int _doorPresses, _doorOpens; string _lockedDoor = "";
+            readonly Dictionary<int, float> _pressedAt = new Dictionary<int, float>(); readonly Dictionary<int, float> _pending = new Dictionary<int, float>(); float _nextDoorLook;
+            float _yielded;
 
             public void Start(List<Vector3> pts, bool run, float timeout, float arrive, float stuck, bool doors)
             {
-                _pts = pts; _i = 0; Run = run; _timeout = timeout; _arrive = arrive; _stuckSecs = stuck; _doors = doors;
-                _t0 = Time.time; _result = "walking"; _blocker = ""; _jumps = 0; _doorOpens = 0; _trace.Clear(); _nextTrace = 0f;
-                var p = Player.m_localPlayer; _lastProg = p.transform.position; _lastProgT = Time.time; Active = true;
+                _pts = pts; _i = 0; _userRun = run; Run = run; _timeout = timeout; _arrive = arrive; _stuckSecs = stuck; _doors = doors;
+                _t0 = Time.time; _result = "walking"; _blocker = ""; _doorPresses = 0; _doorOpens = 0; _lockedDoor = ""; _trace.Clear(); _nextTrace = 0f;
+                _stallsTotal = 0; _spotStalls = 0; _sideSteps = 0; _reroutes = 0; _lastStall = ""; _strafeUntil = 0; _restUntil = 0; _runUntil = 0; _yielded = 0;
+                _pressedAt.Clear(); _pending.Clear();
+                var p = Player.m_localPlayer; _lastProg = p.transform.position; _prevPos = _lastProg; _spotPos = _lastProg; _lastProgT = Time.time; _lastTick = Time.time; Active = true;
+                BuildLine(_lastProg);
+            }
+
+            void BuildLine(Vector3 from)
+            {
+                _line = new List<double[]> { new double[] { from.x, from.z } };
+                for (var k = _i; k < _pts.Count; k++) _line.Add(new double[] { _pts[k].x, _pts[k].z });
+                _seg = 0; _segT = 0; _lastRemain = Remaining();
+            }
+
+            float Remaining()
+            {
+                double total = 0;
+                for (var s = _seg; s < _line.Count - 1; s++)
+                {
+                    var dx = _line[s + 1][0] - _line[s][0]; var dz = _line[s + 1][1] - _line[s][1];
+                    total += Math.Sqrt(dx * dx + dz * dz) * (s == _seg ? 1 - _segT : 1);
+                }
+                return (float)total;
             }
 
             public void Stop(string result) { Active = false; MoveDir = Vector3.zero; Jump = false; _result = result; }
@@ -283,60 +328,170 @@ namespace HubnerExt
                 var p = Player.m_localPlayer;
                 if (!Active) return;
                 if (p == null) { Stop("no player"); return; }
-                var pos = p.transform.position;
-                if (Time.time - _t0 > _timeout)
+                var now = Time.time; var pos = p.transform.position;
+
+                // the human wins the controls: while they drive, no input is written and every clock of the walk stands still
+                var y = (float)User.Yielded(now);
+                if (y > 0f) { _t0 += y; _lastProgT += y; _strafeUntil += y; _restUntil += y; _runUntil += y; _yielded += y; _lastProg = pos; _spotPos = pos; _prevPos = pos; _lastTick = now; MoveDir = Vector3.zero; return; }
+                _lastTick = now;
+
+                // a portal, a respawn or a teleport moves the body far in one tick: the walk is over, not stuck
+                var jump = pos - _prevPos; _prevPos = pos;
+                if (Teleporting(p) || TeleportGuard.Jumped(jump.x, jump.y, jump.z)) { Stop("teleported"); return; }
+
+                if (now - _t0 > _timeout)
                 {
                     if (_i < _pts.Count) { var tf = new Vector3(_pts[_i].x - pos.x, 0f, _pts[_i].z - pos.z); if (tf.sqrMagnitude > 0.01f) _blocker = Blocker(p, tf.normalized); }
                     Stop("timeout"); return;
                 }
-                if (Time.time >= _nextTrace) { _nextTrace = Time.time + 1f; _trace.Add("[" + U.N(pos.x) + "," + U.N(pos.y) + "," + U.N(pos.z) + "," + (p.IsOnGround() ? "1" : "0") + "]"); }
+                if (now >= _nextTrace) { _nextTrace = now + 1f; _trace.Add("[" + U.N(pos.x) + "," + U.N(pos.y) + "," + U.N(pos.z) + "," + (p.IsOnGround() ? "1" : "0") + "]"); }
+
                 var tgt = _pts[_i];
                 var flat = new Vector3(tgt.x - pos.x, 0f, tgt.z - pos.z);
                 if (flat.magnitude < _arrive)
                 {
                     _i++;
                     if (_i >= _pts.Count) { Stop("arrived"); return; }
-                    _lastProg = pos; _lastProgT = Time.time; return;
+                    _lastProg = pos; _lastProgT = now; return;
                 }
-                var dir = flat.normalized; MoveDir = dir;
-                if (Time.time < _strafeUntil) MoveDir = (dir + Vector3.Cross(Vector3.up, dir) * _strafeSide * 0.9f).normalized;     // sidestep: an open door leaf can stand across the aim line
-                try { p.SetLookDir(dir, 0f); } catch { }
-                // progress watchdog: jump when stuck, open doors in the way, give up with the blocker named
-                if ((pos - _lastProg).magnitude > 0.25f) { _lastProg = pos; _lastProgT = Time.time; _jumps = 0; }
-                else if (Time.time - _lastProgT > 1.2f)
+
+                // steer at the point a little ahead on the line
+                var speed = Run ? 7f : 4f;
+                double ax, az;
+                Pursuit.Aim(_line, ref _seg, ref _segT, pos.x, pos.z, Pursuit.LookAhead(speed), out ax, out az);
+                var aim = new Vector3((float)ax - pos.x, 0f, (float)az - pos.z);
+                var dir = aim.sqrMagnitude > 0.0004f ? aim.normalized : flat.normalized; MoveDir = dir;
+                if (now < _strafeUntil) MoveDir = (dir * 0.2f + Vector3.Cross(Vector3.up, dir) * _strafeSide * 0.8f).normalized;            // step aside: 0.8 sideways + 0.2 forward
+                if (now < _restUntil) MoveDir = Vector3.zero;                                                                               // wait for stamina
+
+                // slope, stamina and the run rule: a bank steeper than the slide limit is only climbed at a run
+                var stam = p.GetMaxStamina() > 0.01f ? p.GetStamina() / p.GetMaxStamina() : 1f;
+                var slope = Vector3.Angle(p.GetLastGroundNormal(), Vector3.up);
+                var goesUp = RouteGoesUp(pos, new Vector3((float)ax, pos.y, (float)az));
+                var bank = goesUp && slope > WalkFacts.SlideDeg && slope <= WalkFacts.RunClimbMaxDeg && stam > WalkFacts.RunMinStamina;
+                Run = (_userRun && stam > 0.1f) || bank || now < _runUntil;
+
+                if (_doors) DoorTick(p, pos, dir, now);
+
+                // progress = the route ahead shrank AND the feet moved; a body pressing a wall (or sliding down a bank) has neither
+                var remain = Remaining();
+                if (StallLadder.Progressed(_lastRemain - remain, (pos - _lastProg).magnitude)) { _lastProg = pos; _lastProgT = now; _lastRemain = remain; }
+                else if (now - _lastProgT > WalkFacts.StallSeconds && now >= _restUntil) OnStall(p, pos, dir, now, stam, slope, goesUp);
+            }
+
+            bool RouteGoesUp(Vector3 pos, Vector3 ahead)
+            {
+                float h;
+                return ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(ahead.x, 5000f, ahead.z), out h) && h > pos.y + 0.3f;
+            }
+
+            void OnStall(Player p, Vector3 pos, Vector3 dir, float now, float stam, float slope, bool goesUp)
+            {
+                if ((pos - _spotPos).magnitude > WalkFacts.SameSpotRadius) { _spotPos = pos; _spotStalls = 0; }
+                _spotStalls++; _stallsTotal++;
+                var rise = NoJump ? float.NaN : RiseAhead(p, dir);
+                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes);
+                _lastStall = act + " (rise " + (float.IsNaN(rise) ? "none" : U.N(Math.Round(rise, 2))) + ", slope " + U.N(Math.Round(slope)) + ")";
+                _lastProgT = now;
+                switch (act)
                 {
-                    if (_doors && TryDoor(p, dir)) { _lastProgT = Time.time; return; }
-                    if (_doorOpens > 0 && Time.time >= _strafeUntil && Time.time - _lastProgT > 1.6f)
-                    {
-                        var o2 = pos + Vector3.up * 1.0f; var perp = Vector3.Cross(Vector3.up, dir);
-                        float cl = 0f, cr = 0f; RaycastHit hh;
-                        cl = Physics.Raycast(o2, (dir + perp * 0.6f).normalized, out hh, 2.5f, ~0, QueryTriggerInteraction.Ignore) ? hh.distance : 2.5f;
-                        cr = Physics.Raycast(o2, (dir - perp * 0.6f).normalized, out hh, 2.5f, ~0, QueryTriggerInteraction.Ignore) ? hh.distance : 2.5f;
-                        _strafeSide = cl >= cr ? 1f : -1f; _strafeUntil = Time.time + 1.4f; _lastProgT = Time.time; return;
-                    }
-                    if (_jumps < 3 && !NoJump) { Jump = true; _jumps++; _lastProgT = Time.time - 0.6f; }
-                    else if (Time.time - _lastProgT > _stuckSecs) { _blocker = Blocker(p, dir); Stop("blocked"); }
+                    case StallAction.Hop: Jump = true; break;
+                    case StallAction.RunUp: _runUntil = now + 3f; break;
+                    case StallAction.Rest: _restUntil = now + 1.5f; break;
+                    case StallAction.SideStep:
+                        {
+                            _sideSteps++;
+                            var o2 = pos + Vector3.up * 1.0f; var perp = Vector3.Cross(Vector3.up, dir); RaycastHit hh;
+                            var cl = Physics.Raycast(o2, (dir + perp * 0.6f).normalized, out hh, 2.5f, ~0, QueryTriggerInteraction.Ignore) ? hh.distance : 2.5f;
+                            var cr = Physics.Raycast(o2, (dir - perp * 0.6f).normalized, out hh, 2.5f, ~0, QueryTriggerInteraction.Ignore) ? hh.distance : 2.5f;
+                            _strafeSide = cl >= cr ? 1f : -1f; _strafeUntil = now + 0.6f; break;
+                        }
+                    case StallAction.Reroute:
+                        {
+                            _reroutes++;
+                            string err; var leg = NavLeg(pos, _pts[_pts.Count - 1], "Humanoid", out err);
+                            if (leg == null) { _blocker = "re-route failed: " + err + "; " + Blocker(p, dir); Stop("blocked"); return; }
+                            _pts = new List<Vector3>(leg); _i = 0; BuildLine(pos); _lastProg = pos; break;
+                        }
+                    default:
+                        _blocker = !string.IsNullOrEmpty(_lockedDoor) ? "locked door: " + _lockedDoor + " (ward or missing key); " + Blocker(p, dir) : Blocker(p, dir);
+                        Stop("blocked"); break;
                 }
             }
 
-            bool TryDoor(Player p, Vector3 dir)
+            /// <summary>Height of the top just ahead of the feet (a ledge, a log, a step), measured with rays down from 1.5 m over the feet; NaN when there is none.</summary>
+            static float RiseAhead(Player p, Vector3 dir)
             {
-                // double doors leave a seam between the leaves that a thin ray passes through: look for any closed door within reach of the character's front
-                var o = p.transform.position + Vector3.up * 1.0f + dir * 0.9f; bool any = false;
+                var feet = p.transform.position; float best = float.NaN;
+                foreach (var d in new[] { 0.4f, 0.7f, 1.0f })
+                {
+                    var o = feet + dir * d + Vector3.up * 1.5f; RaycastHit h;
+                    if (!Physics.Raycast(o, Vector3.down, out h, 1.6f, ~0, QueryTriggerInteraction.Ignore)) continue;
+                    if (h.collider.GetComponentInParent<Player>() != null) continue;
+                    var rise = h.point.y - feet.y;
+                    if (rise > 0.05f && (float.IsNaN(best) || rise > best)) best = rise;
+                }
+                return best;
+            }
+
+            /// <summary>A burning fire or a portal trigger within a metre ahead: never jump toward them.</summary>
+            static bool HazardAhead(Vector3 pos, Vector3 dir)
+            {
+                foreach (var c in Physics.OverlapSphere(pos + dir * 1.2f + Vector3.up * 0.5f, 1.0f, ~0, QueryTriggerInteraction.Collide))
+                {
+                    if (c.GetComponentInParent<TeleportWorld>() != null) return true;
+                    var f = c.GetComponentInParent<Fireplace>();
+                    if (f != null && f.IsBurning()) return true;
+                }
+                return false;
+            }
+
+            static readonly MethodInfo CanInteractM = typeof(Door).GetMethod("CanInteract", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+            /// <summary>
+            ///     Doors on the way: only a door the line ahead crosses within 2.8 m, never a locked one (Door.Interact returns true for a ward-denied or keyed door that did not open), only when its
+            ///     leaf is at rest, and not the same door twice within 2 s. Whether a door opened is read from its state afterwards, not from what Interact returned.
+            /// </summary>
+            void DoorTick(Player p, Vector3 pos, Vector3 dir, float now)
+            {
+                foreach (var kv in _pending.ToList())
+                {
+                    var nv0 = kv.Key; if (now - kv.Value < 0.4f) continue;
+                    _pending.Remove(nv0);
+                    var d0 = FindDoor(nv0); var z0 = d0 != null ? d0.GetComponentInParent<ZNetView>()?.GetZDO() : null;
+                    if (z0 != null && z0.GetInt("state", 0) != 0) _doorOpens++;
+                }
+                if (now < _nextDoorLook) return;
+                _nextDoorLook = now + 0.2f;
                 var seen = new HashSet<Door>();
-                foreach (var c in Physics.OverlapSphere(o, 1.6f, ~0, QueryTriggerInteraction.Ignore))
+                foreach (var c in Physics.OverlapSphere(pos + dir * 1.6f + Vector3.up, 2.2f, ~0, QueryTriggerInteraction.Ignore))
                 {
                     var d = c.GetComponentInParent<Door>();
                     if (d == null || !seen.Add(d)) continue;
                     try
                     {
-                        var nv = d.GetComponentInParent<ZNetView>();
-                        if (nv != null && nv.GetZDO() != null && nv.GetZDO().GetInt("state", 0) != 0) continue;     // already open: a second Interact would close it again
-                        if (d.Interact(p, false, false)) { _doorOpens++; any = true; }
+                        var nv = d.GetComponentInParent<ZNetView>(); var z = nv != null ? nv.GetZDO() : null; if (z == null) continue;
+                        var dp = d.transform.position;
+                        var wardDenies = d.m_checkGuardStone && !PrivateArea.CheckAccess(dp, 0f, false);
+                        var needsKey = d.m_keyItem != null; var haveKey = !needsKey || p.GetInventory().HaveItem(d.m_keyItem.m_itemData.m_shared.m_name);
+                        var locked = DoorRules.Locked(wardDenies, needsKey, haveKey);
+                        var rest = CanInteractM == null || (bool)CanInteractM.Invoke(d, null);
+                        var id = d.GetInstanceID(); float last; var since = _pressedAt.TryGetValue(id, out last) ? now - last : 999f;
+                        var decision = DoorRules.Decide(locked, rest, DoorRules.OnLineAhead(pos.x, pos.z, dir.x, dir.z, dp.x, dp.z), z.GetInt("state", 0) != 0, since);
+                        if (decision == DoorDecision.SkipLocked && DoorRules.OnLineAhead(pos.x, pos.z, dir.x, dir.z, dp.x, dp.z)) _lockedDoor = U.PrefabName(nv) + " at " + U.V(dp);
+                        if (decision != DoorDecision.Press) continue;
+                        _pressedAt[id] = now; _doorPresses++;
+                        d.Interact(p, false, false);
+                        _pending[id] = now;
                     }
-                    catch { }
+                    catch (Exception ex) { U.Once("Walker.door", ex); }
                 }
-                return any;
+            }
+
+            static Door FindDoor(int instanceId)
+            {
+                foreach (var d in UnityEngine.Object.FindObjectsOfType<Door>()) if (d.GetInstanceID() == instanceId) return d;
+                return null;
             }
 
             internal static string Headroom(Vector3 pos)
@@ -368,7 +523,8 @@ namespace HubnerExt
             {
                 var p = Player.m_localPlayer; var pos = p != null ? p.transform.position : Vector3.zero;
                 var sb = new StringBuilder("{\"running\":" + (Active ? "true" : "false") + ",\"result\":" + U.S(_result) + ",\"index\":" + _i + ",\"of\":" + _pts.Count + ",\"pos\":" + U.V(pos) + ",\"grounded\":" + (p != null && p.IsOnGround() ? "true" : "false") + ",\"elapsed\":" + U.N(Time.time - _t0));
-                sb.Append(",\"doorsOpened\":" + _doorOpens);
+                sb.Append(",\"stalls\":" + _stallsTotal + ",\"lastStall\":" + U.S(_lastStall) + ",\"doorPresses\":" + _doorPresses + ",\"doorsOpened\":" + _doorOpens + ",\"yieldedToUserSeconds\":" + U.N(Math.Round(_yielded, 1)));
+                if (!string.IsNullOrEmpty(_lockedDoor)) sb.Append(",\"lockedDoor\":" + U.S(_lockedDoor));
                 if (!string.IsNullOrEmpty(_blocker)) sb.Append(",\"blocker\":" + U.S(_blocker));
                 if (trace) sb.Append(",\"trace\":[" + string.Join(",", _trace.ToArray()) + "]");
                 return sb.Append('}').ToString();

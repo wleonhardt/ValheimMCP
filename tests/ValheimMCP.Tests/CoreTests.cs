@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using HubnerExt;
@@ -399,4 +400,143 @@ public class IdentityTests
         => Assert.Equal(Match.Found, Find("", "99", "5:77", "woodwall", "p", "k", 0, 0, false, out _, O("1:3", "woodwall", 80, 80, "p", "k")));
 
     [Fact] public void NoCandidatesIsNotFound() => Assert.Equal(Match.NotFound, Find("77", "77", "5:77", "woodwall", "", "", 1, 1, true, out _));
+}
+
+public class StallLadderTests
+{
+    static StallAction Pick(int spot = 1, int total = 1, float rise = float.NaN, float slope = 0, bool up = false, bool water = false, bool hazard = false, float stam = 1f, bool running = false, int side = 0, int rer = 0)
+        => StallLadder.Pick(spot, total, rise, slope, up, water, hazard, stam, running, side, rer);
+
+    [Fact] public void ProbeMeasuredAHoppableTopSoHop() => Assert.Equal(StallAction.Hop, Pick(rise: 0.8f));
+    [Fact] public void TooLowOrTooHighATopIsNotHopped() { Assert.NotEqual(StallAction.Hop, Pick(rise: 0.2f)); Assert.NotEqual(StallAction.Hop, Pick(rise: 1.6f)); }
+    [Fact] public void NoProbeNoBlindJump() => Assert.NotEqual(StallAction.Hop, Pick());
+    [Fact] public void NeverHopInWaterOrTowardAHazard() { Assert.NotEqual(StallAction.Hop, Pick(rise: 0.8f, water: true)); Assert.NotEqual(StallAction.Hop, Pick(rise: 0.8f, hazard: true)); }
+    [Fact] public void ASteepBankThatTheRouteClimbsIsRunUp() => Assert.Equal(StallAction.RunUp, Pick(slope: 50, up: true));
+    [Fact] public void AWallSteeperThanSixtyIsNotRunUp() => Assert.NotEqual(StallAction.RunUp, Pick(slope: 70, up: true));
+    [Fact] public void NoRunUpWhenAlreadyRunningOrTired() { Assert.NotEqual(StallAction.RunUp, Pick(slope: 50, up: true, running: true)); Assert.NotEqual(StallAction.RunUp, Pick(slope: 50, up: true, stam: 0.4f)); }
+    [Fact] public void TiredBodyRests() => Assert.Equal(StallAction.Rest, Pick(stam: 0.2f));
+    [Fact] public void ThenSideStepThenRerouteThenGiveUp()
+    {
+        Assert.Equal(StallAction.SideStep, Pick(side: 0));
+        Assert.Equal(StallAction.SideStep, Pick(side: 1));
+        Assert.Equal(StallAction.Reroute, Pick(side: 2, rer: 0));
+        Assert.Equal(StallAction.Reroute, Pick(side: 2, rer: 1));
+        Assert.Equal(StallAction.GiveUp, Pick(side: 2, rer: 2));
+    }
+    [Fact] public void FourStallsAtOneSpotOrFiveInTotalEndTheWalk() { Assert.Equal(StallAction.GiveUp, Pick(spot: 4, rise: 0.8f)); Assert.Equal(StallAction.GiveUp, Pick(total: 5)); }
+    [Fact] public void ProgressNeedsBothTheRouteAndTheFeetToMove() { Assert.True(StallLadder.Progressed(0.3f, 0.3f)); Assert.False(StallLadder.Progressed(0.0f, 0.5f)); Assert.False(StallLadder.Progressed(0.5f, 0.0f)); }
+}
+
+public class DoorRulesTests
+{
+    [Fact] public void WardOrMissingKeyLocksADoor() { Assert.True(DoorRules.Locked(true, false, false)); Assert.True(DoorRules.Locked(false, true, false)); Assert.False(DoorRules.Locked(false, true, true)); Assert.False(DoorRules.Locked(false, false, false)); }
+
+    [Fact]
+    public void OnlyDoorsOnTheLineAheadCount()
+    {
+        Assert.True(DoorRules.OnLineAhead(0, 0, 1, 0, 2.0, 0.3));
+        Assert.False(DoorRules.OnLineAhead(0, 0, 1, 0, 3.5, 0));       // too far ahead
+        Assert.False(DoorRules.OnLineAhead(0, 0, 1, 0, -1, 0));        // behind
+        Assert.False(DoorRules.OnLineAhead(0, 0, 1, 0, 1.5, 2.0));     // beside the line
+        Assert.False(DoorRules.OnLineAhead(0, 0, 0, 0, 1, 0));         // not walking
+    }
+
+    [Fact]
+    public void DecisionOrder()
+    {
+        Assert.Equal(DoorDecision.SkipLocked, DoorRules.Decide(true, true, true, false, 10));
+        Assert.Equal(DoorDecision.SkipOffRoute, DoorRules.Decide(false, true, false, false, 10));
+        Assert.Equal(DoorDecision.SkipUnneeded, DoorRules.Decide(false, true, true, true, 10));
+        Assert.Equal(DoorDecision.SkipNotReady, DoorRules.Decide(false, false, true, false, 10));
+        Assert.Equal(DoorDecision.SkipHeld, DoorRules.Decide(false, true, true, false, 0.5));
+        Assert.Equal(DoorDecision.Press, DoorRules.Decide(false, true, true, false, 5));
+    }
+}
+
+public class UserOverrideTests
+{
+    [Fact]
+    public void TheUserHasTheControlsUntilTheyStopTouchingForOneAndAHalfSeconds()
+    {
+        var u = new UserOverride();
+        Assert.False(u.Active(10));
+        u.Touch(10);
+        Assert.True(u.Active(11.4)); Assert.False(u.Active(11.6));
+    }
+
+    [Fact]
+    public void WalkerClocksDoNotRunWhileTheUserDrives()
+    {
+        var u = new UserOverride();
+        Assert.Equal(0, u.Yielded(100));                // first call
+        u.Touch(100.1);
+        Assert.Equal(0.6, u.Yielded(100.6), 6);         // the user is active: the 0.6 s since the last call are added to the walker's clocks
+        Assert.Equal(0.5, u.Yielded(101.1), 6);
+        Assert.Equal(0.0, u.Yielded(103.0), 6);         // the user stopped long ago: clocks run again
+    }
+}
+
+public class PursuitTests
+{
+    static List<double[]> L(params double[][] p) => p.ToList();
+
+    [Fact] public void LookAheadGrowsWithSpeedAndIsClamped() { Assert.Equal(1.0, Pursuit.LookAhead(0.1), 6); Assert.Equal(1.8, Pursuit.LookAhead(3), 6); Assert.Equal(2.4, Pursuit.LookAhead(20), 6); }
+
+    [Fact]
+    public void SteersAtAPointAheadOnTheLineNotAtTheWaypoint()
+    {
+        var line = L(new[] { 0.0, 0 }, new[] { 10.0, 0 });
+        int seg = 0; double t = 0;
+        Pursuit.Aim(line, ref seg, ref t, 2, 0.4, 2.0, out var ax, out var az);
+        Assert.Equal(4.0, ax, 6); Assert.Equal(0.0, az, 6);
+    }
+
+    [Fact]
+    public void RoundsACornerAlongTheLine()
+    {
+        var line = L(new[] { 0.0, 0 }, new[] { 10.0, 0 }, new[] { 10.0, 10 });
+        int seg = 0; double t = 0;
+        Pursuit.Aim(line, ref seg, ref t, 9.0, 0, 3.0, out var ax, out var az);
+        Assert.Equal(10.0, ax, 6); Assert.Equal(2.0, az, 6);              // 1 m to the corner, then 2 m up the next leg
+    }
+
+    [Fact]
+    public void ProgressNeverMovesBackward()
+    {
+        var line = L(new[] { 0.0, 0 }, new[] { 10.0, 0 });
+        int seg = 0; double t = 0;
+        Pursuit.Aim(line, ref seg, ref t, 6, 0, 1.0, out _, out _);
+        var before = t;
+        Pursuit.Aim(line, ref seg, ref t, 3, 0, 1.0, out var ax, out _);       // pushed back by a stall
+        Assert.True(t >= before); Assert.Equal(7.0, ax, 6);
+    }
+
+    [Fact]
+    public void NearTheEndItAimsAtTheEnd()
+    {
+        var line = L(new[] { 0.0, 0 }, new[] { 10.0, 0 });
+        int seg = 0; double t = 0;
+        Pursuit.Aim(line, ref seg, ref t, 9.5, 0, 2.4, out var ax, out var az);
+        Assert.Equal(10.0, ax, 6); Assert.Equal(0.0, az, 6);
+    }
+}
+
+public class WalkGuardTests
+{
+    [Fact] public void AJumpOfThirtyMetresIsATeleport() { Assert.True(TeleportGuard.Jumped(30, 0, 0)); Assert.True(TeleportGuard.Jumped(22, 22, 0)); Assert.False(TeleportGuard.Jumped(5, 1, 5)); }
+
+    [Fact]
+    public void RunDecisions()
+    {
+        Assert.True(RunRules.WantRun(false, 30, 0.9, 0, false, false));          // far and fresh
+        Assert.False(RunRules.WantRun(false, 10, 0.9, 0, false, false));         // not far enough to start
+        Assert.True(RunRules.WantRun(true, 10, 0.9, 0, false, false));           // hold it down to 8 m
+        Assert.False(RunRules.WantRun(true, 6, 0.9, 0, false, false));
+        Assert.False(RunRules.WantRun(true, 30, 0.4, 0, false, false));          // tired
+        Assert.True(RunRules.WantRun(false, 3, 0.9, 50, true, false));           // a steep bank the route climbs is always run
+        Assert.False(RunRules.WantRun(false, 3, 0.4, 50, true, false));          // ... unless there is no stamina
+        Assert.True(RunRules.WantRun(false, 3, 0.9, 0, false, true));            // the caller asked for run
+    }
+
+    [Fact] public void CapsuleNumbersAreThePlayersNotAGuess() { Assert.Equal(0.49f, WalkFacts.CapsuleRadius); Assert.Equal(1.85f, WalkFacts.CapsuleHeight); Assert.Equal(0.45f, WalkFacts.StepUp); Assert.Equal(38f, WalkFacts.SlideDeg); }
 }

@@ -23,6 +23,7 @@
     <Compile Include="../../src/ValheimMCP/BuildStamp.cs" Link="src/BuildStamp.cs" />
     <Compile Include="../../ext/FlatJson.cs" Link="ext/FlatJson.cs" />
     <Compile Include="../../ext/Pure.cs" Link="ext/Pure.cs" />
+    <Compile Include="../../ext/WalkRules.cs" Link="ext/WalkRules.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
