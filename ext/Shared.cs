@@ -166,7 +166,7 @@ namespace HubnerExt
 #else
             const string role = "client";
 #endif
-            return U.Json("{\"version\":" + U.S(Ext.Version) + ",\"role\":" + U.S(role) + ",\"writes\":" + (ToolRegistry.WritesEnabled ? "true" : "false") + ",\"zdoReady\":" + (Zdos.Ready ? "true" : "false") + ",\"note\":\"no terrain-edit tools by design\"}");
+            return U.Json("{\"version\":" + U.S(Ext.Version) + ",\"build\":" + U.S(Cfg.BuildStamp(typeof(Ext).Assembly)) + ",\"role\":" + U.S(role) + ",\"writes\":" + (ToolRegistry.WritesEnabled ? "true" : "false") + ",\"zdoReady\":" + (Zdos.Ready ? "true" : "false") + ",\"note\":\"no terrain-edit tools by design\"}");
         }
 
         static ToolOutput Portals(Dictionary<string, object> a)

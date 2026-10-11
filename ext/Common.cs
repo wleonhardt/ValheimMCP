@@ -16,6 +16,12 @@ namespace HubnerExt
     {
         // resolved by reflection: a direct call would make Mono throw MissingMethodException while JIT-compiling the CALLER on an old core, outside any try/catch
         static readonly MethodInfo MInt = typeof(McpJson).GetMethod("SettingInt", new[] { typeof(string), typeof(int) }), MStr = typeof(McpJson).GetMethod("Setting", new[] { typeof(string), typeof(string) }), MList = typeof(McpJson).GetMethod("SettingList", new[] { typeof(string) });
+        /// <summary>The build stamp of an assembly (commit, dirty, branch, worktree), through the core by reflection so an older core still loads the extension.</summary>
+        public static string BuildStamp(System.Reflection.Assembly a)
+        {
+            try { var t = typeof(McpJson).Assembly.GetType("ValheimMCP.BuildStamp"); var m = t != null ? t.GetMethod("Of", new[] { typeof(System.Reflection.Assembly) }) : null; return m != null ? (string)m.Invoke(null, new object[] { a }) : "core without build stamps"; }
+            catch (Exception) { return "unknown"; /* allow: a stamp that cannot be read is shown as unknown, never an error */ }
+        }
         public static bool CoreHasSettings { get { return MInt != null; } }
         public static int Int(string key, int dflt) { try { return MInt != null ? (int)MInt.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
         public static string Str(string key, string dflt) { try { return MStr != null ? (string)MStr.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
