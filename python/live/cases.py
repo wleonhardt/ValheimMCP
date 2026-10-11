@@ -208,6 +208,20 @@ def smelters_case(ctx):
         ctx.check(f"{s['prefab']}: an empty queue takes no time", s['queued'] > 0 or s['secondsToEmpty'] == 0, s)
 
 
+def creature_case(ctx):
+    c = ctx.client('any')
+    if not _has_prefab(c, 'Boar'): raise Skip('prefab Boar not in this game')
+    r = c.tool('creature_info', name='Boar', armor=10, playerHp=100)
+    ctx.check('health by star is health x level', r['healthByStar'] == [r['health'], r['health'] * 2, r['health'] * 3], r['healthByStar'])
+    ctx.check('a boar has an attack', len(r['attacks']) >= 1, r['attacks'])
+    ctx.check('a boar can be tamed', 'tame' in r and r['tame']['tamingTimeSec'] > 0, r.get('tame'))
+    for w in r['againstPlayer']['hits']:
+        hits = [s['hit'] for s in w['stars']]
+        ctx.check('more stars hurt more', hits == sorted(hits), w)
+        ctx.check('hits to kill are consistent with the hit', all(s['hitsToKill'] >= 100 / max(s['hit'], 0.01) - 1 for s in w['stars']), w)
+    ctx.check('the damage factor by star is 1, 1.5, 2', r['damageFactorByStar'] == [1, 1.5, 2])
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -288,6 +302,7 @@ CASES = [
     Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
     Case('stations', 'stations: level is 1 + the extensions that count', stations_case),
     Case('smelters', 'smelters: queue, room and why one stands still agree', smelters_case),
+    Case('creature-info', 'creature_info: stars scale health and damage, hits to kill follow', creature_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

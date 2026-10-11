@@ -391,3 +391,42 @@ public class SmelterMathTests
         Assert.Equal("needs a roof", SmelterMath.Stalled(roofed, 3, 4, true, false)); Assert.Null(SmelterMath.Stalled(roofed, 3, 4, false, false));      // unknown roof: no claim
     }
 }
+
+public class CombatRulesTests
+{
+    [Theory]
+    [InlineData(100, 20, 80)]           // armour under half the damage: subtracted
+    [InlineData(100, 50, 50)]           // exactly half: still subtracted (ac < dmg/2 is false, so the other branch: 100/(200) x 100 = 50)
+    [InlineData(100, 100, 25)]          // armour equal to damage: dmg/(4 ac) x dmg
+    [InlineData(40, 200, 2)]            // heavy armour on a small hit
+    [InlineData(100, 0, 100)]
+    public void ArmourIsTheGamesFormula(double dmg, double ac, double expected) => Assert.Equal(expected, CombatRules.Armor(dmg, ac), 6);
+
+    [Fact] public void StarsAddFiftyPercentOfTheBaseEach() { Assert.Equal(1.0, CombatRules.LevelFactor(1)); Assert.Equal(1.5, CombatRules.LevelFactor(2)); Assert.Equal(2.0, CombatRules.LevelFactor(3)); Assert.Equal(1.0, CombatRules.LevelFactor(0)); }
+    [Fact] public void HealthIsTheBaseTimesTheLevelAndTheWorldLevelMultiplier()
+    {
+        Assert.Equal(600, CombatRules.MaxHealth(600, 1)); Assert.Equal(1800, CombatRules.MaxHealth(600, 3));
+        Assert.Equal(600 * 1 * 2 * 2, CombatRules.MaxHealth(600, 2, 1, 2));
+    }
+    [Theory] [InlineData((int)Mod.Resistant, 0.5)] [InlineData((int)Mod.VeryResistant, 0.25)] [InlineData((int)Mod.SlightlyResistant, 0.75)] [InlineData((int)Mod.Weak, 1.5)] [InlineData((int)Mod.VeryWeak, 2)] [InlineData((int)Mod.SlightlyWeak, 1.25)] [InlineData((int)Mod.Immune, 0)] [InlineData((int)Mod.Ignore, 0)] [InlineData((int)Mod.Normal, 1)]
+    public void ResistanceMultipliersAreTheGamesOwn(int m, double x) => Assert.Equal(x, CombatRules.Multiplier((Mod)m));
+
+    [Fact] public void ResistanceComesBeforeArmourAndArmourIsOnTheArmouredSumOnly()
+    {
+        var dmg = new Dictionary<string, double> { { "slash", 60 }, { "fire", 40 }, { "chop", 100 } };
+        var mods = new Dictionary<string, Mod> { { "fire", Mod.Immune } };
+        // fire gone, slash 60 against armour 20: 40; chop (not armoured) 100 stays
+        Assert.Equal(40 + 100, CombatRules.Hit(dmg, mods, 20), 6);
+        // a 3-star attacker: damage x2 before resistance and armour: slash 120 - 20
+        Assert.Equal(100 + 200, CombatRules.Hit(dmg, mods, 20, 3), 6);
+    }
+    [Fact] public void HitsToDieRoundUp() { Assert.Equal(4, CombatRules.HitsToDie(100, 30)); Assert.Equal(3, CombatRules.HitsToDie(90, 30)); Assert.Equal(int.MaxValue, CombatRules.HitsToDie(100, 0)); }
+    [Fact] public void ContactTimeIsDistanceLeftOverClosingSpeed()
+    {
+        Assert.Equal(2.0, CombatRules.SecondsToContact(10, 2, 4)); Assert.Equal(0, CombatRules.SecondsToContact(1.5, 2, 4)); Assert.True(double.IsPositiveInfinity(CombatRules.SecondsToContact(10, 2, 0)));
+    }
+    [Fact] public void ExpectedDropsScaleWithTheLevelOnlyWhenTheDropDoes()
+    {
+        Assert.Equal(1.5, CombatRules.ExpectedDrop(1, 2, 1.0, false, 3)); Assert.Equal(4.5, CombatRules.ExpectedDrop(1, 2, 1.0, true, 3)); Assert.Equal(0.5, CombatRules.ExpectedDrop(1, 1, 0.5, true, 1));
+    }
+}

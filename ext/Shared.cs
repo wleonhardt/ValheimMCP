@@ -36,6 +36,7 @@ namespace HubnerExt
             Neighbours.Register(r);
             ClockTools.Register(r);
             RecipeTools.Register(r);
+            CreatureTools.Register(r);
             WorldEvents.Register(r);
             PlanCheck.Register(r);
             Journal.Load();
