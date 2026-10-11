@@ -438,10 +438,10 @@ namespace HubnerExt
         static readonly string[] KeepNames = { "Player", "Location", "LocationProxy", "Music", "sign", "portal", "Chest", "TreasureChest", "Spawner", "Vegvisir", "BossStone", "StartTemple", "Pickable_ForestCryptRemains" };
         static float NaturalRadius(string n)
         {
-            if (n.StartsWith("Beech") || n.StartsWith("Oak") || n.StartsWith("Birch")) return n.Contains("small") ? 2.0f : 3.5f;
-            if (n.IndexOf("Tree", StringComparison.OrdinalIgnoreCase) >= 0 || n.StartsWith("Pine") || n.StartsWith("Fir")) return 2.2f;
-            if (n.StartsWith("Rock") || n.StartsWith("rock")) return 2.0f;
-            if (n.IndexOf("Bush", StringComparison.OrdinalIgnoreCase) >= 0 || n.StartsWith("shrub")) return 1.2f;
+            if (n.StartsWith("Beech", StringComparison.Ordinal) || n.StartsWith("Oak", StringComparison.Ordinal) || n.StartsWith("Birch", StringComparison.Ordinal)) return n.Contains("small") ? 2.0f : 3.5f;
+            if (n.IndexOf("Tree", StringComparison.OrdinalIgnoreCase) >= 0 || n.StartsWith("Pine", StringComparison.Ordinal) || n.StartsWith("Fir", StringComparison.Ordinal)) return 2.2f;
+            if (n.StartsWith("Rock", StringComparison.Ordinal) || n.StartsWith("rock", StringComparison.Ordinal)) return 2.0f;
+            if (n.IndexOf("Bush", StringComparison.OrdinalIgnoreCase) >= 0 || n.StartsWith("shrub", StringComparison.Ordinal)) return 1.2f;
             return 0.6f;
         }
 
@@ -755,7 +755,7 @@ namespace HubnerExt
             if (_vars != null) return _vars;
             _vars = new Dictionary<int, string>();
             foreach (var f in typeof(ZDOVars).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                if (f.FieldType == typeof(int) && f.Name.StartsWith("s_")) { try { _vars[(int)f.GetValue(null)] = f.Name.Substring(2); } catch { } }
+                if (f.FieldType == typeof(int) && f.Name.StartsWith("s_", StringComparison.Ordinal)) { try { _vars[(int)f.GetValue(null)] = f.Name.Substring(2); } catch { } }
             foreach (var k in new[] { "text", "tag", "creator", "scale", "health", "author", "hub_plan", "hub_key", "hub_ctag", "target", "support", "owner", "fuel", "state" }) _vars[k.GetStableHashCode()] = k;
             return _vars;
         }

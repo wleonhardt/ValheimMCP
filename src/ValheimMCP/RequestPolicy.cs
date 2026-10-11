@@ -30,7 +30,7 @@ namespace ValheimMCP
         /// <summary>Host header without the port: "127.0.0.1:8731" -> "127.0.0.1", "[::1]:8731" -> "[::1]".</summary>
         public static string HostName(string host)
         {
-            if (host.StartsWith("["))
+            if (host.StartsWith("[", StringComparison.Ordinal))
             {
                 var end = host.IndexOf(']');
                 return end > 0 ? host.Substring(0, end + 1) : host;

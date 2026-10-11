@@ -406,7 +406,7 @@ namespace HubnerExt
             return U.Json("{\"job\":" + j.Id + ",\"state\":\"queued\",\"sliced\":" + (JobIters.ContainsKey(tool) ? "true" : "false") + "}");
         }
 
-        static void Finish(Job j, ToolOutput o) { j.Result = o != null ? o.Text : ""; j.IsJson = o != null && !o.IsError && o.Text != null && o.Text.StartsWith("{"); j.State = o == null || o.IsError ? "error" : "done"; }
+        static void Finish(Job j, ToolOutput o) { j.Result = o != null ? o.Text : ""; j.IsJson = o != null && !o.IsError && o.Text != null && o.Text.StartsWith("{", StringComparison.Ordinal); j.State = o == null || o.IsError ? "error" : "done"; }
 
         static void RunJobs()
         {

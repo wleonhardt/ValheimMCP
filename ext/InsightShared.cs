@@ -53,7 +53,7 @@ namespace HubnerExt
 
         static bool Wild(string value, string pattern)
         {
-            if (pattern.EndsWith("*")) return value.StartsWith(pattern.TrimEnd('*'), StringComparison.OrdinalIgnoreCase);
+            if (pattern.EndsWith("*", StringComparison.Ordinal)) return value.StartsWith(pattern.TrimEnd('*'), StringComparison.OrdinalIgnoreCase);
             return string.Equals(value, pattern, StringComparison.OrdinalIgnoreCase);
         }
     }

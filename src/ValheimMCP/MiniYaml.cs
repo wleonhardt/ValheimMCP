@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -72,7 +73,7 @@ namespace ValheimMCP
                     listKey = path;
                     if (!y._lists.ContainsKey(path)) y._lists[path] = new List<string>();
                 }
-                else if (val.StartsWith("[") && val.EndsWith("]"))
+                else if (val.StartsWith("[", StringComparison.Ordinal) && val.EndsWith("]", StringComparison.Ordinal))
                 {
                     var inner = val.Substring(1, val.Length - 2);
                     var list = new List<string>();

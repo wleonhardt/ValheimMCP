@@ -194,7 +194,7 @@ namespace HubnerExt
             foreach (var z in Zdos.InBox(x0, z0, x1, z1))
             {
                 var rec = Zdos.ToRec(z);
-                if (rec.Prefab.StartsWith("_")) continue;
+                if (rec.Prefab.StartsWith("_", StringComparison.Ordinal)) continue;
                 if (U.Has(a, "x") && !U.Has(a, "x0") && Vector2.Distance(new Vector2(rec.Pos.x, rec.Pos.z), new Vector2((float)U.D(a, "x", 0), (float)U.D(a, "z", 0))) > U.D(a, "radius", 20)) continue;
                 if (U.Has(a, "y0") && rec.Pos.y < U.D(a, "y0", -1e9)) continue;
                 if (U.Has(a, "y1") && rec.Pos.y > U.D(a, "y1", 1e9)) continue;
@@ -431,7 +431,7 @@ namespace HubnerExt
             var name = McpJson.GetStr(a, "name");
             if (!SafeNames.IsFileStem(name)) return ToolOutput.Err("snapshot name must be 1-64 characters of letters, digits, _ - . (it becomes a file name)");
             var s = new S { Box = new[] { (float)U.D(a, "x0", 0), (float)U.D(a, "z0", 0), (float)U.D(a, "x1", 0), (float)U.D(a, "z1", 0) } };
-            foreach (var z in Zdos.InBox(s.Box[0], s.Box[1], s.Box[2], s.Box[3])) { var r = Zdos.ToRec(z); if (!r.Prefab.StartsWith("_")) s.Items[r.Id] = r; }
+            foreach (var z in Zdos.InBox(s.Box[0], s.Box[1], s.Box[2], s.Box[3])) { var r = Zdos.ToRec(z); if (!r.Prefab.StartsWith("_", StringComparison.Ordinal)) s.Items[r.Id] = r; }
             All[name] = s;
             try
             {
@@ -450,7 +450,7 @@ namespace HubnerExt
             if (string.IsNullOrEmpty(name)) return ToolOutput.Err("name required");
             if (!All.TryGetValue(name, out var s)) return ToolOutput.Err("no such snapshot in memory (extension reload clears memory; take it again): " + name);
             var now = new Dictionary<string, Rec>();
-            foreach (var z in Zdos.InBox(s.Box[0], s.Box[1], s.Box[2], s.Box[3])) { var r = Zdos.ToRec(z); if (!r.Prefab.StartsWith("_")) now[r.Id] = r; }
+            foreach (var z in Zdos.InBox(s.Box[0], s.Box[1], s.Box[2], s.Box[3])) { var r = Zdos.ToRec(z); if (!r.Prefab.StartsWith("_", StringComparison.Ordinal)) now[r.Id] = r; }
             var added = new List<string>(); var removed = new List<string>(); var changed = new List<string>(); int na = 0, nr = 0, nc = 0;
             foreach (var kv in now) if (!s.Items.ContainsKey(kv.Key)) { na++; if (added.Count < lim) added.Add(Zdos.Json(kv.Value)); }
             foreach (var kv in s.Items)
