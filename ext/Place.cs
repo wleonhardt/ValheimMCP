@@ -21,9 +21,11 @@ namespace HubnerExt
 
         private static Info Get(string name)
         {
+            if (string.IsNullOrEmpty(name)) return new Info();
             if (Cache.TryGetValue(name, out var c)) return c;
             var info = new Info();
-            var prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(name) : null;
+            if (ZNetScene.instance == null) return info;                                  // not ready is not an answer: do not cache it
+            var prefab = ZNetScene.instance.GetPrefab(name);
             if (prefab != null)
             {
                 GameObject go = null;
@@ -41,7 +43,7 @@ namespace HubnerExt
                 }
                 finally { UnityEngine.Object.Destroy(go); }
             }
-            Cache[name] = info;
+            if (info.Ok) Cache[name] = info;                                               // only a measured prefab is cached; an unknown name is cheap to look up again
             return info;
         }
 

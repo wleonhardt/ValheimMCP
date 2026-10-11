@@ -166,7 +166,8 @@ namespace HubnerExt
         {
             if (Chat.instance == null) return ToolOutput.Err("chat not available (menu or loading)");
             var t = McpJson.GetStr(a, "text") ?? ""; if (t.Length > 180) t = t.Substring(0, 180);
-            Talker.Type ty = Talker.Type.Normal; Enum.TryParse(McpJson.GetStr(a, "type") ?? "Normal", true, out ty);
+            Talker.Type ty;
+            if (!Enum.TryParse(McpJson.GetStr(a, "type") ?? "Normal", true, out ty) || !Enum.IsDefined(typeof(Talker.Type), ty)) return ToolOutput.Err("type must be Normal, Shout, Whisper or Ping");     // a failed parse used to fall back to the enum's zero value (Whisper)
             Chat.instance.SendText(ty, t); return U.Json("{\"sent\":" + U.S(t) + ",\"type\":" + U.S(ty.ToString()) + "}");
         }
 

@@ -46,7 +46,7 @@ namespace HubnerExt
         {
             var pts = Pts(a); if (pts.Count < 1) return ToolOutput.Err("points required");
             float step = Math.Max(0.5f, (float)McpJson.Get(a, "step", 2)); var zs = ZoneSystem.instance;
-            var rows = new List<string>(); float dist = 0, min = 1e9f, max = -1e9f, maxSlope = 0, prevH = float.NaN; int nulls = 0;
+            var rows = new List<string>(); float dist = 0, min = 1e9f, max = -1e9f, maxSlope = 0, prevH = float.NaN; int nulls = 0; bool truncated = false;
             for (int i = 0; i < pts.Count; i++)
             {
                 var p0 = pts[i]; var p1 = i + 1 < pts.Count ? pts[i + 1] : null;
@@ -54,7 +54,7 @@ namespace HubnerExt
                 int n = p1 == null ? 1 : Math.Max(1, (int)Math.Ceiling(L / step));
                 for (int k = 0; k < n; k++)
                 {
-                    if (rows.Count >= 4000) break;
+                    if (rows.Count >= 4000) { truncated = true; break; }
                     float t = n == 0 ? 0 : (float)k / n; float x = p1 == null ? p0[0] : p0[0] + (p1[0] - p0[0]) * t, z = p1 == null ? p0[1] : p0[1] + (p1[1] - p0[1]) * t;
                     float h = 0; bool ok = zs != null && zs.GetGroundHeight(new Vector3(x, 5000f, z), out h);
                     if (ok) { min = Math.Min(min, h); max = Math.Max(max, h); if (!float.IsNaN(prevH)) maxSlope = Math.Max(maxSlope, Math.Abs(h - prevH) / step); prevH = h; } else nulls++;
@@ -62,7 +62,7 @@ namespace HubnerExt
                 }
                 dist += L;
             }
-            return U.Json("{\"samples\":[" + string.Join(",", rows.ToArray()) + "],\"length\":" + U.N(Math.Round(dist, 1)) + ",\"min\":" + U.N(min) + ",\"max\":" + U.N(max) + ",\"maxSlope\":" + U.N(Math.Round(maxSlope, 3)) + ",\"unloaded\":" + nulls + "}");
+            return U.Json("{\"samples\":[" + string.Join(",", rows.ToArray()) + "],\"length\":" + U.N(Math.Round(dist, 1)) + ",\"min\":" + U.N(min) + ",\"max\":" + U.N(max) + ",\"maxSlope\":" + U.N(Math.Round(maxSlope, 3)) + ",\"unloaded\":" + nulls + ",\"truncated\":" + (truncated ? "true" : "false") + "}");
         }
 
         // first hit along a downward ray, skipping objects whose prefab name starts with one of `ignore` (trees, bushes, ...)
@@ -211,7 +211,10 @@ namespace HubnerExt
             var pts = McpJson.GetList(a, "points"); if (pts == null || pts.Count < 1) return ToolOutput.Err("points required");
             float step = Mathf.Max(0.1f, (float)McpJson.Get(a, "step", 0.5)); float min = (float)McpJson.Get(a, "min", 2.6);
             var path = new List<Vector3>();
-            foreach (var o in pts) { var l = o as List<object>; if (l == null || l.Count < 3) return ToolOutput.Err("points must be [x,y,z]"); path.Add(new Vector3((float)Convert.ToDouble(l[0], CultureInfo.InvariantCulture), (float)Convert.ToDouble(l[1], CultureInfo.InvariantCulture), (float)Convert.ToDouble(l[2], CultureInfo.InvariantCulture))); }
+            if (pts.Count > 500) return ToolOutput.Err("max 500 points");
+            foreach (var o in pts) { var l = o as List<object>; if (l == null || l.Count < 3) return ToolOutput.Err("points must be [x,y,z]"); var v = U.Vec(l); if (float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z)) return ToolOutput.Err("points must be [x,y,z] numbers"); path.Add(v); }
+            float total = 0f; for (int q = 1; q < path.Count; q++) total += Vector3.Distance(path[q - 1], path[q]);
+            if (total / step > 6000f) return ToolOutput.Err("path of " + U.N(Math.Round(total)) + " m at step " + U.N(step) + " is more than 6000 samples; raise step or split the path");
             var low = new List<string>(); float worst = 99f; string worstAt = ""; int n = 0;
             for (int i = 0; i < path.Count; i++)
             {

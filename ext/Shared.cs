@@ -447,6 +447,7 @@ namespace HubnerExt
         {
             if (!Zdos.Ready) return ToolOutput.Err("no world loaded");
             var name = McpJson.GetStr(a, "name"); var lim = (int)U.D(a, "limit", 15);
+            if (string.IsNullOrEmpty(name)) return ToolOutput.Err("name required");
             if (!All.TryGetValue(name, out var s)) return ToolOutput.Err("no such snapshot in memory (extension reload clears memory; take it again): " + name);
             var now = new Dictionary<string, Rec>();
             foreach (var z in Zdos.InBox(s.Box[0], s.Box[1], s.Box[2], s.Box[3])) { var r = Zdos.ToRec(z); if (!r.Prefab.StartsWith("_")) now[r.Id] = r; }

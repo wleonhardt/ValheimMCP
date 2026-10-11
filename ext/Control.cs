@@ -30,14 +30,14 @@ namespace HubnerExt
             r.Add("walk_status", "State of the current/last walk: running, waypoint index, position, result (arrived | blocked | timeout | stopped), blocking object, trace of positions (every 1 s with grounded flag).",
                 "{\"type\":\"object\",\"properties\":{\"trace\":{\"type\":\"boolean\"}}}", WalkStatus);
             r.Add("walk_stop", "Cancel the running walk.", "{\"type\":\"object\",\"properties\":{}}", WalkStop, true);
-            r.Add("menu_join", "Main-menu only: pick a character profile and join a dedicated server by host:port. {profile, host, port, password}. Uses the game's own FejdStartup join path, so no clicks are needed. Also runs at startup when the game is launched with -hubner-autojoin host:port,profile[,password].",
-                "{\"type\":\"object\",\"properties\":{\"profile\":{\"type\":\"string\"},\"host\":{\"type\":\"string\"},\"port\":{\"type\":\"number\"},\"password\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\"}},\"required\":[\"profile\",\"host\"]}", MenuJoin, true);
+            r.Add("menu_join", "Main-menu only: pick a character profile and join a dedicated server by host:port. {profile, host, port}. Uses the game's own FejdStartup join path, so no clicks are needed. The server password is never a tool argument (it would end up in the model's context): set the environment variable HUBNER_AUTOJOIN_PASSWORD before starting the game. Also runs at startup when the game is launched with -hubner-autojoin host:port,profile.",
+                "{\"type\":\"object\",\"properties\":{\"profile\":{\"type\":\"string\"},\"host\":{\"type\":\"string\"},\"port\":{\"type\":\"number\"},\"mode\":{\"type\":\"string\",\"description\":\"data (default, builds the join itself) | auto (the game's AutoJoinServer)\"}},\"required\":[\"profile\",\"host\"]}", MenuJoin, true);
             r.Add("ready_state", "One-call readiness of the character at (x,z): teleporting, grounded, godMode, position, zone loaded, terrain ground known, instance count within radius. Poll after teleport instead of combining zone_state and player_state.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"}}}", Ready);
             r.Add("nav_path", "Ask the game's own pathfinder for a walkable route: fromX,fromZ,toX,toZ (y = TERRAIN height unless fromY/toY are given: pass the floor height for targets inside buildings, towers and on decks, otherwise the goal lies under the floor and the route detours or fails), agent (default Humanoid). Returns found + waypoints; found=false means no route exists on the navmesh (doors count as passable). Use before walking, and via walk_to nav:true.",
                 "{\"type\":\"object\",\"properties\":{\"fromX\":{\"type\":\"number\"},\"fromZ\":{\"type\":\"number\"},\"fromY\":{\"type\":\"number\"},\"toY\":{\"type\":\"number\"},\"toX\":{\"type\":\"number\"},\"toZ\":{\"type\":\"number\"},\"agent\":{\"type\":\"string\"}},\"required\":[\"toX\",\"toZ\"]}", NavPath);
-            r.Add("menu_password", "Answer the server password dialog of a join that is waiting for it (menu_state shows connecting:true, passwordDialog:true). The extension types it on the next tick. Use when a join was started without the right password.",
-                "{\"type\":\"object\",\"properties\":{\"password\":{\"type\":\"string\"}},\"required\":[\"password\"]}", MenuPassword, true);
+            r.Add("menu_password", "Answer the server password dialog of a join that is waiting for it (menu_state shows connecting:true, passwordDialog:true) with the password from the environment variable HUBNER_AUTOJOIN_PASSWORD. The password is not a tool argument. The extension types it on the next tick.",
+                "{\"type\":\"object\",\"properties\":{}}", MenuPassword, true);
             r.Add("menu_state", "Where the game is: main menu (profile list, selected profile), loading, or in a world. Read-only; works at the menu.",
                 "{\"type\":\"object\",\"properties\":{}}", MenuState);
             Install();
@@ -81,10 +81,10 @@ namespace HubnerExt
         static void PlayerTick(Player __instance)
         {
             if (__instance != Player.m_localPlayer) return;
-            try { if (_walker != null) _walker.Tick(); if (_auto != null) _auto.Tick(); } catch { }
-            try { Env.Tick(); } catch { }
+            try { if (_walker != null) _walker.Tick(); if (_auto != null) _auto.Tick(); } catch (Exception ex) { U.Once("PlayerTick", ex); }
+            try { Env.Tick(); } catch (Exception ex) { U.Once("PlayerTick.env", ex); }
         }
-        static void MenuTick() { try { if (_auto != null) _auto.Tick(); Env.Tick(); } catch { } }
+        static void MenuTick() { try { if (_auto != null) _auto.Tick(); Env.Tick(); } catch (Exception ex) { U.Once("MenuTick", ex); } }
 
         // reflective field handles, resolved once (SetControlsPrefix runs every physics tick)
         const BindingFlags FI = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
@@ -141,7 +141,7 @@ namespace HubnerExt
                 }
                 list = nav;
             }
-            try { Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }
+            try { if (U.IsSandbox(Player.m_localPlayer)) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
             try { if (FDebugFly != null) FDebugFly.SetValue(Player.m_localPlayer, false); } catch (Exception ex) { U.Once("m_debugFly.set", ex); }
             _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true));
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
@@ -173,20 +173,19 @@ namespace HubnerExt
             return U.Json("{\"player\":true,\"ready\":" + (ready ? "true" : "false") + ",\"teleporting\":" + (tele ? "true" : "false") + ",\"grounded\":" + (p.IsOnGround() ? "true" : "false") + ",\"god\":" + (god ? "true" : "false") + ",\"pos\":" + U.V(pos) + ",\"zoneLoaded\":" + (loaded ? "true" : "false") + ",\"groundKnown\":" + (gok ? "true" : "false") + ",\"nearTarget\":" + (near ? "true" : "false") + ",\"instances\":" + inst + "}");
         }
 
-        [ThreadStatic] static bool _navAllowPartial;
-        static List<Vector3> NavLeg(Vector3 from, Vector3 to, string agent, out string err)
+        static List<Vector3> NavLeg(Vector3 from, Vector3 to, string agent, out string err, bool allowPartial = false)
         {
             err = null; var res = new List<Vector3>();
             if (Pathfinding.instance == null) { err = "no Pathfinding instance"; return null; }
             Pathfinding.AgentType at;
             try { at = (Pathfinding.AgentType)Enum.Parse(typeof(Pathfinding.AgentType), agent ?? "Humanoid", true); } catch { err = "unknown agent " + agent; return null; }
             float h;
-            if (float.IsNaN(from.y) && ZoneSystem.instance.GetGroundHeight(new Vector3(from.x, 5000f, from.z), out h)) from.y = h;
-            if (float.IsNaN(to.y) && ZoneSystem.instance.GetGroundHeight(new Vector3(to.x, 5000f, to.z), out h)) to.y = h;
+            if (float.IsNaN(from.y) && ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(from.x, 5000f, from.z), out h)) from.y = h;
+            if (float.IsNaN(to.y) && ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(new Vector3(to.x, 5000f, to.z), out h)) to.y = h;
             bool ok = Pathfinding.instance.GetPath(from, to, res, at, false, true, false);
             if (!ok || res.Count == 0) { err = "no route from " + U.V(from) + " to " + U.V(to); return null; }
             var last = res[res.Count - 1]; float gap = Mathf.Sqrt((last.x - to.x) * (last.x - to.x) + (last.z - to.z) * (last.z - to.z));
-            if (gap > 2.5f) { err = "route ends " + U.N(Math.Round(gap, 1)) + " m short of the target at " + U.V(last) + " (target unreachable on the navmesh: a closed door or gate blocks it, the target is inside a collider, or the y is wrong - pass toY for floors above terrain)"; if (!_navAllowPartial) return null; }
+            if (gap > 2.5f) { err = "route ends " + U.N(Math.Round(gap, 1)) + " m short of the target at " + U.V(last) + " (target unreachable on the navmesh: a closed door or gate blocks it, the target is inside a collider, or the y is wrong - pass toY for floors above terrain)"; if (!allowPartial) return null; }
             return res;
         }
 
@@ -195,7 +194,7 @@ namespace HubnerExt
             var p = Player.m_localPlayer; var from = p != null ? p.transform.position : Vector3.zero;
             if (U.Has(a, "fromX")) from = new Vector3((float)U.D(a, "fromX", 0), U.Has(a, "fromY") ? (float)U.D(a, "fromY", 0) : float.NaN, (float)U.D(a, "fromZ", 0));
             var to = new Vector3((float)U.D(a, "toX", 0), U.Has(a, "toY") ? (float)U.D(a, "toY", 0) : float.NaN, (float)U.D(a, "toZ", 0));
-            string err; _navAllowPartial = true; var path = NavLeg(from, to, McpJson.GetStr(a, "agent"), out err); _navAllowPartial = false;
+            string err; var path = NavLeg(from, to, McpJson.GetStr(a, "agent"), out err, true);
             if (path == null) return U.Json("{\"found\":false,\"reason\":" + U.S(err) + "}");
             if (err != null) return U.Json("{\"found\":false,\"partial\":true,\"reason\":" + U.S(err) + ",\"count\":" + path.Count + ",\"points\":[" + string.Join(",", path.Select(v => "[" + U.N(Math.Round(v.x, 2)) + "," + U.N(Math.Round(v.y, 2)) + "," + U.N(Math.Round(v.z, 2)) + "]").ToArray()) + "]}");
             return U.Json("{\"found\":true,\"count\":" + path.Count + ",\"points\":[" + string.Join(",", path.Select(v => "[" + U.N(Math.Round(v.x, 2)) + "," + U.N(Math.Round(v.y, 2)) + "," + U.N(Math.Round(v.z, 2)) + "]").ToArray()) + "]}");
@@ -219,49 +218,47 @@ namespace HubnerExt
 
         static ToolOutput MenuPassword(Dictionary<string, object> a)
         {
-            var pw = McpJson.GetStr(a, "password"); if (string.IsNullOrEmpty(pw)) return ToolOutput.Err("password required");
-            PendingPw = pw; bool dlg = false; try { dlg = ZNet.instance != null && ZNet.IsPasswordDialogShowing(); } catch { }
+            var pw = Environment.GetEnvironmentVariable("HUBNER_AUTOJOIN_PASSWORD");
+            if (string.IsNullOrEmpty(pw)) return ToolOutput.Err("HUBNER_AUTOJOIN_PASSWORD is not set in the game's environment (the password is deliberately not a tool argument)");
+            PendingPw = pw; bool dlg = false; try { dlg = ZNet.instance != null && ZNet.IsPasswordDialogShowing(); } catch (Exception ex) { U.Once("IsPasswordDialogShowing", ex); }
             return U.Json("{\"queued\":true,\"dialogShowing\":" + (dlg ? "true" : "false") + "}");
         }
 
         internal static string DoJoin(string profile, string host, int port, string password)
         {
+            if (string.IsNullOrEmpty(profile) || string.IsNullOrEmpty(host)) return "join failed: profile and host are required";
+            if (port < 1 || port > 65535) return "join failed: port must be 1-65535";
             var f = FejdStartup.instance; if (f == null) return "not at the main menu";
             try
             {
-                var sp = typeof(FejdStartup).GetMethod("SetSelectedProfile", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, new[] { typeof(string) }, null);
-                if (sp == null) return "SetSelectedProfile not found";
+                const BindingFlags any = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+                var sp = typeof(FejdStartup).GetMethod("SetSelectedProfile", any, null, new[] { typeof(string) }, null);
+                if (sp == null) return "join failed: SetSelectedProfile not found";
                 sp.Invoke(f, new object[] { profile });
-                // preferred: the game's own auto-join entry point (host:port)
-                var aj = typeof(FejdStartup).GetMethod("AutoJoinServer", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, new[] { typeof(string) }, null);
-                if (!string.IsNullOrEmpty(password))
+                PendingPw = string.IsNullOrEmpty(password) ? null : password;              // the game asks for the password after the join starts; AutoJoin.Tick answers the dialog
+                if (Mode == "auto")
                 {
-                    var pw = typeof(FejdStartup).GetField("m_passwordInputField", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    // the password is asked by the game after the join starts; remembered passwords are used if present
+                    // the game's own entry point (host:port); at the menu it may only queue the join
+                    var aj = typeof(FejdStartup).GetMethod("AutoJoinServer", any, null, new[] { typeof(string) }, null);
+                    if (aj == null) return "join failed: AutoJoinServer not found";
+                    aj.Invoke(f, new object[] { host + ":" + port.ToString(CultureInfo.InvariantCulture) });
+                    return "join requested (auto)";
                 }
-                // second path (when AutoJoinServer only queues): build the join data ourselves and call the private JoinServer()
-                if (Mode == "data")
-                {
-                    var ded = new ServerJoinDataDedicated(host, (ushort)port);
-                    var data = new ServerJoinData(ded);
-                    PendingPw = string.IsNullOrEmpty(password) ? null : password;
-                    typeof(FejdStartup).GetMethod("SetServerToJoin", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Invoke(f, new object[] { data });
-                    typeof(FejdStartup).GetMethod("JoinServer", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, Type.EmptyTypes, null).Invoke(f, null);
-                    return "join requested (data)";
-                }
-                if (aj == null) return "AutoJoinServer not found";
-                PendingPw = string.IsNullOrEmpty(password) ? null : password;
-                aj.Invoke(f, new object[] { host + ":" + port.ToString(CultureInfo.InvariantCulture) });
-                return "join requested";
+                // default: build the join data ourselves and call the private JoinServer()
+                var data = new ServerJoinData(new ServerJoinDataDedicated(host, (ushort)port));
+                typeof(FejdStartup).GetMethod("SetServerToJoin", any).Invoke(f, new object[] { data });
+                typeof(FejdStartup).GetMethod("JoinServer", any, null, Type.EmptyTypes, null).Invoke(f, null);
+                return "join requested (data)";
             }
             catch (Exception ex) { return "join failed: " + (ex.InnerException ?? ex).Message; }
         }
 
         static ToolOutput MenuJoin(Dictionary<string, object> a)
         {
-            Mode = McpJson.GetStr(a, "mode") ?? "auto";
-            var msg = DoJoin(McpJson.GetStr(a, "profile"), McpJson.GetStr(a, "host"), (int)McpJson.Get(a, "port", 2456), McpJson.GetStr(a, "password"));
-            return msg.Contains("failed") || msg.Contains("not ") ? ToolOutput.Err(msg) : U.Json("{\"result\":" + U.S(msg) + "}");
+            Mode = McpJson.GetStr(a, "mode") == "auto" ? "auto" : "data";
+            var port = McpJson.Get(a, "port", 2456);
+            var msg = DoJoin(McpJson.GetStr(a, "profile"), McpJson.GetStr(a, "host"), port >= 1 && port <= 65535 ? (int)port : 0, Environment.GetEnvironmentVariable("HUBNER_AUTOJOIN_PASSWORD"));
+            return msg.StartsWith("join requested", StringComparison.Ordinal) ? U.Json("{\"result\":" + U.S(msg) + "}") : ToolOutput.Err(msg);
         }
 
         // ------------------------------------------------------------------ walker
@@ -388,14 +385,14 @@ namespace HubnerExt
                 var args = Environment.GetCommandLineArgs();
                 for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-hubner-autojoin") _spec = args[i + 1];
                 if (string.IsNullOrEmpty(_spec)) _done = true;
-                else { var sp = _spec.Split(','); if (sp.Length > 2) _pw = sp[2]; }
+                else { var sp = _spec.Split(new[] { ',' }, 3); if (sp.Length > 2) _pw = sp[2]; }       // everything after the second comma is the password, commas included
                 var env = Environment.GetEnvironmentVariable("HUBNER_AUTOJOIN_PASSWORD"); if (!string.IsNullOrEmpty(env)) _pw = env;
             }
             float _godNext;
             public void Tick()
             {
-                // the sandbox character is a tool: keep it invulnerable across respawns (it was being killed by wandering skeletons and trolls between teleports)
-                if (Time.time >= _godNext) { _godNext = Time.time + 1f; var pl = Player.m_localPlayer; try { if (pl != null && !pl.InGodMode()) pl.SetGodMode(true); } catch { } }
+                // the sandbox character (hubner.sandboxNames) is a tool: keep it invulnerable across respawns (it was being killed by wandering skeletons and trolls between teleports). Nobody else is touched.
+                if (Time.time >= _godNext) { _godNext = Time.time + 1f; var pl = Player.m_localPlayer; try { if (pl != null && U.IsSandbox(pl) && !pl.InGodMode()) pl.SetGodMode(true); } catch (Exception ex) { U.Once("AutoJoin.god", ex); } }
                 if (!string.IsNullOrEmpty(_pw)) PendingPw = _pw;
                 if (!string.IsNullOrEmpty(PendingPw) && ZNet.instance != null)                // answer the server's password dialog when it appears
                 {
@@ -407,11 +404,16 @@ namespace HubnerExt
                 if (Player.m_localPlayer != null) { _done = true; _pw = null; return; }
                 if (FejdStartup.instance == null || _tries >= 120) return;          // 120 attempts x 5 s: the menu can take minutes to come up (Steam/PlayFab login), the old 20 x 3 s gave up before it did
                 if (ZNet.instance != null) return;                                   // already connecting: the password dialog is answered above
-                var parts = _spec.Split(',');
-                var hp = parts[0].Split(':'); int port = hp.Length > 1 ? int.Parse(hp[1], CultureInfo.InvariantCulture) : 2456;
+                var parts = _spec.Split(new[] { ',' }, 3);
+                var hostPort = parts[0]; var colon = hostPort.LastIndexOf(':');
+                bool hasPort = colon > 0 && hostPort.IndexOf(']') < colon;                  // IPv6 literals ([::1]:2456) keep their inner colons
+                var host = (hasPort ? hostPort.Substring(0, colon) : hostPort).Trim('[', ']');
+                int port = 2456;
+                if (hasPort && !int.TryParse(hostPort.Substring(colon + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out port)) { Debug.LogWarning("[hubner autojoin] bad port in '" + hostPort + "'"); _done = true; return; }
                 _tries++;
                 Mode = "data";                                                       // AutoJoinServer only queues at the menu; the data path builds the join itself
-                var res = DoJoin(parts.Length > 1 ? parts[1] : "ClaudeEyes", hp[0], port, _pw);
+                if (parts.Length < 2 || string.IsNullOrEmpty(parts[1])) { Debug.LogWarning("[hubner autojoin] -hubner-autojoin needs host:port,profile"); _done = true; return; }
+                var res = DoJoin(parts[1], host, port, _pw);
                 Debug.Log("[hubner autojoin] attempt " + _tries + ": " + res);
             }
         }
