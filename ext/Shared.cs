@@ -440,7 +440,7 @@ namespace HubnerExt
             {
                 var dir = Path.Combine(BepInEx.Paths.BepInExRootPath, "hubner-ext", "snapshots"); Directory.CreateDirectory(dir);
                 var sb = new StringBuilder(); foreach (var r in s.Items.Values) sb.AppendLine(Zdos.Json(r));
-                File.WriteAllText(Path.Combine(dir, name + ".jsonl"), sb.ToString());
+                AtomicFile.WriteAllText(Path.Combine(dir, name + ".jsonl"), sb.ToString());
             }
             catch (Exception ex) { U.Once("Snap.Take", ex); }
             return U.Json("{\"snapshot\":" + U.S(name) + ",\"objects\":" + s.Items.Count + "}");

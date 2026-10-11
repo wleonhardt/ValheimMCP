@@ -39,6 +39,7 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"}}}", JobStatus);
             JobTools["zdo_audit"] = x => McpJson.GetBool(x, "fix", false) ? Plans.GuardPublic(x, AuditTool) : AuditTool(x);
             Install();
+            ResumeFromLedger();
         }
 
         // ------------------------------------------------------------------ hooks (jobs run on ZNetScene.Update, which exists on client and server)
@@ -67,7 +68,45 @@ namespace HubnerExt
 #endif
             patch("ZNet.SaveWorld", typeof(ZNet).GetMethod("SaveWorld", F), "BeforeSave", true);                                              // every save, autosaves included
         }
-        public static void Uninstall() { try { if (_h != null) _h.UnpatchSelf(); } catch { } _h = null; }
+        public static void Uninstall() { WriteLedger(); try { if (_h != null) _h.UnpatchSelf(); } catch (Exception ex) { U.Once("Audit.Uninstall", ex); } _h = null; }
+
+        // ------------------------------------------------------------------ jobs across a hot reload
+        // Replacing the extension DLL unloads this code while a sliced job may be half done. The job is written to reload.json; the next load, in the SAME game process and within two minutes,
+        // submits it again. plan_apply is idempotent and journaled, so running it again finishes what was left. A restart of the game (another pid) never resumes anything.
+        static string LedgerPath { get { return System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath, "hubner-ext", "reload.json"); } }
+        internal static string ResumeNote = "";
+        static long UnixNow() { return (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds; }
+
+        static void WriteLedger()
+        {
+            try
+            {
+                var j = _jobs.FirstOrDefault(x => x.State == "running") ?? _jobs.FirstOrDefault(x => x.State == "queued");
+                if (j == null) return;
+                if (j.State == "running" && j.Iter != null) { try { j.Iter.Dispose(); } catch (Exception ex) { U.Once("Audit.ledger dispose", ex); } }     // the iterator's finally blocks flush the journal batch
+                j.State = "cancelled"; j.Code = JobCodes.Unloaded; j.Result = "interrupted by an extension reload after " + j.Frames + " frames";
+                AtomicFile.WriteAllText(LedgerPath, JsonOut.Write(new Dictionary<string, object> { { "id", (double)j.Id }, { "tool", j.Tool }, { "args", j.Args }, { "pid", (double)System.Diagnostics.Process.GetCurrentProcess().Id }, { "written", (double)UnixNow() } }));
+            }
+            catch (Exception ex) { U.Once("Audit.WriteLedger", ex); }
+        }
+
+        static void ResumeFromLedger()
+        {
+            try
+            {
+                if (!System.IO.File.Exists(LedgerPath)) return;
+                var text = System.IO.File.ReadAllText(LedgerPath);
+                System.IO.File.Delete(LedgerPath);                                       // once: a resumed job that fails again must not be resubmitted by the next reload forever
+                var d = McpJson.Parse(text) as Dictionary<string, object>; if (d == null) return;
+                var tool = McpJson.GetStr(d, "tool"); var args = McpJson.GetObj(d, "args") ?? new Dictionary<string, object>();
+                if (!ReloadLedger.ShouldResume((int)McpJson.Get(d, "pid", -1), System.Diagnostics.Process.GetCurrentProcess().Id, (long)McpJson.Get(d, "written", 0), UnixNow())) { ResumeNote = "an interrupted " + tool + " job was not resumed (another game process or too old)"; return; }
+                if (tool == null || !(JobTools.ContainsKey(tool) || JobIters.ContainsKey(tool))) return;
+                var j = new Job { Id = ++_jobSeq, Tool = tool, Args = args }; _jobs.Add(j);
+                ResumeNote = "resumed " + tool + " as job " + j.Id + " after a reload (it was job " + (int)McpJson.Get(d, "id", 0) + ")";
+                Plugin.Log?.LogInfo("[hubner-ext] " + ResumeNote);
+            }
+            catch (Exception ex) { U.Once("Audit.ResumeFromLedger", ex); }
+        }
         internal static string HookError = "";
         static void BeforeSave() { try { SanitizeLists(); } catch (Exception ex) { U.Once("BeforeSave", ex); } }
         // ------------------------------------------------------------------ chat capture (client: Chat.OnNewChatMessage fires for every message the player would see)
@@ -345,7 +384,7 @@ namespace HubnerExt
                 var peers = ZNet.instance.GetPeers(); sb.Append(",\"peers\":" + (peers == null ? 0 : peers.Count));
                 try { sb.Append(",\"saveStart\":" + U.N(ZNet.instance.SaveStartTime) + ",\"saveDone\":" + U.N(ZNet.instance.SaveDoneTime)); } catch { }
             }
-            sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"journalError\":" + U.S(Journal.LastError) + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"health\":" + U.S(HealthSummary()));
+            sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"journalError\":" + U.S(Journal.LastError) + ",\"resumeNote\":" + U.S(ResumeNote) + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"health\":" + U.S(HealthSummary()));
             return U.Json(sb.Append('}').ToString());
         }
 
@@ -370,7 +409,7 @@ namespace HubnerExt
 
         // ------------------------------------------------------------------ jobs
         // Two kinds: JobTools run in one frame (off the HTTP timeout); JobIters are iterators advanced for at most hubner.jobBudgetMs per frame.
-        sealed class Job { public int Id; public string Tool; public Dictionary<string, object> Args; public string State = "queued"; public string Result; public DateTime Queued = DateTime.UtcNow; public IEnumerator<ToolOutput> Iter; public int Frames; public bool IsJson; }
+        sealed class Job { public int Id; public string Code = ""; public string Tool; public Dictionary<string, object> Args; public string State = "queued"; public string Result; public DateTime Queued = DateTime.UtcNow; public IEnumerator<ToolOutput> Iter; public int Frames; public bool IsJson; }
         static readonly List<Job> _jobs = new List<Job>(); static int _jobSeq;
         internal static Dictionary<string, Func<Dictionary<string, object>, ToolOutput>> JobTools = new Dictionary<string, Func<Dictionary<string, object>, ToolOutput>>();
         internal static Dictionary<string, Func<Dictionary<string, object>, IEnumerator<ToolOutput>>> JobIters = new Dictionary<string, Func<Dictionary<string, object>, IEnumerator<ToolOutput>>>();
@@ -383,11 +422,11 @@ namespace HubnerExt
         static ToolOutput JobCancel(Dictionary<string, object> a)
         {
             var id = (int)McpJson.Get(a, "id", -1); var j = _jobs.FirstOrDefault(x => x.Id == id); if (j == null) return ToolOutput.Err("no such job");
-            if (j.State == "queued") { j.State = "cancelled"; return U.Json("{\"job\":" + id + ",\"state\":\"cancelled\"}"); }
+            if (j.State == "queued") { j.State = "cancelled"; j.Code = JobCodes.Cancelled; return U.Json("{\"job\":" + id + ",\"state\":\"cancelled\"}"); }
             if (j.State == "running")
             {
                 try { if (j.Iter != null) j.Iter.Dispose(); } catch (Exception ex) { U.Once("JobCancel", ex); }      // runs the iterator's finally blocks: the journal batch is flushed
-                j.State = "cancelled"; j.Result = "cancelled after " + j.Frames + " frames";
+                j.State = "cancelled"; j.Code = JobCodes.Cancelled; j.Result = "cancelled after " + j.Frames + " frames";
                 return U.Json("{\"job\":" + id + ",\"state\":\"cancelled\",\"frames\":" + j.Frames + "}");
             }
             return ToolOutput.Err("job " + id + " is already " + j.State);
@@ -396,7 +435,7 @@ namespace HubnerExt
         static ToolOutput JobStart(Dictionary<string, object> a)
         {
             var tool = McpJson.GetStr(a, "tool");
-            if (tool == null || !(JobTools.ContainsKey(tool) || JobIters.ContainsKey(tool))) return ToolOutput.Err("tool not allowed for jobs: " + tool + " (allowed: " + string.Join(", ", JobTools.Keys.Concat(JobIters.Keys).ToArray()) + ")");
+            if (tool == null || !(JobTools.ContainsKey(tool) || JobIters.ContainsKey(tool))) return ToolOutput.Err(JobCodes.BadArgs + ": tool not allowed for jobs: " + tool + " (allowed: " + string.Join(", ", JobTools.Keys.Concat(JobIters.Keys).ToArray()) + ")");
             var args = McpJson.GetObj(a, "args") ?? new Dictionary<string, object>();
             if (_jobs.Count >= 50)                                                          // only finished jobs are forgotten: a queued or running one must not vanish
             {
@@ -408,7 +447,7 @@ namespace HubnerExt
             return U.Json("{\"job\":" + j.Id + ",\"state\":\"queued\",\"sliced\":" + (JobIters.ContainsKey(tool) ? "true" : "false") + "}");
         }
 
-        static void Finish(Job j, ToolOutput o) { j.Result = o != null ? o.Text : ""; j.IsJson = o != null && !o.IsError && o.Text != null && o.Text.StartsWith("{", StringComparison.Ordinal); j.State = o == null || o.IsError ? "error" : "done"; }
+        static void Finish(Job j, ToolOutput o) { j.Result = o != null ? o.Text : ""; j.IsJson = o != null && !o.IsError && o.Text != null && o.Text.StartsWith("{", StringComparison.Ordinal); j.State = o == null || o.IsError ? "error" : "done"; j.Code = o == null ? JobCodes.Error : JobCodes.ForResult(o.IsError, o.Text); }
 
         static void RunJobs()
         {
@@ -422,11 +461,11 @@ namespace HubnerExt
             if (j.State == "queued")
             {
                 j.State = "running";
-                if (JobIters.TryGetValue(j.Tool, out var mk)) { try { j.Iter = mk(j.Args); } catch (Exception ex) { j.Result = ex.Message; j.State = "error"; return; } }
+                if (JobIters.TryGetValue(j.Tool, out var mk)) { try { j.Iter = mk(j.Args); } catch (Exception ex) { j.Result = ex.Message; j.State = "error"; j.Code = JobCodes.Crash; return; } }
                 else
                 {
                     try { Finish(j, JobTools[j.Tool](j.Args)); }
-                    catch (Exception ex) { j.Result = ex.Message; j.State = "error"; }
+                    catch (Exception ex) { j.Result = ex.Message; j.State = "error"; j.Code = JobCodes.Crash; }
                     return;
                 }
             }
@@ -441,7 +480,7 @@ namespace HubnerExt
                     if ((Time.realtimeSinceStartup - t0) * 1000f >= budget) return;
                 }
             }
-            catch (Exception ex) { j.Result = ex.GetType().Name + ": " + ex.Message; j.State = "error"; Plugin.Log?.LogWarning("[hubner-ext] job " + j.Id + " " + j.Tool + " threw: " + ex); }
+            catch (Exception ex) { j.Result = ex.GetType().Name + ": " + ex.Message; j.State = "error"; j.Code = JobCodes.Crash; Plugin.Log?.LogWarning("[hubner-ext] job " + j.Id + " " + j.Tool + " threw: " + ex); }
         }
 
         static ToolOutput JobStatus(Dictionary<string, object> a)
@@ -449,9 +488,9 @@ namespace HubnerExt
             if (U.Has(a, "id"))
             {
                 var j = _jobs.FirstOrDefault(x => x.Id == (int)McpJson.Get(a, "id", -1)); if (j == null) return ToolOutput.Err("no such job");
-                return U.Json("{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"frames\":" + j.Frames + ",\"result\":" + (j.IsJson ? j.Result : U.S(j.Result ?? "")) + "}");
+                return U.Json("{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"code\":" + U.S(j.Code) + ",\"frames\":" + j.Frames + ",\"result\":" + (j.IsJson ? j.Result : U.S(j.Result ?? "")) + "}");
             }
-            return U.Json("{\"jobs\":[" + string.Join(",", _jobs.Select(j => "{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"frames\":" + j.Frames + "}").ToArray()) + "]}");
+            return U.Json("{\"jobs\":[" + string.Join(",", _jobs.Select(j => "{\"job\":" + j.Id + ",\"tool\":" + U.S(j.Tool) + ",\"state\":" + U.S(j.State) + ",\"code\":" + U.S(j.Code) + ",\"frames\":" + j.Frames + "}").ToArray()) + "]}");
         }
     }
 }

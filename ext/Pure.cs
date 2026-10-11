@@ -22,6 +22,12 @@ namespace HubnerExt
             if (confirm != Confirm) return "pass confirm:'" + Confirm + "' with every server write";
             return null;
         }
+
+        /// <summary>Is this error text one of the gate's refusals (as opposed to a failure of the tool itself)?</summary>
+        public static bool IsRefusal(string text)
+        {
+            return text != null && (text.StartsWith("server writes are off", StringComparison.Ordinal) || text.StartsWith("server write flag expired", StringComparison.Ordinal) || text.StartsWith("pass confirm:", StringComparison.Ordinal));
+        }
     }
 
     internal static class SafeNames
@@ -125,6 +131,94 @@ namespace HubnerExt
         {
             var dx = c.X - x; var dy = c.Y - y; var dz = c.Z - z;
             return System.Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+    }
+}
+
+namespace HubnerExt
+{
+    /// <summary>Writes a file so that a crash leaves either the old content or the new, never half of one.</summary>
+    internal static class AtomicFile
+    {
+        public static void WriteAllText(string path, string text)
+        {
+            var dir = System.IO.Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
+            var tmp = path + ".tmp";
+            System.IO.File.WriteAllText(tmp, text);
+            if (System.IO.File.Exists(path)) System.IO.File.Replace(tmp, path, null); else System.IO.File.Move(tmp, path);
+        }
+    }
+
+    /// <summary>Writes the dictionaries, lists, strings and numbers a tool call is made of back to JSON (the core's own writer is internal).</summary>
+    internal static class JsonOut
+    {
+        public static string Write(object o) { var sb = new System.Text.StringBuilder(); Put(sb, o); return sb.ToString(); }
+
+        private static void Put(System.Text.StringBuilder sb, object o)
+        {
+            switch (o)
+            {
+                case null: sb.Append("null"); break;
+                case bool b: sb.Append(b ? "true" : "false"); break;
+                case string s: Str(sb, s); break;
+                case double d: sb.Append(double.IsNaN(d) || double.IsInfinity(d) ? "null" : d.ToString("R", System.Globalization.CultureInfo.InvariantCulture)); break;
+                case float f: sb.Append(float.IsNaN(f) || float.IsInfinity(f) ? "null" : f.ToString("R", System.Globalization.CultureInfo.InvariantCulture)); break;
+                case int i: sb.Append(i.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
+                case long l: sb.Append(l.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
+                case System.Collections.IDictionary dict:
+                    sb.Append('{'); var firstD = true;
+                    foreach (System.Collections.DictionaryEntry kv in dict) { if (!firstD) sb.Append(','); firstD = false; Str(sb, Convert.ToString(kv.Key, System.Globalization.CultureInfo.InvariantCulture)); sb.Append(':'); Put(sb, kv.Value); }
+                    sb.Append('}'); break;
+                case System.Collections.IEnumerable list:
+                    sb.Append('['); var first = true;
+                    foreach (var item in list) { if (!first) sb.Append(','); first = false; Put(sb, item); }
+                    sb.Append(']'); break;
+                default: Str(sb, Convert.ToString(o, System.Globalization.CultureInfo.InvariantCulture)); break;
+            }
+        }
+
+        private static void Str(System.Text.StringBuilder sb, string s)
+        {
+            sb.Append('"');
+            foreach (var c in s ?? "")
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default: if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4")); else sb.Append(c); break;
+                }
+            }
+            sb.Append('"');
+        }
+    }
+
+    /// <summary>How a job ended, as a code a caller can branch on (the text is for people).</summary>
+    internal static class JobCodes
+    {
+        public const string Done = "done", Cancelled = "cancelled", Error = "error", Crash = "crash", Unloaded = "unloaded", BadArgs = "bad_args", Refused = "refused";
+
+        /// <summary>The code of a finished tool result: ok, a refusal by the write gate, or another error.</summary>
+        public static string ForResult(bool isError, string text)
+        {
+            if (!isError) return Done;
+            return WriteGate.IsRefusal(text) ? Refused : Error;
+        }
+    }
+
+    /// <summary>A job interrupted by a hot reload is resubmitted by the next load, but only for the same game process and only when the interruption is recent.</summary>
+    internal static class ReloadLedger
+    {
+        public const int MaxAgeSeconds = 120;
+        public static bool ShouldResume(int ledgerPid, int currentPid, long writtenUnix, long nowUnix)
+        {
+            if (ledgerPid != currentPid) return false;                         // another game process: the world was restarted, nothing is half-done
+            var age = nowUnix - writtenUnix;
+            return age >= 0 && age <= MaxAgeSeconds;
         }
     }
 }

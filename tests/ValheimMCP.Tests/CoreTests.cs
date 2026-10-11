@@ -653,3 +653,73 @@ public class PresenceTests
         Assert.Equal(new[] { "c" }, arrived); Assert.Equal(new[] { "a" }, left);
     }
 }
+
+public class AtomicFileTests
+{
+    static string Tmp() { var d = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hubner-test-" + System.Guid.NewGuid().ToString("N")); return d; }
+
+    [Fact]
+    public void WritesNewAndReplacesExistingWithoutLeavingATempFile()
+    {
+        var dir = Tmp(); var path = System.IO.Path.Combine(dir, "sub", "state.json");
+        try
+        {
+            AtomicFile.WriteAllText(path, "one");
+            AtomicFile.WriteAllText(path, "two");
+            Assert.Equal("two", System.IO.File.ReadAllText(path));
+            Assert.False(System.IO.File.Exists(path + ".tmp"));
+        }
+        finally { try { System.IO.Directory.Delete(dir, true); } catch (System.Exception) { } }
+    }
+
+    [Fact]
+    public void AStaleTempFileFromACrashDoesNotCorruptTheTarget()
+    {
+        var dir = Tmp(); var path = System.IO.Path.Combine(dir, "state.json");
+        try
+        {
+            AtomicFile.WriteAllText(path, "good");
+            System.IO.File.WriteAllText(path + ".tmp", "half writ");          // what a crash mid-write leaves
+            Assert.Equal("good", System.IO.File.ReadAllText(path));
+            AtomicFile.WriteAllText(path, "newer");
+            Assert.Equal("newer", System.IO.File.ReadAllText(path));
+        }
+        finally { try { System.IO.Directory.Delete(dir, true); } catch (System.Exception) { } }
+    }
+}
+
+public class JsonOutTests
+{
+    [Fact]
+    public void ARequestRoundTripsThroughTheCoreParser()
+    {
+        var args = new Dictionary<string, object>
+        {
+            { "plan", "castle \"x\"\n" }, { "dry", false }, { "n", 3.5 }, { "big", 4000000000L }, { "none", null },
+            { "items", new List<object> { new Dictionary<string, object> { { "prefab", "woodwall" }, { "x", 1.25 }, { "ints", new Dictionary<string, object> { { "state", 1.0 } } } } } }
+        };
+        var back = (Dictionary<string, object>)MiniJson.Parse(JsonOut.Write(args));
+        Assert.Equal("castle \"x\"\n", back["plan"]); Assert.Equal(false, back["dry"]); Assert.Equal(3.5, back["n"]); Assert.Equal(4000000000.0, back["big"]); Assert.Null(back["none"]);
+        var item = (Dictionary<string, object>)((List<object>)back["items"])[0];
+        Assert.Equal("woodwall", item["prefab"]); Assert.Equal(1.25, item["x"]); Assert.Equal(1.0, ((Dictionary<string, object>)item["ints"])["state"]);
+    }
+
+    [Fact] public void NonFiniteNumbersBecomeNull() => Assert.Equal("[null,null]", JsonOut.Write(new object[] { double.NaN, float.PositiveInfinity }));
+}
+
+public class JobCodeTests
+{
+    [Fact] public void OkIsDone() => Assert.Equal(JobCodes.Done, JobCodes.ForResult(false, "{}"));
+    [Fact] public void TheGatesRefusalsAreRefused() { foreach (var t in new[] { "server writes are off: create /x (and remove it when done)", "server write flag expired (older than 30 min): touch /x again", "pass confirm:'server-write' with every server write" }) Assert.Equal(JobCodes.Refused, JobCodes.ForResult(true, t)); }
+    [Fact] public void OtherErrorsAreErrors() => Assert.Equal(JobCodes.Error, JobCodes.ForResult(true, "plan required"));
+    [Fact] public void IsRefusalIgnoresOrdinaryText() { Assert.False(WriteGate.IsRefusal("plan required")); Assert.False(WriteGate.IsRefusal(null)); }
+}
+
+public class ReloadLedgerTests
+{
+    [Fact] public void SameProcessAndRecentResumes() => Assert.True(ReloadLedger.ShouldResume(100, 100, 1000, 1060));
+    [Fact] public void AnotherGameProcessNeverResumes() => Assert.False(ReloadLedger.ShouldResume(100, 200, 1000, 1010));
+    [Fact] public void AnOldLedgerNeverResumes() => Assert.False(ReloadLedger.ShouldResume(100, 100, 1000, 1000 + ReloadLedger.MaxAgeSeconds + 1));
+    [Fact] public void ALedgerFromTheFutureIsIgnored() => Assert.False(ReloadLedger.ShouldResume(100, 100, 2000, 1000));
+    [Fact] public void TheBoundaryResumes() => Assert.True(ReloadLedger.ShouldResume(100, 100, 1000, 1000 + ReloadLedger.MaxAgeSeconds));
+}
