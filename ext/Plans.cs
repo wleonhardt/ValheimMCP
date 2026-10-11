@@ -563,7 +563,9 @@ namespace HubnerExt
                     while (left > 0)
                     {
                         int n = Math.Min(per, left);
-                        if (inv.AddItem(name, n, quality, 0, 0L, "", false) == null) { errs.Add(prefab + " " + id + ": no room for " + name); break; }
+                        bool placed = false;
+                        try { placed = inv.CanAddItem(ip, n) && inv.AddItem(name, n, quality, 0, 0L, "", false) != null; } catch (Exception ex) { U.Once("container_set add", ex); }   // a full inventory made AddItem throw
+                        if (!placed) { errs.Add(prefab + " " + id + ": no room for " + name); break; }
                         left -= n; added += n;
                     }
                 }
