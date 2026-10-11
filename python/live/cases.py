@@ -197,6 +197,17 @@ def stations_case(ctx):
         ctx.check(f"{s['prefab']}: the build range is at least the base range", s['buildRange'] >= 10, s['buildRange'])
 
 
+def smelters_case(ctx):
+    c = ctx.client('any'); x, z = ctx.test_xz
+    r = c.tool('smelters', x=x, z=z, radius=150)
+    if r['total'] == 0: raise Skip(f'no smelter, kiln or windmill within 150 m of {x},{z}')
+    for s in r['smelters']:
+        ctx.check(f"{s['prefab']}: queued = ore listed (up to 40)", s['queued'] == len(s['ore']) or s['queued'] > 40, s)
+        ctx.check(f"{s['prefab']}: room = max - queued", s['queueRoom'] >= 0, s)
+        ctx.check(f"{s['prefab']}: stalled says why or is empty", s['stalled'] in (None, 'no ore queued', 'out of fuel'), s['stalled'])
+        ctx.check(f"{s['prefab']}: an empty queue takes no time", s['queued'] > 0 or s['secondsToEmpty'] == 0, s)
+
+
 def plan_materials_case(ctx):
     c = ctx.client('any')
     if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
@@ -276,6 +287,7 @@ CASES = [
     Case('recipes', 'recipe_info and item_info agree about Bronze', recipes_case),
     Case('missing-for', 'missing_for with no stock is crafts x ingredients', missing_for_case),
     Case('stations', 'stations: level is 1 + the extensions that count', stations_case),
+    Case('smelters', 'smelters: queue, room and why one stands still agree', smelters_case),
     Case('plan-materials', 'plan_materials scales with the item count', plan_materials_case),
     Case('portals-complete', 'portals says whether its list is complete', portals_complete),
     Case('plan-order', 'plan_apply builds lowest first by default', order_case, acts=True, pre=_spot_pre, clean=order_clean),

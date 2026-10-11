@@ -360,3 +360,34 @@ public class StationMathTests
         Assert.Equal(1, StationMath.Link(new[] { St("s", 0, 0) }, new[] { Ex("a", 3, 0, "x", false, 2) }, out un).Single().Level);       // 3 m away, its own range is 2
     }
 }
+
+public class SmelterMathTests
+{
+    static readonly SmelterSpec Smelter = new SmelterSpec { MaxOre = 10, MaxFuel = 20, FuelPerProduct = 2, SecPerProduct = 30 };
+    static readonly SmelterSpec Kiln = new SmelterSpec { MaxOre = 25, MaxFuel = 0, FuelPerProduct = 0, SecPerProduct = 30 };
+
+    [Fact] public void FuelPressesStopAtMaxMinusOne()
+    {
+        Assert.Equal(20, SmelterMath.FuelPressesAllowed(Smelter, 0)); Assert.Equal(1, SmelterMath.FuelPressesAllowed(Smelter, 19)); Assert.Equal(0, SmelterMath.FuelPressesAllowed(Smelter, 19.5)); Assert.Equal(1, SmelterMath.FuelPressesAllowed(Smelter, 18.2)); Assert.Equal(2, SmelterMath.FuelPressesAllowed(Smelter, 17.5));
+    }
+    [Fact] public void TimeAndFuelForTheQueueAccountForTheBakeTimer()
+    {
+        Assert.Equal(10 * 30 - 12, SmelterMath.SecondsToEmpty(Smelter, 10, 12, 1), 6);
+        Assert.Equal(10 * 2 - 12.0 * 2 / 30, SmelterMath.FuelNeeded(Smelter, 10, 12), 6);                       // 20 units less the 0.8 the bake timer has paid
+        Assert.Equal(150, SmelterMath.SecondsToEmpty(Smelter, 10, 0, 2), 6);                                      // a windmill at power 2 halves the time
+    }
+    [Fact] public void FuelLastsInProportionToPower() => Assert.Equal(300, SmelterMath.FuelSecondsLeft(Smelter, 20, 1), 6);          // 20 units at 2 per 30 s
+    [Fact] public void AKilnBurnsNoFuel()
+    {
+        Assert.Equal(0, SmelterMath.FuelNeeded(Kiln, 25, 0)); Assert.True(double.IsPositiveInfinity(SmelterMath.FuelSecondsLeft(Kiln, 0, 1)));
+        Assert.Null(SmelterMath.Stalled(Kiln, 3, 0, true, true));
+    }
+    [Fact] public void TheReasonItStandsStill()
+    {
+        Assert.Equal("no ore queued", SmelterMath.Stalled(Smelter, 0, 5, true, true));
+        Assert.Equal("out of fuel", SmelterMath.Stalled(Smelter, 3, 0, true, true));
+        Assert.Null(SmelterMath.Stalled(Smelter, 3, 4, true, true));
+        var roofed = new SmelterSpec { MaxOre = 10, MaxFuel = 10, FuelPerProduct = 1, SecPerProduct = 10, RequiresRoof = true };
+        Assert.Equal("needs a roof", SmelterMath.Stalled(roofed, 3, 4, true, false)); Assert.Null(SmelterMath.Stalled(roofed, 3, 4, false, false));      // unknown roof: no claim
+    }
+}

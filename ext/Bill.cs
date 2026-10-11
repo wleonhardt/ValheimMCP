@@ -162,4 +162,31 @@ namespace HubnerExt
             return links;
         }
     }
+
+    internal sealed class SmelterSpec { public int MaxOre = 10, MaxFuel = 10, FuelPerProduct = 4; public double SecPerProduct = 10; public bool RequiresRoof; }
+
+    /// <summary>Smelter.UpdateSmelter (decompiled): each second with ore queued, fuel (unless it burns none) and a clear flue, the bake timer grows by the power (1, or the windmill's) and fuel drops by power x fuelPerProduct / secPerProduct; at secPerProduct one ore becomes one product.</summary>
+    internal static class SmelterMath
+    {
+        public static int QueueRoom(SmelterSpec s, int queued) { return Math.Max(0, s.MaxOre - queued); }
+
+        /// <summary>OnAddFuel refuses above max - 1, so a press adds one unit while fuel is at most max - 1.</summary>
+        public static int FuelPressesAllowed(SmelterSpec s, double fuel) { return fuel > s.MaxFuel - 1 ? 0 : (int)Math.Floor(s.MaxFuel - fuel); }
+
+        public static double SecondsToEmpty(SmelterSpec s, int queued, double bake, double power) { return queued <= 0 || power <= 0 ? 0 : Math.Max(0, (queued * s.SecPerProduct - bake) / power); }
+
+        /// <summary>Fuel units it takes to smelt what is queued: queued x fuelPerProduct less what the bake timer has already paid for.</summary>
+        public static double FuelNeeded(SmelterSpec s, int queued, double bake) { return s.MaxFuel <= 0 || queued <= 0 ? 0 : Math.Max(0, queued * s.FuelPerProduct - bake * s.FuelPerProduct / s.SecPerProduct); }
+
+        public static double FuelSecondsLeft(SmelterSpec s, double fuel, double power) { return s.MaxFuel <= 0 ? double.PositiveInfinity : (power <= 0 ? 0 : fuel / (power * s.FuelPerProduct / s.SecPerProduct)); }
+
+        /// <summary>Why it is not working now, or null: no ore, no fuel (when it burns any), no roof (when it needs one).</summary>
+        public static string Stalled(SmelterSpec s, int queued, double fuel, bool roofKnown, bool roof)
+        {
+            if (s.MaxOre != 0 && queued <= 0) return "no ore queued";
+            if (s.MaxFuel != 0 && fuel <= 0) return "out of fuel";
+            if (s.RequiresRoof && roofKnown && !roof) return "needs a roof";
+            return null;
+        }
+    }
 }

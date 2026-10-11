@@ -21,6 +21,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"item\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"item\"]}", MissingFor);
             r.Add("stations", "Crafting stations round a point or in a box (ZDO table, works on the server): prefab, position, level (1 + the extensions that count for it: pivot to pivot closer than the extension's own range, one per kind unless it stacks), the extensions with distances, the build range (m_rangeBuild + m_extraRangePerLevel per extension, measured flat from the player), whether it needs a roof or a fire to craft, and what the next extension would unlock (recipes of the next level). Also the extensions that count for no station here, with the reason. The roof and fire themselves need the physics and are judged by bed_check / plan_check style tools, not here.",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}}}", Stations);
+            r.Add("smelters", "Smelters, blast furnaces, charcoal kilns, windmills, spinning wheels and eitr refineries round a point or in a box, from the ZDO table (works on the server): the ore queue (names, how many, room left), fuel and how many fuel presses the game still accepts (it refuses above max - 1), fuel needed for what is queued and seconds of fuel left, seconds to finish the queue, products held back until the empty switch is used, what it accepts and what it makes, and why it stands still (no ore, out of fuel). A windmill-driven machine runs at the windmill's power, which is not stored: times assume power 1. A roof or blocked smoke needs the physics and is not judged here.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", Smelters);
             r.Add("plan_materials", "The bill of materials of a plan: items:[{prefab,...}] as for plan_apply. Sums Piece.m_resources per item, the crafting stations the pieces need (by name, in range of whoever builds by hand), pieces the world makes free (NoBuildCost; items and feasts use NoCraftCost), unknown prefabs, and, with x,z,radius or a box, what the chests there hold and what is missing. standing:true leaves out items that already stand within 0.35 m. Read-only.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"standing\":{\"type\":\"boolean\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}},\"required\":[\"items\"]}", PlanMaterials);
         }
@@ -150,6 +152,32 @@ namespace HubnerExt
             }).ToList();
             var un = unlinked.Where(u => u.Key.X >= x0 && u.Key.X <= x1 && u.Key.Z >= z0 && u.Key.Z <= z1).Take(40).Select(u => "{\"prefab\":" + U.S(u.Key.Prefab) + ",\"id\":" + U.S(u.Key.Id) + ",\"why\":" + U.S(u.Value) + "}");
             return U.Json("{\"stations\":[" + string.Join(",", rows.ToArray()) + "],\"extensionsCountingForNothing\":[" + string.Join(",", un.ToArray()) + "]}");
+        }
+
+        static ToolOutput Smelters(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready) return ToolOutput.Err("world not ready");
+            float x0, z0, x1, z1; string err;
+            if (!Box(a, out x0, out z0, out x1, out z1, out err)) return ToolOutput.Err(err ?? "give x,z[,radius] or x0,z0,x1,z1");
+            var limit = Math.Max(1, (int)U.D(a, "limit", 100)); var rows = new List<string>(); var total = 0; var cache = new Dictionary<int, GameObject>();
+            foreach (var z in Zdos.InBox(x0, z0, x1, z1))
+            {
+                var h = z.GetPrefab(); GameObject go;
+                if (!cache.TryGetValue(h, out go)) cache[h] = go = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(h) : null;
+                var sm = go != null ? go.GetComponent<Smelter>() : null; if (sm == null) continue;
+                total++; if (rows.Count >= limit) continue;
+                var spec = new SmelterSpec { MaxOre = sm.m_maxOre, MaxFuel = sm.m_maxFuel, FuelPerProduct = sm.m_fuelPerProduct, SecPerProduct = sm.m_secPerProduct, RequiresRoof = sm.m_requiresRoof };
+                var queued = z.GetInt(ZDOVars.s_queued, 0); var fuel = z.GetFloat(ZDOVars.s_fuel, 0f); var bake = z.GetFloat(ZDOVars.s_bakeTimer, 0f);
+                var ore = new List<string>(); for (var i = 0; i < queued && i < 40; i++) ore.Add(z.GetString("item" + i, ""));
+                var held = z.GetString(ZDOVars.s_spawnOre, ""); var heldN = z.GetInt(ZDOVars.s_spawnAmount, 0);
+                var accepts = sm.m_conversion.Where(c => c.m_from != null).Select(c => c.m_from.gameObject.name).Distinct().ToList();
+                var makes = sm.m_conversion.Where(c => c.m_to != null).Select(c => c.m_to.gameObject.name).Distinct().ToList();
+                var stalled = SmelterMath.Stalled(spec, queued, fuel, false, true);
+                var p = z.GetPosition();
+                rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(go.name) + ",\"pos\":" + U.V(p) + ",\"queued\":" + queued + ",\"queueRoom\":" + SmelterMath.QueueRoom(spec, queued) + ",\"ore\":[" + string.Join(",", ore.Select(U.S).ToArray()) + "],\"fuel\":" + U.N(Math.Round(fuel, 2)) + ",\"maxFuel\":" + spec.MaxFuel + ",\"fuelItem\":" + U.S(sm.m_fuelItem != null ? sm.m_fuelItem.gameObject.name : "") + ",\"fuelPressesAllowed\":" + SmelterMath.FuelPressesAllowed(spec, fuel) + ",\"fuelNeeded\":" + U.N(Math.Round(SmelterMath.FuelNeeded(spec, queued, bake), 2)) +
+                    ",\"fuelSecondsLeft\":" + (spec.MaxFuel <= 0 ? "null" : U.N(Math.Round(SmelterMath.FuelSecondsLeft(spec, fuel, 1)))) + ",\"secondsToEmpty\":" + U.N(Math.Round(SmelterMath.SecondsToEmpty(spec, queued, bake, 1))) + ",\"heldBack\":{\"item\":" + U.S(held) + ",\"amount\":" + heldN + "},\"stalled\":" + U.S(stalled) + ",\"needsRoof\":" + B(spec.RequiresRoof) + ",\"windmill\":" + B(sm.m_windmill != null) + ",\"accepts\":[" + string.Join(",", accepts.Select(U.S).ToArray()) + "],\"makes\":[" + string.Join(",", makes.Select(U.S).ToArray()) + "]}");
+            }
+            return U.Json("{\"total\":" + total + ",\"returned\":" + rows.Count + ",\"smelters\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
         static string CostKeys()
