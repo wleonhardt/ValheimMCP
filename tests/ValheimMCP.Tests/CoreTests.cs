@@ -540,3 +540,41 @@ public class WalkGuardTests
 
     [Fact] public void CapsuleNumbersAreThePlayersNotAGuess() { Assert.Equal(0.49f, WalkFacts.CapsuleRadius); Assert.Equal(1.85f, WalkFacts.CapsuleHeight); Assert.Equal(0.45f, WalkFacts.StepUp); Assert.Equal(38f, WalkFacts.SlideDeg); }
 }
+
+public class OwnershipTests
+{
+    [Fact] public void PlanOwnedObjectsAreOurs() => Assert.Null(Ownership.Why(new OwnFacts { PlanOwned = true, Tombstone = true, InWard = true, ContainerWithItems = true, Creator0Neighbours = 9 }));
+    [Fact] public void ATombstoneIsNeverTouched() => Assert.Contains("tombstone", Ownership.Why(new OwnFacts { Tombstone = true }));
+    [Fact] public void AnEnabledWardProtects() => Assert.Contains("guard stone", Ownership.Why(new OwnFacts { InWard = true }));
+    [Fact] public void AContainerWithItemsIsProtected() => Assert.Contains("holds items", Ownership.Why(new OwnFacts { ContainerWithItems = true }));
+    [Fact] public void ALoneCreatorZeroPieceIsFairGame() => Assert.Null(Ownership.Why(new OwnFacts { Creator0Neighbours = 1 }));
+    [Fact] public void ThreeCreatorZeroPiecesTogetherAreSomebodysBuild() => Assert.Contains("creator-0", Ownership.Why(new OwnFacts { Creator0Neighbours = 2 }));
+    [Fact] public void NothingSpecialIsAllowed() => Assert.Null(Ownership.Why(new OwnFacts()));
+    [Fact] public void TombstonePrefabNames() { Assert.True(Ownership.IsTombstonePrefab("Player_tombstone")); Assert.False(Ownership.IsTombstonePrefab("woodwall")); Assert.False(Ownership.IsTombstonePrefab(null)); }
+
+    [Fact]
+    public void OnlyEnabledWardsCoverAPoint()
+    {
+        var on = new WardFact { X = 0, Z = 0, Radius = 32, Enabled = true };
+        var off = new WardFact { X = 100, Z = 0, Radius = 32, Enabled = false };
+        Assert.True(Ownership.WardCovers(new[] { on, off }, 20, 20, 0));          // 28.3 m
+        Assert.False(Ownership.WardCovers(new[] { on, off }, 30, 30, 0));         // 42 m
+        Assert.False(Ownership.WardCovers(new[] { on, off }, 100, 0, 0));         // the ward there is switched off
+        Assert.True(Ownership.WardCovers(new[] { on }, 33, 0, 2));                // a margin for the piece's own size
+    }
+
+    [Fact] public void WardAccessIsTheCreatorOrAPermittedPlayer()
+    {
+        var w = new WardFact { Creator = 7, Permitted = { 8, 9 } };
+        Assert.True(Ownership.Permitted(w, 7)); Assert.True(Ownership.Permitted(w, 9)); Assert.False(Ownership.Permitted(w, 10));
+    }
+}
+
+public class LocationRulesTests
+{
+    [Fact] public void InsideTheMaxRadiusWhenThereIsNoOverride() { Assert.True(LocationRules.NoBuildInside(30, 50, 0, true)); Assert.False(LocationRules.NoBuildInside(50, 50, 0, true)); }
+    [Fact] public void AnOverrideRadiusReplacesTheMaxRadius() { Assert.False(LocationRules.NoBuildInside(30, 50, 20, true)); Assert.True(LocationRules.NoBuildInside(10, 50, 20, true)); }
+    [Fact] public void ALocationThatAllowsBuildingNeverBlocks() => Assert.False(LocationRules.NoBuildInside(1, 50, 0, false));
+    [Fact] public void AnInteriorWidensTheRadius() { Assert.Equal(80, LocationRules.MaxRadius(true, 40, 80)); Assert.Equal(40, LocationRules.MaxRadius(false, 40, 80)); }
+    [Fact] public void CountByCreator() { var d = OwnershipSummary.CountByCreator(new long[] { 0, 5, 5, 0, 0 }); Assert.Equal(3, d[0]); Assert.Equal(2, d[5]); }
+}

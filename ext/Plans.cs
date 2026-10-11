@@ -65,8 +65,8 @@ namespace HubnerExt
             r.Add("plans", "List every plan id in the loaded/known world with piece counts and bounding box (objects tagged by plan_apply). Optional box filter x0,z0,x1,z1.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"}}}", ListPlans);
             r.Add("plan_apply",
-                "Idempotent plan placement. plan: id string. items:[{prefab,x,y,z,yaw,rot:[rx,ry,rz],text,tag,key,seat,ctag,label,ints:{},floats:{}}] (max 6000; label = text for the chest plaque the game makes next to a container). Identity per item is `key` (send a stable one from your generator so a moved piece is MOVED, not deleted and respawned); without it prefab + rounded position + yaw. Exact key -> unchanged/moved/updated; else ADOPT an untagged piece of the same prefab within adoptTol (default 0.35 m; only creator 0, not worldgen, never creatures); else spawn. Every object of this plan that no item claims is deleted (deleteExtra, default true) wherever this process knows it; pass box to limit that sweep. The sweep is skipped when any item had an error (sweepSkipped:true in the result) unless sweepOnErrors:true, so a bad item cannot delete the piece it was meant to replace. Fireplace prefabs get fuel (floats.fuel, default full) so they arrive lit. Never touches untagged objects except by adoption, never terrain/internal prefabs, never Player. 'seat':'ground' items ignore y when matching. dry=true reports only. Journaled under group=plan id. Prefer job_start for plans over ~300 pieces: the job runs in slices (hubner.jobBudgetMs per frame) instead of freezing the game.",
-                "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"deleteExtra\":{\"type\":\"boolean\"},\"sweepOnErrors\":{\"type\":\"boolean\"},\"adopt\":{\"type\":\"boolean\"},\"adoptTol\":{\"type\":\"number\"},\"movedTol\":{\"type\":\"number\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"examples\":{\"type\":\"number\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"plan\",\"items\"]}", a => Guard(a, Apply, true), W);
+                "Idempotent plan placement. plan: id string. items:[{prefab,x,y,z,yaw,rot:[rx,ry,rz],text,tag,key,seat,ctag,label,ints:{},floats:{}}] (max 6000; label = text for the chest plaque the game makes next to a container). Identity per item is `key` (send a stable one from your generator so a moved piece is MOVED, not deleted and respawned); without it prefab + rounded position + yaw. Exact key -> unchanged/moved/updated; else ADOPT an untagged piece of the same prefab within adoptTol (default 0.35 m; only creator 0, not worldgen, never creatures); else spawn. Every object of this plan that no item claims is deleted (deleteExtra, default true) wherever this process knows it; pass box to limit that sweep. Pieces are refused inside an enabled guard stone's area unless force:true + forceConfirm:'player-built'; items inside a known location's radius are counted as noBuildAdvice (the server may not know whether that location forbids building). The sweep is skipped when any item had an error (sweepSkipped:true in the result) unless sweepOnErrors:true, so a bad item cannot delete the piece it was meant to replace. Fireplace prefabs get fuel (floats.fuel, default full) so they arrive lit. Never touches untagged objects except by adoption, never terrain/internal prefabs, never Player. 'seat':'ground' items ignore y when matching. dry=true reports only. Journaled under group=plan id. Prefer job_start for plans over ~300 pieces: the job runs in slices (hubner.jobBudgetMs per frame) instead of freezing the game.",
+                "{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"deleteExtra\":{\"type\":\"boolean\"},\"sweepOnErrors\":{\"type\":\"boolean\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"adopt\":{\"type\":\"boolean\"},\"adoptTol\":{\"type\":\"number\"},\"movedTol\":{\"type\":\"number\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"examples\":{\"type\":\"number\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"plan\",\"items\"]}", a => Guard(a, Apply, true), W);
             r.Add("clear_overlaps", "Delete untagged, non-player objects (creator 0, no hub_plan: trees, rocks, bushes, pickables, ruin pieces) that overlap planned pieces. items:[{x,z,y0,y1,r}] footprints (r = half-size in metres, y0/y1 = vertical extent), margin metres (default 0.3), dry=true counts only. Never touches player-built objects (creator!=0), anything tagged by a plan, creatures, tamed animals, ships, carts, dropped items (by component), locations, signs or internal prefabs. Journaled under group. Works on the server twin with no teleports.",
                 "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"margin\":{\"type\":\"number\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"examples\":{\"type\":\"number\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"items\"]}", a => Guard(a, ClearOverlaps, true), W);
             r.Add("plan_stats", "What the plans have put in the world, from the ZDOs: per plan id and per ctag (generator label): piece count, bounding box and centre; plus 'foreign': objects built by players (creator != 0, no hub_plan) inside each plan's box - things someone added or left behind. Optional box x0,z0,x1,z1 and ctagDepth (how many ':' segments of the ctag to group by, default 2).",
@@ -113,6 +113,11 @@ namespace HubnerExt
             bool mine = !string.IsNullOrEmpty(z.GetString(PlanHash, ""));
             if (!forced && !mine && U.IsLiving(z.GetPrefab())) { why = "creature/tamed/ship/cart/item: pass force=true and forceConfirm"; return true; }
             if (!forced && z.GetLong("creator", 0L) != 0L && !mine) { why = "player-built (creator!=0): pass force=true and forceConfirm:'" + ForceConfirm + "'"; return true; }
+            if (!forced)
+            {
+                var own = Neighbours.Judge(z, prefab);                                         // tombstones, guard stones, containers with items, builds of creator-0 pieces
+                if (own != null) { why = own + ": pass force=true and forceConfirm:'" + ForceConfirm + "'"; return true; }
+            }
             if (forced && (z.GetLong("creator", 0L) != 0L || U.IsLiving(z.GetPrefab()))) Plugin.Log?.LogWarning("[hubner-ext] FORCED write on " + prefab + " " + U.Id(z) + " at " + U.V(z.GetPosition()) + " creator=" + z.GetLong("creator", 0L));
             return false;
         }
@@ -229,6 +234,8 @@ namespace HubnerExt
             float adoptTol = (float)McpJson.Get(a, "adoptTol", 0.35), movedTol = (float)McpJson.Get(a, "movedTol", 0.15);
             var group = McpJson.GetStr(a, "group") ?? plan; int maxEx = (int)McpJson.Get(a, "examples", 8);
             bool boxGiven = McpJson.GetList(a, "box") != null;
+            bool forcedPlace = McpJson.GetBool(a, "force", false) && McpJson.GetStr(a, "forceConfirm") == ForceConfirm;      // placing inside somebody's guard stone area needs the same override as touching their things
+            int wardRefused = 0, noBuildAdvice = 0; var exNoBuild = new List<string>();
             var box = Box(a, items);
             var zs = ZoneSystem.instance;
 
@@ -339,6 +346,7 @@ namespace HubnerExt
                             }
                             var cur = z.GetPosition(); var cr = z.GetRotation();
                             bool needMove = Vector3.Distance(cur, pos) > movedTol || Quaternion.Angle(cr, rot) > 2f;
+                            if (needMove && !forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": the new place is inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
                             bool needText = text != null && z.GetString("text", "") != text;
                             bool needTag = tag != null && z.GetString("tag", "") != tag;
                             bool needTagKey = wasAdopted || z.GetString(PlanHash, "") != plan || z.GetString(ItemHash, "") != key;
@@ -359,6 +367,8 @@ namespace HubnerExt
                             continue;
                         }
                         // spawn
+                        if (!forcedPlace && Neighbours.InWard(pos, 0)) { wardRefused++; errors++; if (exErr.Count < maxEx) exErr.Add(prefab + " " + U.V(pos) + ": inside an enabled guard stone's area (force:true + forceConfirm:'" + ForceConfirm + "' overrides)"); continue; }
+                        var locHere = Neighbours.LocationAt(pos); if (locHere != null) { noBuildAdvice++; if (exNoBuild.Count < maxEx) exNoBuild.Add(prefab + " " + U.V(pos) + " in " + locHere); }
                         if (dry && ZNetScene.instance != null && ZNetScene.instance.GetPrefab(prefab) == null) { errors++; if (exErr.Count < maxEx) exErr.Add(prefab + ": unknown prefab"); continue; }      // a dry run reports what the real run would
                         spawned++; if (exSpawn.Count < maxEx) exSpawn.Add(prefab + " " + U.V(pos));
                         if (dry) continue;
@@ -410,7 +420,7 @@ namespace HubnerExt
             }
             finally { Journal.End(); }
 
-            var sb = new StringBuilder("{\"plan\":" + U.S(plan) + ",\"dry\":" + (dry ? "true" : "false") + ",\"items\":" + items.Count + ",\"unchanged\":" + unchanged + ",\"spawned\":" + spawned + ",\"adopted\":" + adopted + ",\"moved\":" + moved + ",\"updated\":" + updated + ",\"deleted\":" + deleted + ",\"duplicateKeys\":" + dupes + ",\"errors\":" + errors + ",\"box\":[" + string.Join(",", box.Select(v => U.N(v)).ToArray()) + "],\"sweep\":" + U.S(sweepSkipped ? "skipped (items had errors)" : (boxGiven ? "box" : "world")) + ",\"sweepSkipped\":" + (sweepSkipped ? "true" : "false") + ",\"group\":" + U.S(group) + ",\"labelled\":" + labelled + ",\"labelPending\":" + labelPending);
+            var sb = new StringBuilder("{\"plan\":" + U.S(plan) + ",\"dry\":" + (dry ? "true" : "false") + ",\"items\":" + items.Count + ",\"unchanged\":" + unchanged + ",\"spawned\":" + spawned + ",\"adopted\":" + adopted + ",\"moved\":" + moved + ",\"updated\":" + updated + ",\"deleted\":" + deleted + ",\"duplicateKeys\":" + dupes + ",\"errors\":" + errors + ",\"box\":[" + string.Join(",", box.Select(v => U.N(v)).ToArray()) + "],\"wardRefused\":" + wardRefused + ",\"noBuildAdvice\":" + noBuildAdvice + ",\"noBuildExamples\":[" + string.Join(",", exNoBuild.Select(U.S).ToArray()) + "],\"sweep\":" + U.S(sweepSkipped ? "skipped (items had errors)" : (boxGiven ? "box" : "world")) + ",\"sweepSkipped\":" + (sweepSkipped ? "true" : "false") + ",\"group\":" + U.S(group) + ",\"labelled\":" + labelled + ",\"labelPending\":" + labelPending);
             sb.Append(",\"examples\":{\"spawn\":[" + string.Join(",", exSpawn.Select(U.S).ToArray()) + "],\"moved\":[" + string.Join(",", exMoved.Select(U.S).ToArray()) + "],\"deleted\":[" + string.Join(",", exDel.Select(U.S).ToArray()) + "],\"errors\":[" + string.Join(",", exErr.Select(U.S).ToArray()) + "]}}");
             yield return U.Json(sb.ToString());
         }

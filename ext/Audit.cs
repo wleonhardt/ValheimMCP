@@ -323,7 +323,9 @@ namespace HubnerExt
             {
                 string name = p.m_playerName ?? ""; bool sb = names.Contains(name); if (sb) sandbox++;
                 string host = ""; if (showHosts) { try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch { } }
-                rows.Add("{\"name\":" + U.S(name) + ",\"host\":" + U.S(host) + ",\"uid\":" + p.m_uid + ",\"pos\":" + U.V(p.m_refPos) + ",\"sandbox\":" + (sb ? "true" : "false") + "}");
+                // the character's own ZDO says more than the peer record: in bed, dead, and where it really is (the peer's reference position can lag a zone behind)
+                ZDO cz = null; try { cz = p.m_characterID != ZDOID.None && ZDOMan.instance != null ? ZDOMan.instance.GetZDO(p.m_characterID) : null; } catch (Exception ex) { U.Once("players.zdo", ex); }
+                rows.Add("{\"name\":" + U.S(name) + ",\"host\":" + U.S(host) + ",\"uid\":" + p.m_uid + ",\"pos\":" + U.V(cz != null ? cz.GetPosition() : p.m_refPos) + ",\"posSource\":" + U.S(cz != null ? "character zdo" : "peer reference") + ",\"inBed\":" + (cz != null && cz.GetBool("inBed", false) ? "true" : "false") + ",\"dead\":" + (cz != null && cz.GetBool("dead", false) ? "true" : "false") + ",\"sandbox\":" + (sb ? "true" : "false") + "}");
             }
             return U.Json("{\"count\":" + rows.Count + ",\"sandbox\":" + sandbox + ",\"players\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
