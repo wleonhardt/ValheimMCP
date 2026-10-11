@@ -155,7 +155,7 @@ namespace HubnerExt
                 var items = z.GetString("items", "");
                 if (items.Length > 0) { strings = strings != null ? new Dictionary<string, string>(strings) : new Dictionary<string, string>(); strings["items"] = items; }
             }
-            Journal.Add(new JEntry { Kind = kind, Id = U.Id(z), Prefab = prefab, Pos = pos, Rot = rot, Text = text, Tag = tag, Plan = plan, Key = key, Creator = creator, Group = group, Scale = z.GetVec3("scale", Vector3.one), Ints = ints, Floats = floats, Strings = strings });
+            Journal.Add(new JEntry { Kind = kind, Id = U.Id(z), Prefab = prefab, Pos = pos, Rot = rot, Text = text, Tag = tag, Plan = plan, Key = key, Creator = creator, Group = group, Scale = z.GetVec3("scale", Vector3.one), Ints = ints, Floats = floats, Strings = strings, IdPlan = z.GetString(PlanHash, ""), IdKey = z.GetString(ItemHash, "") });
         }
 
         static readonly Dictionary<string, float> _fuel = new Dictionary<string, float>();
@@ -843,10 +843,44 @@ namespace HubnerExt
             return U.Json("{\"total\":" + Journal.Entries.Count + ",\"groups\":[" + string.Join(",", rows) + "]}");
         }
 
+        static ObjFacts FactsOf(ZDO z)
+        {
+            var p = z.GetPosition();
+            return new ObjFacts { Id = U.Id(z), Prefab = Zdos.NameOf(z.GetPrefab()), Plan = z.GetString(PlanHash, ""), Key = z.GetString(ItemHash, ""), X = p.x, Y = p.y, Z = p.z, Handle = z };
+        }
+
+        /// <summary>
+        ///     The object a journal entry is about, or null when there is none. ZDO ids are valid for one world load only (the game renumbers every ZDO when it loads a save), so an entry
+        ///     from an earlier run is found by its plan tag, or for a plain spawn by prefab and position (<see cref="Identity" />). A problem text means "do not guess".
+        /// </summary>
+        static ZDO ResolveForUndo(JEntry e, out string problem)
+        {
+            problem = null;
+            var boot = Journal.CurrentBoot();
+            var cands = new List<ObjFacts>();
+            var sameLoad = !string.IsNullOrEmpty(e.Boot) && e.Boot == boot;
+            if (sameLoad) { var z0 = U.FindZdo(e.Id); if (z0 != null) cands.Add(FactsOf(z0)); }
+            else if (!string.IsNullOrEmpty(e.IdPlan) && !string.IsNullOrEmpty(e.IdKey))
+            {
+                foreach (var chunk in Zdos.InBoxChunks(World[0], World[1], World[2], World[3]))
+                    foreach (var z in chunk)
+                        if (z.GetString(PlanHash, "") == e.IdPlan && z.GetString(ItemHash, "") == e.IdKey) cands.Add(FactsOf(z));
+            }
+            else foreach (var z in Zdos.InBox(e.Pos.x - 2f, e.Pos.z - 2f, e.Pos.x + 2f, e.Pos.z + 2f)) cands.Add(FactsOf(z));
+            var m = Identity.Find(e.Boot, boot, e.Id, e.Prefab, e.IdPlan, e.IdKey, e.Pos.x, e.Pos.y, e.Pos.z, e.Kind == "spawn", cands, out var found);
+            if (m == Match.Ambiguous) problem = "the game renumbered its objects since this entry was written and more than one object matches it: not touched";
+            return m == Match.Found ? (ZDO)found.Handle : null;
+        }
+
         /// <summary>Undo one journal entry (shared by undo_group and the client's undo). Returns an error string or null.</summary>
         internal static string UndoEntry(JEntry e)
         {
-            if (e.Kind == "spawn") { var z = U.FindZdo(e.Id); if (z != null) Destroy(z); }
+            if (e.Kind == "spawn")
+            {
+                var z = ResolveForUndo(e, out var problem);
+                if (problem != null) return e.Id + ": " + problem;
+                if (z != null) Destroy(z);                                               // not found: it is gone already
+            }
             else if (e.Kind == "delete")
             {
                 string uerr; var nz = CreateZdo(e.Prefab, e.Pos, e.Rot, e.Text, e.Tag, e.Plan ?? "", e.Key ?? "", out uerr); if (nz == null) return e.Id + ": " + uerr;
@@ -861,7 +895,8 @@ namespace HubnerExt
             }
             else if (e.Kind == "modify")
             {
-                var z = U.FindZdo(e.Id);
+                var z = ResolveForUndo(e, out var problem);
+                if (problem != null) return e.Id + ": " + problem;
                 if (z == null) return e.Id + ": gone";
                 Own(z); z.SetPosition(e.Pos); z.SetRotation(e.Rot); ApplyToInstance(z, e.Pos, e.Rot);
                 z.Set("text", e.Text ?? ""); z.Set("tag", e.Tag ?? "");

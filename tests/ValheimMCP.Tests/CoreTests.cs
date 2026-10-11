@@ -339,3 +339,64 @@ public class WorldBoundsTests
         Assert.Equal(0f, WorldBounds.Clamp(float.NaN));
     }
 }
+
+public class IdentityTests
+{
+    static ObjFacts O(string id, string prefab, double x, double z, string plan = "", string key = "") => new ObjFacts { Id = id, Prefab = prefab, X = x, Y = 40, Z = z, Plan = plan, Key = key };
+    static Match Find(string entryBoot, string boot, string id, string prefab, string plan, string key, double x, double z, bool posReliable, out ObjFacts f, params ObjFacts[] world)
+        => Identity.Find(entryBoot, boot, id, prefab, plan, key, x, 40, z, posReliable, world, out f);
+
+    [Fact]
+    public void SameLoadFindsByIdExactly()
+    {
+        Assert.Equal(Match.Found, Find("77", "77", "5:77", "woodwall", "", "", 1, 1, true, out var f, O("5:77", "woodwall", 1, 1)));
+        Assert.Equal("5:77", f.Id);
+    }
+
+    [Fact]
+    public void SameLoadIdNamingSomethingElseIsNotAMatch()
+        => Assert.Equal(Match.NotFound, Find("77", "77", "5:77", "woodwall", "", "", 1, 1, true, out _, O("5:77", "stone_wall", 1, 1)));
+
+    [Fact]
+    public void AfterARestartTheIdIsIgnoredAndThePlanTagDecides()
+    {
+        // the entry says id 9:123 (an old session user), but after the load the object is 1:4711
+        Assert.Equal(Match.Found, Find("77", "99", "9:123", "woodwall", "castle", "n:1", 5, 5, false, out var f,
+            O("1:4711", "woodwall", 5, 5, "castle", "n:1"), O("9:123", "stone_wall", 0, 0, "castle", "other"), O("1:5", "woodwall", 5, 5, "castle", "n:2")));
+        Assert.Equal("1:4711", f.Id);
+    }
+
+    [Fact]
+    public void AfterARestartAnOldIdThatNowNamesAnotherObjectIsNeverUsed()
+        => Assert.Equal(Match.NotFound, Find("77", "99", "1:4711", "woodwall", "castle", "n:1", 5, 5, false, out _, O("1:4711", "woodwall", 50, 50, "castle", "n:9")));
+
+    [Fact]
+    public void DuplicatePlanKeysPickTheNearestOnlyWhenItIsClearlyNearest()
+    {
+        Assert.Equal(Match.Found, Find("", "99", "x", "woodwall", "p", "k", 5, 5, false, out var f, O("1:1", "woodwall", 5.1, 5, "p", "k"), O("1:2", "woodwall", 9, 9, "p", "k")));
+        Assert.Equal("1:1", f.Id);
+        Assert.Equal(Match.Ambiguous, Find("", "99", "x", "woodwall", "p", "k", 5, 5, false, out _, O("1:1", "woodwall", 6, 5, "p", "k"), O("1:2", "woodwall", 4, 5, "p", "k")));      // a tie
+        Assert.Equal(Match.Ambiguous, Find("", "99", "x", "woodwall", "p", "k", 5, 5, false, out _, O("1:1", "woodwall", 30, 5, "p", "k"), O("1:2", "woodwall", 40, 5, "p", "k")));     // both far
+    }
+
+    [Fact]
+    public void AnUntaggedSpawnIsFoundByPrefabAndPosition()
+    {
+        Assert.Equal(Match.Found, Find("77", "99", "9:1", "chair", "", "", 10, 10, true, out var f, O("1:8", "chair", 10.01, 10), O("1:9", "chair", 12, 10), O("1:10", "table", 10, 10)));
+        Assert.Equal("1:8", f.Id);
+    }
+
+    [Fact]
+    public void TwoIdenticalObjectsAtOneSpotAreNotGuessed()
+        => Assert.Equal(Match.Ambiguous, Find("77", "99", "9:1", "chair", "", "", 10, 10, true, out _, O("1:8", "chair", 10, 10), O("1:9", "chair", 10.02, 10)));
+
+    [Fact]
+    public void AnEditedUntaggedObjectHasNothingToGoBy()
+        => Assert.Equal(Match.NotFound, Find("77", "99", "9:1", "chair", "", "", 10, 10, false, out _, O("1:8", "chair", 10, 10)));       // a modify entry holds the OLD position
+
+    [Fact]
+    public void EntriesWithoutABootCountAsOldRuns()
+        => Assert.Equal(Match.Found, Find("", "99", "5:77", "woodwall", "p", "k", 0, 0, false, out _, O("1:3", "woodwall", 80, 80, "p", "k")));
+
+    [Fact] public void NoCandidatesIsNotFound() => Assert.Equal(Match.NotFound, Find("77", "77", "5:77", "woodwall", "", "", 1, 1, true, out _));
+}
