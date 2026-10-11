@@ -67,11 +67,16 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 
 30. Scene capture: `capture_scene.py` over a real base (radius 40): the saved scene has `withRecordedSupport` > 0 on a server that owns the pieces; `dotnet test` on it. Every disagreement is a defect in the support model or in our collider reading (mesh colliders are bounding boxes): decide which, fix, keep the scene.
 
+31. `plant_check` over a prepared carrot patch: close plants block each other, a roof above gives NoSun, an uncultivated patch gives NotCultivated; compare with what the plants do in game (`farm_state` status vs the plant's tooltip). The sun ray starts at the plant's origin: a plant under a thin eave in game may differ.
+32. `raid_state` at a quiet moment: the roll timer counts down; force an event with the console and read `current`; `keysOkNow` against the boss kills of the world. `threats_near` with a troll chasing: `now` and `secondsToContact`; with PassiveMobs on nothing is `now`.
+33. `level_check` over a hillside, then really level it with the hoe and compare the fill and cut and the stroke count; a pad 10 m under the base reports `unreachable`. Compare `levelTools` with the prefabs' real radii.
+34. `cookers` with a grill of meat: seconds to done and to burnt against the real timer; `fuel_forecast` with two fires and a chest of wood: the hours of cover against a stopwatch.
+
 ### Next candidates (not done)
 
 - Fix the 78 silent catches over time (`python3 scripts/lint_catch.py --list`), lowering the baseline as you go.
 - From the review but skipped on purpose: the design generator, work fronts and stands, the lease, the Jev judge (see `research/2026-10-clauden-jevheim-review.md`).
-- Tier 1 of `research/2026-10-clauden-jevheim-synthesis.md` is done (decompile check in `decisions/0003-decompile-check-results.md`). Not done from it: A14 (plan_check on edited ground), A16 (mesh colliders), A23 (speaker id check against the connection), A24 (`world_state` positions without a source), A26 (Dvergr wards enabled); Tier 2 not yet built: farm and plant checks, threat, biome-spawn and raid-state readers, cookers, upkeep forecast, terrain level feasibility and deltas, `explored_at`, `loot_near`, `situation`; Tier 4 not yet built: walk replay over scenes, walk bench and slope probe, chat injection hook (scene capture and the support differential test exist now).
+- Tier 1 of `research/2026-10-clauden-jevheim-synthesis.md` is done (decompile check in `decisions/0003-decompile-check-results.md`). Not done from it: A14 (plan_check on edited ground), A16 (mesh colliders), A23 (speaker id check against the connection), A24 (`world_state` positions without a source), A26 (Dvergr wards enabled); Tier 2 not yet built: biome-spawn reader, terrain deltas, `explored_at`, `loot_near`, `situation`; Tier 4 not yet built: walk replay over scenes (held back on purpose: it would encode the walker's assumed numbers, StepUp 0.45 and the hop height, which nobody has measured; measure them first with a slope and step probe), walk bench, chat injection hook (scene capture and the support differential test exist now).
 
 ### Other
 

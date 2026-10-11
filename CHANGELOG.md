@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### 0.9.0 core / 0.12.0 extension (more readers from the ClaudeNJevHeim reviews)
+All on the server and the client; each checked against the decompile first; none has run in the game yet.
+- `plant_check` (biome, cultivated ground, heat, cold, shade, space, in the game's order) and `farm_state` (age, grow range, ready times, verdict).
+- `raid_state` (running event, roll timer and chance, every event with its keys and whether they are set) and `threats_near` (ignore / watch / now from the synced alert and target flags, hardest hit after armour, seconds to contact).
+- `level_check` (can level strokes bring a pad to a height: 8 m from the base at most, fill and cut, edge step, strokes per terrain tool by simulation) on a pure `TerrainGrid` that ports TerrainComp's level, raise and smooth.
+- `cookers` (slot states, seconds to done and to burnt) and `fuel_forecast` (what fireplaces, smelters and cookers burn per hour against what they and the chests hold).
+- `scene_capture` / `scene_get`: world fixtures with the support the game recorded, checked against our support model by `dotnet test`.
+
 ### 0.8.0 core / 0.11.0 extension (Tier 2 readers and Tier 4 test tooling of the ClaudeNJevHeim review)
 New readers, all on the server and the client, all checked against the decompile first (nothing has run in the game yet):
 - `world_clock`: the game's day fraction (raw 0.15..0.85 is rescaled to 0.25..0.75), seconds to dusk and dawn, the sleep window, who holds up the night skip (it needs EVERY character in bed).
