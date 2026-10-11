@@ -13,7 +13,7 @@ namespace HubnerExt
 {
     internal static class Neighbours
     {
-        static HashSet<int> _wardH, _containerH, _pieceH, _fireH;
+        static HashSet<int> _wardH, _containerH, _pieceH, _fireH, _tameH;
         static readonly Dictionary<int, GameObject> _prefabs = new Dictionary<int, GameObject>();
 
         static void EnsurePrefabSets()
@@ -22,7 +22,7 @@ namespace HubnerExt
             var f = typeof(ZNetScene).GetField("m_namedPrefabs", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             var dict = f != null ? f.GetValue(ZNetScene.instance) as Dictionary<int, GameObject> : null;
             if (dict == null || dict.Count == 0) return;
-            var w = new HashSet<int>(); var c = new HashSet<int>(); var p = new HashSet<int>(); var fi = new HashSet<int>();
+            var w = new HashSet<int>(); var c = new HashSet<int>(); var p = new HashSet<int>(); var fi = new HashSet<int>(); var tm = new HashSet<int>();
             foreach (var kv in dict)
             {
                 var go = kv.Value; if (go == null) continue;
@@ -30,9 +30,10 @@ namespace HubnerExt
                 if (go.GetComponent<Container>() != null) c.Add(kv.Key);
                 if (go.GetComponent<Piece>() != null) p.Add(kv.Key);
                 if (go.GetComponent<Fireplace>() != null) fi.Add(kv.Key);
+                if (go.GetComponent<Tameable>() != null) tm.Add(kv.Key);
                 _prefabs[kv.Key] = go;
             }
-            _containerH = c; _pieceH = p; _fireH = fi; _wardH = w;
+            _containerH = c; _pieceH = p; _fireH = fi; _tameH = tm; _wardH = w;
         }
 
         static GameObject Prefab(int hash) { EnsurePrefabSets(); return _prefabs.TryGetValue(hash, out var go) ? go : null; }
@@ -119,6 +120,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}},\"required\":[\"points\"]}", BiomeAt);
             r.Add("fires", "Fireplaces (fires, torches, braziers, hearths) in a box or round a point, from the ZDO table: prefab, position, fuel, max fuel, seconds of burning left, whether it burns. Arguments x,z,radius (default 40) or x0,z0,x1,z1; limit (default 200).",
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", Fires);
+            r.Add("husbandry_state", "Tameable creatures round a point from the ZDO table: prefab, position, tamed, name, level, fed seconds left and hungry (the game's own feeding clock), taming progress for wild ones, pregnant, love points. Arguments x,z,radius (default 40, max 300), tamedOnly, limit (default 100). Creatures far from every player may not be known to a server that has not loaded their zone.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"tamedOnly\":{\"type\":\"boolean\"},\"limit\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", HusbandryState);
             r.Add("death_state", "Tombstones in the world: position, owner name and id, time of death, how many item stacks they hold. Optional name filter. The harness never touches them.",
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"limit\":{\"type\":\"number\"}}}", DeathState);
             r.Add("cost_mode", "What the world really enforces for building and crafting, from the global keys: NoBuildCost, NoCraftCost, NoWorkbench, AllPiecesUnlocked, AllRecipesUnlocked, DungeonBuild, NoBuildingFall, plus the resource and event rates.",
@@ -202,6 +205,28 @@ namespace HubnerExt
                 rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Zdos.NameOf(h)) + ",\"pos\":" + U.V(z.GetPosition()) + ",\"fuel\":" + U.N(Math.Round(fuel, 2)) + ",\"maxFuel\":" + U.N(fp.m_maxFuel) + ",\"infinite\":" + (fp.m_infiniteFuel ? "true" : "false") + ",\"secondsLeft\":" + (fp.m_infiniteFuel ? "null" : U.N(Math.Round(fuel * fp.m_secPerFuel))) + ",\"burning\":" + (fp.m_infiniteFuel || fuel > 0f ? "true" : "false") + "}");
             }
             return U.Json("{\"total\":" + total + ",\"returned\":" + rows.Count + ",\"fires\":[" + string.Join(",", rows.ToArray()) + "]}");
+        }
+
+        static ToolOutput HusbandryState(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready) return ToolOutput.Err("world not ready"); EnsurePrefabSets();
+            if (_tameH == null) return ToolOutput.Err("prefab table not ready");
+            double x = U.D(a, "x", 0), zc = U.D(a, "z", 0), rad = Math.Min(300, Math.Max(1, U.D(a, "radius", 40))); var tamedOnly = McpJson.GetBool(a, "tamedOnly", false); var limit = Math.Max(1, (int)U.D(a, "limit", 100));
+            if (!WorldBounds.InWorld(x, 0, zc)) return ToolOutput.Err("x and z must be finite and inside the world");
+            var nowTicks = ZNet.instance != null ? ZNet.instance.GetTime().Ticks : DateTime.UtcNow.Ticks; var rows = new List<string>(); int total = 0;
+            foreach (var z in Zdos.InBox((float)(x - rad), (float)(zc - rad), (float)(x + rad), (float)(zc + rad)))
+            {
+                var h = z.GetPrefab(); if (!_tameH.Contains(h)) continue;
+                var p = z.GetPosition(); var dx = p.x - x; var dz = p.z - zc; if (dx * dx + dz * dz > rad * rad) continue;
+                var tamed = z.GetBool("tamed", false); if (tamedOnly && !tamed) continue;
+                total++; if (rows.Count >= limit) continue;
+                var tm = Prefab(h) != null ? Prefab(h).GetComponent<Tameable>() : null;
+                var fedLeft = tm != null ? Husbandry.FedSecondsLeft(nowTicks, z.GetLong("TameLastFeeding", 0L), tm.m_fedDuration) : double.NaN;
+                rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Zdos.NameOf(h)) + ",\"pos\":" + U.V(p) + ",\"tamed\":" + (tamed ? "true" : "false") + ",\"name\":" + U.S(z.GetString("TamedName", "")) + ",\"level\":" + z.GetInt("level", 1) +
+                    (tamed ? ",\"fedSecondsLeft\":" + (double.IsNaN(fedLeft) ? "null" : U.N(Math.Round(Math.Max(0, fedLeft)))) + ",\"hungry\":" + (!double.IsNaN(fedLeft) && fedLeft < 0 ? "true" : "false") : ",\"tamenessPercent\":" + (tm != null ? Husbandry.TamenessPercent(z.GetFloat("TameTimeLeft", tm.m_tamingTime), tm.m_tamingTime) : 0)) +
+                    ",\"pregnant\":" + (z.GetLong("pregnant", 0L) != 0L ? "true" : "false") + ",\"lovePoints\":" + z.GetInt("lovePoints", 0) + "}");
+            }
+            return U.Json("{\"total\":" + total + ",\"returned\":" + rows.Count + ",\"creatures\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
 
         static ToolOutput DeathState(Dictionary<string, object> a)

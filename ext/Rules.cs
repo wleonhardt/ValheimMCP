@@ -285,3 +285,24 @@ namespace HubnerExt
         }
     }
 }
+
+namespace HubnerExt
+{
+    /// <summary>Tameable's arithmetic as the game does it (Tameable.IsHungry, GetTameness).</summary>
+    internal static class Husbandry
+    {
+        public const long TicksPerSecond = 10000000L;
+
+        /// <summary>Seconds of being fed left; negative when hungry. lastFedTicks is the DateTime.Ticks the game stores in TameLastFeeding (0 = never fed).</summary>
+        public static double FedSecondsLeft(long nowTicks, long lastFedTicks, double fedDuration) { return fedDuration - (nowTicks - lastFedTicks) / (double)TicksPerSecond; }
+        public static bool Hungry(long nowTicks, long lastFedTicks, double fedDuration) { return FedSecondsLeft(nowTicks, lastFedTicks, fedDuration) < 0; }
+
+        /// <summary>0 to 100: how far taming has come (TameTimeLeft counts down from the taming time).</summary>
+        public static int TamenessPercent(double timeLeft, double tamingTime)
+        {
+            if (tamingTime <= 0) return 100;
+            var f = Math.Max(0, Math.Min(1, timeLeft / tamingTime));
+            return (int)((1 - f) * 100);
+        }
+    }
+}

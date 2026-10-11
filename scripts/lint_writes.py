@@ -24,7 +24,7 @@ RULES = [
 ]
 
 def files():
-    out = subprocess.check_output(['git', 'ls-files', 'src/*.cs', 'ext/*.cs'], cwd=ROOT, text=True).split()
+    out = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', 'src/*.cs', 'ext/*.cs'], cwd=ROOT, text=True).split()
     return [f for f in out if f.endswith('.cs')]
 
 def check(path, text):

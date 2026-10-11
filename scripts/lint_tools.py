@@ -44,7 +44,7 @@ def statement_end(masked, start):
     return len(masked)
 
 def collect():
-    files = subprocess.check_output(['git', 'ls-files', 'src/*.cs', 'ext/*.cs'], cwd=ROOT, text=True).split()
+    files = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', 'src/*.cs', 'ext/*.cs'], cwd=ROOT, text=True).split()
     cats = {}
     reg = os.path.join(ROOT, 'ext', 'Reg.cs')
     if os.path.exists(reg):

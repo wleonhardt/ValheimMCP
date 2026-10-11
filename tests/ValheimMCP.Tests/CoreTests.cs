@@ -779,3 +779,12 @@ public class ChatLimiterTests
 
     [Fact] public void ARefusedLineDoesNotUseUpTheGap() { var l = new ChatLimiter(); Assert.Null(l.Check(0, null, "x")); Assert.NotNull(l.Check(3, null, "y")); Assert.Null(l.Check(7, null, "y")); }
 }
+
+public class HusbandryMathTests
+{
+    const long S = Husbandry.TicksPerSecond;
+    [Fact] public void FedRecentlyIsNotHungry() { Assert.False(Husbandry.Hungry(1000 * S, 990 * S, 30)); Assert.Equal(20.0, Husbandry.FedSecondsLeft(1000 * S, 990 * S, 30), 6); }
+    [Fact] public void FedLongAgoIsHungry() => Assert.True(Husbandry.Hungry(1000 * S, 900 * S, 30));
+    [Fact] public void NeverFedIsHungry() => Assert.True(Husbandry.Hungry(1000 * S, 0, 30));
+    [Fact] public void TamenessGrowsAsTheTimerRunsDown() { Assert.Equal(0, Husbandry.TamenessPercent(1800, 1800)); Assert.Equal(50, Husbandry.TamenessPercent(900, 1800)); Assert.Equal(100, Husbandry.TamenessPercent(0, 1800)); Assert.Equal(100, Husbandry.TamenessPercent(-5, 1800)); }
+}

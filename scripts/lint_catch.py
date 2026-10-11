@@ -17,7 +17,7 @@ BASELINE = os.path.join(ROOT, 'scripts', 'lint-baseline.json')
 OK_TOKENS = re.compile(r'\bthrow\b|\bLog\w*\b|\bOnce\b|\bReport\b|\bWarn\w*\b|\bError\b|\bFault\w*\b|Debug\.Log')
 
 def sources():
-    files = subprocess.check_output(['git', 'ls-files', 'src/*.cs', 'ext/*.cs'], cwd=ROOT, text=True).split()
+    files = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', 'src/*.cs', 'ext/*.cs'], cwd=ROOT, text=True).split()
     return [f for f in files if f.endswith('.cs')]
 
 def flagged(path, text):
