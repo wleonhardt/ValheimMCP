@@ -42,6 +42,10 @@ namespace HubnerExt
             return double.NaN;
         }
 
+        /// <summary>god_set can switch the sandbox character's invulnerability off for a while (to test a death): until this time nothing puts it back.</summary>
+        internal static float GodOffUntil = -1f;
+        internal static bool GodWanted() { return Time.time >= GodOffUntil; }
+
         /// <summary>Is this character one of hubner.sandboxNames? Only those get god mode from teleport/walk: the extension must not make someone's real character invulnerable.</summary>
         public static bool IsSandbox(string playerName)
         {

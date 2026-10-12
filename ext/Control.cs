@@ -84,18 +84,14 @@ namespace HubnerExt
             return _h != null && methods >= 4 && _walker != null;
         }
 
-        static float _godOffUntil = -1f;
-        /// <summary>The sandbox character is protected unless god_set switched that off and the time has not run out.</summary>
-        internal static bool GodWanted() { return Time.time >= _godOffUntil; }
-
         static ToolOutput GodSet(Dictionary<string, object> a)
         {
             var p = Player.m_localPlayer; if (p == null) return ToolOutput.Err("no local player");
             if (!U.IsSandbox(p)) return ToolOutput.Err("god_set only touches a character named in hubner.sandboxNames");
             var on = McpJson.GetBool(a, "on", true);
-            if (on) { _godOffUntil = -1f; p.SetGodMode(true); }
-            else { _godOffUntil = Time.time + (float)Math.Max(0.5, Math.Min(30, U.D(a, "minutes", 5))) * 60f; p.SetGodMode(false); }
-            return U.Json("{\"god\":" + (p.InGodMode() ? "true" : "false") + ",\"vulnerableForSeconds\":" + (on ? "0" : U.N(Math.Round(_godOffUntil - Time.time))) + "}");
+            if (on) { U.GodOffUntil = -1f; p.SetGodMode(true); }
+            else { U.GodOffUntil = Time.time + (float)Math.Max(0.5, Math.Min(30, U.D(a, "minutes", 5))) * 60f; p.SetGodMode(false); }
+            return U.Json("{\"god\":" + (p.InGodMode() ? "true" : "false") + ",\"vulnerableForSeconds\":" + (on ? "0" : U.N(Math.Round(U.GodOffUntil - Time.time))) + "}");
         }
 
         /// <summary>One word for what the walker is doing now, for the situation digest.</summary>
@@ -180,7 +176,7 @@ namespace HubnerExt
                 }
                 list = nav;
             }
-            try { if (U.IsSandbox(Player.m_localPlayer) && GodWanted()) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
+            try { if (U.IsSandbox(Player.m_localPlayer) && U.GodWanted()) Player.m_localPlayer.SetGodMode(true); } catch (Exception ex) { U.Once("SetGodMode", ex); }       // only the sandbox character is made invulnerable
             try { if (Flying(Player.m_localPlayer)) Player.m_localPlayer.ToggleDebugFly(); } catch (Exception ex) { U.Once("ToggleDebugFly", ex); }          // ToggleDebugFly sets the field AND the ZDO value other clients read
             _walker.HopMax = (float)Math.Max(WalkFacts.HopMin, Math.Min(3.0, McpJson.Get(a, "hopMax", WalkFacts.HopMax))); _walker.ThroughPortals = McpJson.GetBool(a, "throughPortals", false); _walker.GoalHasY = goalHasY; _walker.AutoRun = McpJson.GetBool(a, "autoRun", false); _walker.Agent = McpJson.GetStr(a, "agent") ?? "HumanoidNoSwim"; _walker.NoJump = !McpJson.GetBool(a, "jump", true); _walker.ArriveHeight = (float)McpJson.Get(a, "arriveHeight", WalkFacts.StandReach); _walker.Start(list, McpJson.GetBool(a, "run", false), (float)McpJson.Get(a, "timeout", 120), (float)McpJson.Get(a, "arrive", 0.8), (float)McpJson.Get(a, "stuckSeconds", 4), McpJson.GetBool(a, "openDoors", true), userWps);
             return U.Json("{\"started\":true,\"waypoints\":" + list.Count + "}");
@@ -611,7 +607,7 @@ namespace HubnerExt
             public void Tick()
             {
                 // the sandbox character (hubner.sandboxNames) is a tool: keep it invulnerable across respawns (it was being killed by wandering skeletons and trolls between teleports). Nobody else is touched.
-                if (Time.time >= _godNext) { _godNext = Time.time + 1f; var pl = Player.m_localPlayer; try { if (pl != null && U.IsSandbox(pl) && GodWanted() && !pl.InGodMode()) pl.SetGodMode(true); } catch (Exception ex) { U.Once("AutoJoin.god", ex); } }
+                if (Time.time >= _godNext) { _godNext = Time.time + 1f; var pl = Player.m_localPlayer; try { if (pl != null && U.IsSandbox(pl) && U.GodWanted() && !pl.InGodMode()) pl.SetGodMode(true); } catch (Exception ex) { U.Once("AutoJoin.god", ex); } }
                 if (!string.IsNullOrEmpty(_pw)) PendingPw = _pw;
                 if (!string.IsNullOrEmpty(PendingPw) && ZNet.instance != null)                // answer the server's password dialog when it appears
                 {

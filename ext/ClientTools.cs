@@ -255,7 +255,7 @@ namespace HubnerExt
             var x = (float)U.D(a, "x", 0); var z = (float)U.D(a, "z", 0);
             if (!WorldBounds.InWorld(x, U.Has(a, "y") ? U.D(a, "y", 0) : 0, z)) return ToolOutput.Err("x, y and z must be finite numbers inside the world");
             // the sandbox character is a tool, not a player: never let a teleport or a fall hurt (or kill) whoever is watching; anyone else stays mortal
-            var god = U.IsSandbox(pl) && Control.GodWanted(); if (god) pl.SetGodMode(true);
+            var god = U.IsSandbox(pl) && U.GodWanted(); if (god) pl.SetGodMode(true);
             float y; var snapped = true; var snap = McpJson.GetStr(a, "snap") ?? "solid";
             if (U.Has(a, "y")) y = (float)U.D(a, "y", 0);
             else
