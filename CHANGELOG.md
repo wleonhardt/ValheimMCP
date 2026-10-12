@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The design rule "no terrain editing" is replaced by decision 0006; analysis of the command in `plans/research/2026-10-terrain-console.md`.
 - `terrain_level` refuses a pad that already carries saved terrain edits: the older level objects cannot override them (found on the server twin, where a corner of the pad stayed 4 m low). Real edits with undo verified on the server twin for `terrain_paint` and `terrain_level`, also across the corner of four zones (zones that had no terrain data go back to none).
 - Terrain tools report per zone whether this process owns the terrain data (`ownedHere`) and add a note when another peer owns it, because that peer applies the strokes later and the immediate counts are zero. Verified live on the server twin with the sandbox client as owner: the edit lands, undo from the server restores both views.
+- Ward margin verified on the server twin: a stroke is refused below ward radius + the op's reach (32 + 3 = 35 m) and allowed above, at every angle, as the game's own check.
 - Server twin: `terrain_paint` and `terrain_level` refusals checked with dry runs and a virtual peer (pieces on the pad, no-build location, enabled guard stone, `force` needing `forceConfirm`, no heightmap). `terrain_wec` is refused on the server because World Edit Commands is not installed there.
 - README: tool count corrected to about 140 and the tool table now lists the base-keeping, crafting, creature, terrain and testing tools.
 
