@@ -54,7 +54,7 @@ namespace HubnerExt
         }
         public static bool IsSandbox(Player p) { return p != null && IsSandbox(p.GetPlayerName()); }
 
-        /// <summary>Prefabs that edit terrain or the terrain data itself. Never spawned, modified or deleted by these tools (design rule: no terrain editing).</summary>
+        /// <summary>Prefabs that edit terrain or the terrain data itself. Never spawned, modified or deleted by the generic tools; only TerrainEdit.cs instantiates them (decision 0006).</summary>
         private static readonly string[] Forbidden = { "digg", "raise", "terrain", "cultivat", "mud_road", "paved_road", "path_v2", "replant", "levelground", "level_ground", "flatten", "TerrainOp" };
         public static bool IsForbidden(string prefab)
         {

@@ -207,7 +207,7 @@ About 93 tools (the core's six plus the extension's), in two builds: `HubnerExt.
 | Session control | `teleport` (with arrival check), `menu_join` / `menu_password` / auto-join (the password only from `HUBNER_AUTOJOIN_PASSWORD`), `player_state`, `players` |
 | Operations | `world_save`, `snapshot` / `snapshot_diff`, `journal`, `job_start` / `job_status` / `job_cancel`, `log_tail`, `chat_tail` (in-game chat, client and server) |
 
-There are **no terrain-editing tools** by design.
+Terrain is edited only by `terrain_paint` and `terrain_level`, which apply the game's own hoe ops (never hand-written height or paint) after saving the terrain data of the zones they can reach, so `undo` / `undo_group` restore it byte for byte. They refuse inside an enabled guard stone's area and in no-build locations, and `terrain_level` refuses when built pieces stand on the pad. See `plans/decisions/0006-terrain-editing.md`.
 
 ## Python client (`python/`)
 `hubner_mcp.py` is a tiny MCP-over-HTTP client (not named `mcp.py`: that would shadow the official `mcp` package); `hubner.py` has a `Client` class with the tools as methods plus three ready instances: `default` (follows `HUBNER_URL`), `sandbox` (the game client, 8731) and `twin` (the dedicated server, `HUBNER_SERVER_URL`, default 8741, adds `confirm:'server-write'` to writes). `from hubner import *` still gives the module-level functions bound to `default`.

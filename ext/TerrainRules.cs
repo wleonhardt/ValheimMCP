@@ -114,7 +114,7 @@ namespace HubnerExt
 
     internal sealed class PadReport
     {
-        public int Vertices, Unreachable, Raised, Lowered; public double MaxShortfall, FillM3, CutM3; public int Strokes;
+        public int Vertices, Unreachable, Raised, Lowered; public double MaxShortfall, FillM3, CutM3; public int Strokes, Spacing;
     }
 
     internal static class PadPlanner
@@ -140,7 +140,7 @@ namespace HubnerExt
                     for (var x = x0; x <= x1 + spacing - 1; x += spacing) { g.Level(Math.Min(x, x1), Math.Min(z, z1), targetY, radius, square); n++; }
                 var ok = true;
                 for (var z = z0; z <= z1 && ok; z++) for (var x = x0; x <= x1; x++) { var b = baseHeight(x, z); var reach = b + Math.Max(-TerrainGrid.LevelMax, Math.Min(TerrainGrid.LevelMax, targetY - b)); if (Math.Abs(g.Height(x, z) - reach) > 1e-6) { ok = false; break; } }
-                if (ok) { rep.Strokes = n; break; }
+                if (ok) { rep.Strokes = n; rep.Spacing = spacing; break; }
             }
             return rep;
         }

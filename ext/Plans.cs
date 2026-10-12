@@ -956,6 +956,7 @@ namespace HubnerExt
         internal static string UndoEntry(JEntry e)
         {
             if (WorldKey.Differs(e.World, Journal.CurrentWorld())) return e.Id + ": written in the world " + e.World + " and this is " + Journal.CurrentWorld() + ": not touched";
+            if (e.Kind == "terrain") return TerrainEdit.Undo(e);
             if (e.Kind == "spawn")
             {
                 var z = ResolveForUndo(e, out var problem);

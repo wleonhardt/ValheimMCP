@@ -717,6 +717,13 @@ public class TerrainOpsTests
         Assert.Equal(8, r.Raised); Assert.Equal(4, r.Lowered);                           // bases 10, 10.5, 11, 11.5 along x: two columns to raise, one already right, one to cut
         Assert.Equal(4 * (1.0 + 0.5), r.FillM3, 9); Assert.Equal(4 * 0.5, r.CutM3, 9);
     }
+    [Fact] public void TheStrokeSpacingReproducesTheStrokeCount()
+    {
+        var r = PadPlanner.Level((x, z) => 10, (x, z) => 10, 0, 0, 9, 9, 12, 3, true);
+        Assert.True(r.Spacing >= 1 && r.Spacing <= 6);                                   // square radius 3: lattice spacing at most 2 x 3
+        var per = 0; for (var x = 0; x <= 9 + r.Spacing - 1; x += r.Spacing) per++;          // the planner counts the clamped edge stroke too
+        Assert.Equal(per * per, r.Strokes);
+    }
     [Fact] public void AVertexMoreThanEightMetresAwayCannotBeReached()
     {
         var r = PadPlanner.Level((x, z) => x < 2 ? 0 : 30, (x, z) => x < 2 ? 0 : 30, 0, 0, 3, 3, 5, 3, true);

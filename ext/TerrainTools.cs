@@ -17,12 +17,18 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"half\":{\"type\":\"number\"},\"targetY\":{\"type\":\"number\"}},\"required\":[\"targetY\"]}", LevelCheck);
         }
 
+        internal static GameObject Prefab(string name)
+        {
+            if (ObjectDB.instance != null) foreach (var t in ObjectDB.instance.m_terrainOps) if (t != null && t.name == name) return t.gameObject;
+            return ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(name) : null;
+        }
+
         static string B(bool v) { return v ? "true" : "false"; }
 
-        sealed class Op { public string Prefab = ""; public bool Level, Raise, Smooth, Square; public double LevelRadius, RaiseRadius, RaiseDelta, RaisePower, SmoothRadius, SmoothPower; }
+        internal sealed class Op { public string Prefab = ""; public bool Level, Raise, Smooth, Square, Paints; public double LevelOffset; public double LevelRadius, RaiseRadius, RaiseDelta, RaisePower, SmoothRadius, SmoothPower; }
         static List<Op> _ops;
 
-        static List<Op> Ops()
+        internal static List<Op> Ops()
         {
             if (_ops != null || ZNetScene.instance == null) return _ops ?? new List<Op>();
             var f = typeof(ZNetScene).GetField("m_namedPrefabs", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
@@ -36,10 +42,10 @@ namespace HubnerExt
                 if (go == null) continue;
                 var tm = go.GetComponent<TerrainModifier>();                                                // the older terrain tools: a TerrainModifier on the prefab (path, raise, mud_road, paved_road, cultivate, digg ...)
                 if (tm != null && !seen.Contains(go.name) && (tm.m_level || tm.m_smooth))
-                { seen.Add(go.name); list.Add(new Op { Prefab = go.name, Level = tm.m_level, Raise = false, Smooth = tm.m_smooth, Square = tm.m_square, LevelRadius = tm.m_levelRadius, SmoothRadius = tm.m_smoothRadius, SmoothPower = tm.m_smoothPower }); continue; }
+                { seen.Add(go.name); list.Add(new Op { Prefab = go.name, Level = tm.m_level, Raise = false, Smooth = tm.m_smooth, Square = tm.m_square, Paints = tm.m_paintCleared, LevelOffset = tm.m_levelOffset, LevelRadius = tm.m_levelRadius, SmoothRadius = tm.m_smoothRadius, SmoothPower = tm.m_smoothPower }); continue; }
                 if (!seen.Add(go.name)) continue; var top = go.GetComponent<TerrainOp>(); if (top == null || top.m_settings == null) continue; var s = top.m_settings;
                 if (!s.m_level && !s.m_raise && !s.m_smooth) continue;
-                list.Add(new Op { Prefab = go.name, Level = s.m_level, Raise = s.m_raise, Smooth = s.m_smooth, Square = s.m_square, LevelRadius = s.m_levelRadius, RaiseRadius = s.m_raiseRadius, RaiseDelta = s.m_raiseDelta, RaisePower = s.m_raisePower, SmoothRadius = s.m_smoothRadius, SmoothPower = s.m_smoothPower });
+                list.Add(new Op { Prefab = go.name, Level = s.m_level, Raise = s.m_raise, Smooth = s.m_smooth, Square = s.m_square, Paints = s.m_paintCleared, LevelOffset = s.m_levelOffset, LevelRadius = s.m_levelRadius, RaiseRadius = s.m_raiseRadius, RaiseDelta = s.m_raiseDelta, RaisePower = s.m_raisePower, SmoothRadius = s.m_smoothRadius, SmoothPower = s.m_smoothPower });
             }
             _ops = list.OrderBy(o => o.Prefab, StringComparer.Ordinal).ToList(); return _ops;
         }

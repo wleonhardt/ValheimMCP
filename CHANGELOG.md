@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
+### Terrain editing (0.15.0 extension, not yet run in the game)
+- New write tools `terrain_paint` (cultivated, paved or dirt over a disc or box) and `terrain_level` (a rectangular pad to a target height, on the stroke lattice `level_check` plans). Both instantiate the game's own registered terrain ops, so the game's maths, ownership and replication apply. Neither writes height or paint by hand.
+- Before an edit the compressed terrain data of every zone it can reach is saved to `hubner-ext/terrain/` and a journal entry of kind `terrain` is written; `undo` / `undo_group` put the bytes back. Pure codec and stroke planner: `ext/TerrainData.cs`, unit-tested.
+- Refusals: an enabled guard stone's area, a no-build location, no loaded heightmap, more than 300 strokes, a radius or pad over 40 m, a level target the 8 m limit cannot reach, and (for `terrain_level`) built pieces on the pad unless `allowPieces`.
+- The design rule "no terrain editing" is replaced by decision 0006. `plans/research/2026-10-terrain-console.md` analyses the World Edit Commands `terrain` command (option C); nothing there is built.
+
 ### Cover model and base-keeping readers (0.14.0 extension, live-tested)
 Ported from the decompiled game and unit-tested; none of it has run in the game yet.
 - `plan_check` judges cover: a bed (roof and 80% cover at its spawn point), a roofed crafting station (70%), a smelter (a roof), a fermenter barrel (roof and 70%), and a beehive (under its prefab's m_maxCover, 60% on piece_beehive). It is a model of the game's 17 cover rays and its roof cast on the pieces' boxes: near the limit it can be a little off, so a close miss is a warning. Rules `bed-cover`, `station-cover`, `smelter-roof`, `fermenter-cover`, `beehive-cover`.

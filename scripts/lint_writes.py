@@ -16,7 +16,7 @@ RULES = [
     (r'\bDestroyZDO\s*\(',                  {'ext/Plans.cs', 'ext/Audit.cs'}, 'destroying a ZDO'),
     (r'ZNetScene\.instance\.Destroy\s*\(',  {'ext/Plans.cs', 'ext/ClientTools.cs'}, 'destroying an object'),
     (r'\.SetPosition\s*\(',                 {'ext/Plans.cs', 'ext/ClientTools.cs'}, 'moving a ZDO'),
-    (r'\bObject\.Instantiate\s*\(|\bInstantiate\s*\(', {'ext/ClientTools.cs', 'ext/Place.cs', 'ext/PlanCheck.cs'}, 'instantiating a prefab'),
+    (r'\bObject\.Instantiate\s*\(|\bInstantiate\s*\(', {'ext/ClientTools.cs', 'ext/Place.cs', 'ext/PlanCheck.cs', 'ext/TerrainEdit.cs'}, 'instantiating a prefab'),
     (r'\bSetGodMode\s*\(',                  {'ext/ClientTools.cs', 'ext/Control.cs'}, 'god mode'),
     (r'\bTryRunCommand\s*\(',               {'src/ValheimMCP/ConsoleBridge.cs'}, 'running console commands'),
     (r'\bKick\s*\(|\bBan\s*\(|AddToBanList|ZNet\.instance\.Kick', set(), 'kicking or banning players'),

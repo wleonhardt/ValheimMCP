@@ -110,6 +110,9 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 
 - Decide whether `log_tail` (file) and `get_log` (ring buffer) should merge, and whether `Render.Ex` should share the core's camera (see open questions).
 
+61. Terrain editing, not yet run in the game (decision 0006): on the scratch spot (-280,-300) with the client near it, `terrain_paint` dry then real (cultivated disc r=3): `heightChanged` / `paintChanged` non-zero, `undo_group` restores (second `terrain_paint dry`, then compare `terrain_info`). `terrain_level` on a 10 x 10 pad 1 m above the ground: `verticesOnTarget` equals the vertex count, `undo_group` restores. Check that a level op exists at all (item 52 says none reported `m_level`). Check the owner case: an edit when another peer owns the zone's terrain compiler (`zonesNotYetChanged`). Server twin: needs `vpeer_add` near the pad; writes also need the server flag and `confirm:"server-write"`.
+62. Option C (World Edit Commands `terrain`): see `plans/research/2026-10-terrain-console.md`; first `list_commands` on the client to see if the command exists.
+
 ## Done
 
 - 2026-10-11: review fixes applied in code, docs, CI, Python (branch `review-fixes`); see `decisions/0001-review-fixes.md` and the top section of `CHANGELOG.md`.

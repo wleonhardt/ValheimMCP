@@ -1,5 +1,5 @@
 // Hubner extension for ValheimMCP: perception + (gated) control tools for building work.
-// Loaded from BepInEx/hubner-ext/HubnerExt.dll and hot-reloaded on change. No terrain-editing tools, on purpose.
+// Loaded from BepInEx/hubner-ext/HubnerExt.dll and hot-reloaded on change. Terrain is edited only by TerrainEdit.cs (decision 0006).
 using System;
 using System.Linq;
 using System.Collections;
