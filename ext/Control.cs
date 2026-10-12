@@ -87,7 +87,7 @@ namespace HubnerExt
 
         public static void Uninstall()
         {
-            try { if (_h != null) _h.UnpatchSelf(); } catch { }
+            try { if (_h != null) _h.UnpatchSelf(); } catch (Exception ex1) { U.Once("Control.cs:90.1", ex1); }
             _h = null;
             _walker = null; _auto = null;
         }
@@ -191,7 +191,7 @@ namespace HubnerExt
             bool loaded = zs != null && zs.IsZoneLoaded(new Vector3(x, 0, z)); float h; bool gok = zs != null && zs.GetGroundHeight(new Vector3(x, 5000f, z), out h);
             int inst = 0; foreach (var nv in U.Instances()) { var d = nv.transform.position - new Vector3(x, nv.transform.position.y, z); if (d.x * d.x + d.z * d.z < rad * rad) inst++; }
             bool near = U.Has(a, "x") ? ((pos.x - x) * (pos.x - x) + (pos.z - z) * (pos.z - z) < 36f) : true;
-            bool god = false; try { god = p.InGodMode(); } catch { }
+            bool god = false; try { god = p.InGodMode(); } catch (Exception ex1) { U.Once("Control.cs:194.1", ex1); }
             bool ready = !tele && p.IsOnGround() && loaded && gok && near;
             return U.Json("{\"player\":true,\"ready\":" + (ready ? "true" : "false") + ",\"teleporting\":" + (tele ? "true" : "false") + ",\"grounded\":" + (p.IsOnGround() ? "true" : "false") + ",\"god\":" + (god ? "true" : "false") + ",\"pos\":" + U.V(pos) + ",\"zoneLoaded\":" + (loaded ? "true" : "false") + ",\"groundKnown\":" + (gok ? "true" : "false") + ",\"nearTarget\":" + (near ? "true" : "false") + ",\"instances\":" + inst + "}");
         }
@@ -231,10 +231,10 @@ namespace HubnerExt
             if (f != null)
             {
                 var profiles = new List<string>();
-                try { var fl = typeof(FejdStartup).GetField("m_profiles", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); var l = fl == null ? null : fl.GetValue(f) as System.Collections.IList; if (l != null) foreach (var pf in l) { var nm = pf.GetType().GetMethod("GetName"); profiles.Add(nm != null ? (string)nm.Invoke(pf, null) : pf.ToString()); } } catch { }
+                try { var fl = typeof(FejdStartup).GetField("m_profiles", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); var l = fl == null ? null : fl.GetValue(f) as System.Collections.IList; if (l != null) foreach (var pf in l) { var nm = pf.GetType().GetMethod("GetName"); profiles.Add(nm != null ? (string)nm.Invoke(pf, null) : pf.ToString()); } } catch (Exception ex1) { U.Once("Control.cs:234.1", ex1); }
                 sb.Append(",\"profiles\":[" + string.Join(",", profiles.Select(U.S).ToArray()) + "]");
             }
-            bool dlg = false; try { dlg = ZNet.instance != null && ZNet.IsPasswordDialogShowing(); } catch { }
+            bool dlg = false; try { dlg = ZNet.instance != null && ZNet.IsPasswordDialogShowing(); } catch (Exception ex1) { U.Once("Control.cs:237.1", ex1); }
             sb.Append(",\"connecting\":" + (ZNet.instance != null && Player.m_localPlayer == null ? "true" : "false") + ",\"passwordDialog\":" + (dlg ? "true" : "false") + ",\"passwordQueued\":" + (string.IsNullOrEmpty(PendingPw) ? "false" : "true"));
             return U.Json(sb.Append("}").ToString());
         }
@@ -599,7 +599,7 @@ namespace HubnerExt
                 if (!string.IsNullOrEmpty(_pw)) PendingPw = _pw;
                 if (!string.IsNullOrEmpty(PendingPw) && ZNet.instance != null)                // answer the server's password dialog when it appears
                 {
-                    try { if (ZNet.IsPasswordDialogShowing()) { var m = typeof(ZNet).GetMethod("OnPasswordEntered", BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public); if (m != null) { m.Invoke(m.IsStatic ? null : (object)ZNet.instance, new object[] { PendingPw }); PendingPw = null; _pw = null; } } } catch { }
+                    try { if (ZNet.IsPasswordDialogShowing()) { var m = typeof(ZNet).GetMethod("OnPasswordEntered", BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public); if (m != null) { m.Invoke(m.IsStatic ? null : (object)ZNet.instance, new object[] { PendingPw }); PendingPw = null; _pw = null; } } } catch (Exception ex1) { U.Once("Control.cs:602.1", ex1); }
                 }
                 if (_done && string.IsNullOrEmpty(PendingPw)) return;
                 if (_done || Time.time < _next) return;

@@ -14,7 +14,7 @@ namespace HubnerExt
             if (string.IsNullOrEmpty(s) || s[0] != '{') return null;
             int i = 0;
             try { return Obj(s, ref i); }
-            catch { return null; }
+            catch { return null; }          // allow: a read of an optional value falls back to its default
         }
 
         static Dictionary<string, object> Obj(string s, ref int i)

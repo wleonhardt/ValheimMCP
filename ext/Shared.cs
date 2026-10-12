@@ -247,7 +247,7 @@ namespace HubnerExt
             if (EnvMan.instance != null)
             {
                 sb.Append(",\"dayFraction\":" + U.N(EnvMan.instance.GetDayFraction()) + ",\"isDay\":" + (EnvMan.IsDay() ? "true" : "false"));
-                try { sb.Append(",\"environment\":" + U.S(EnvMan.instance.GetCurrentEnvironment().m_name)); } catch { }
+                try { sb.Append(",\"environment\":" + U.S(EnvMan.instance.GetCurrentEnvironment().m_name)); } catch (Exception ex1) { U.Once("Shared.cs:250.1", ex1); }
             }
             if (Player.m_localPlayer != null)
                 sb.Append(",\"localPlayer\":{\"name\":" + U.S(Player.m_localPlayer.GetPlayerName()) + ",\"pos\":" + U.V(Player.m_localPlayer.transform.position) + "}");

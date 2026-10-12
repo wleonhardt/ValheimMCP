@@ -121,10 +121,10 @@ namespace HubnerExt
         static ToolOutput StateWith(float requested)
         {
             var em = EnvMan.instance; if (em == null) return U.Json("{\"world\":false}");
-            float frac = 0f; try { frac = float.IsNaN(requested) ? em.GetDayFraction() : requested; } catch { }
-            bool day = false, night = false; try { day = EnvMan.IsDay(); night = EnvMan.IsNight(); } catch { }
+            float frac = 0f; try { frac = float.IsNaN(requested) ? em.GetDayFraction() : requested; } catch (Exception ex1) { U.Once("Env.cs:124.1", ex1); }
+            bool day = false, night = false; try { day = EnvMan.IsDay(); night = EnvMan.IsNight(); } catch (Exception ex1) { U.Once("Env.cs:125.1", ex1); }
             var pending = !float.IsNaN(requested);
-            string env = ""; try { var m = typeof(EnvMan).GetMethod("GetCurrentEnvironment", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); var e = m != null ? m.Invoke(em, null) : null; if (e != null) { var f = e.GetType().GetField("m_name"); env = f != null ? Convert.ToString(f.GetValue(e)) : ""; } } catch { }
+            string env = ""; try { var m = typeof(EnvMan).GetMethod("GetCurrentEnvironment", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); var e = m != null ? m.Invoke(em, null) : null; if (e != null) { var f = e.GetType().GetField("m_name"); env = f != null ? Convert.ToString(f.GetValue(e)) : ""; } } catch (Exception ex1) { U.Once("Env.cs:127.1", ex1); }
             return U.Json("{\"dayFraction\":" + U.N(Math.Round(frac, 3)) + ",\"isDay\":" + (day ? "true" : "false") + ",\"isNight\":" + (night ? "true" : "false") + (pending ? ",\"pending\":true,\"note\":\"dayFraction is the time requested; isDay, isNight and environment show the old time until the next frame\"" : "") + ",\"environment\":" + U.S(env) + ",\"timeHeld\":" + (_timeHeld ? "true" : "false") + ",\"weatherForced\":" + U.S(_weather) + ",\"autoReleaseSeconds\":" + (Until() > 0 ? U.N(Math.Round(Until() - Time.time)) : "null") + "}");
         }
     }

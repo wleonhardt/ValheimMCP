@@ -27,7 +27,7 @@ namespace HubnerExt
         const bool W = false;       // the core's tools.write switch is a restart-time setting; on the server these tools use their own runtime gate instead
         static string FlagPath { get { return Path.Combine(BepInEx.Paths.BepInExRootPath, "hubner-ext", "ALLOW_SERVER_WRITES"); } }
         /// <summary>The flag only counts for hubner.writeFlagMinutes (default 30) after it was last touched: forgetting to remove it cannot leave the server writable.</summary>
-        internal static bool FlagFresh() { try { return File.Exists(FlagPath) && (DateTime.UtcNow - File.GetLastWriteTimeUtc(FlagPath)).TotalMinutes < FlagMinutes; } catch { return false; } }
+        internal static bool FlagFresh() { try { return File.Exists(FlagPath) && (DateTime.UtcNow - File.GetLastWriteTimeUtc(FlagPath)).TotalMinutes < FlagMinutes; } catch { return false; } }          // allow: a read of an optional value falls back to its default
         internal static string GateState() { return !File.Exists(FlagPath) ? "closed" : (FlagFresh() ? "open (flag touched < " + FlagMinutes + " min ago)" : "closed (flag expired: touch it again)"); }
         static ToolOutput Guard(Dictionary<string, object> a, Func<Dictionary<string, object>, ToolOutput> h, bool honoursDry = false)
         {
@@ -184,7 +184,7 @@ namespace HubnerExt
             if (pgo != null && pgo.GetComponent<ZNetView>() == null) { err = prefab + ": not a networked prefab (no ZNetView): a ZDO for it would never become an object"; return null; }
             var nz = ZDOMan.instance.CreateNewZDO(pos, Hash(prefab));
             nz.SetPrefab(Hash(prefab));                           // CreateNewZDO leaves the prefab hash 0 on this game version: set it explicitly
-            if (nz.GetPrefab() != Hash(prefab)) { err = prefab + ": created object has prefab hash " + nz.GetPrefab(); try { ZDOMan.instance.DestroyZDO(nz); } catch { } return null; }
+            if (nz.GetPrefab() != Hash(prefab)) { err = prefab + ": created object has prefab hash " + nz.GetPrefab(); try { ZDOMan.instance.DestroyZDO(nz); } catch (Exception ex1) { U.Once("Plans.cs:187.1", ex1); } return null; }
             nz.Persistent = true; nz.SetRotation(rot);
             if (text != null) nz.Set("text", text);
             if (tag != null) nz.Set("tag", tag);
@@ -818,7 +818,7 @@ namespace HubnerExt
             if (_vars != null) return _vars;
             _vars = new Dictionary<int, string>();
             foreach (var f in typeof(ZDOVars).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                if (f.FieldType == typeof(int) && f.Name.StartsWith("s_", StringComparison.Ordinal)) { try { _vars[(int)f.GetValue(null)] = f.Name.Substring(2); } catch { } }
+                if (f.FieldType == typeof(int) && f.Name.StartsWith("s_", StringComparison.Ordinal)) { try { _vars[(int)f.GetValue(null)] = f.Name.Substring(2); } catch (Exception ex1) { U.Once("Plans.cs:821.1", ex1); } }
             foreach (var k in new[] { "text", "tag", "creator", "scale", "health", "author", "hub_plan", "hub_key", "hub_ctag", "target", "support", "owner", "fuel", "state" }) _vars[k.GetStableHashCode()] = k;
             return _vars;
         }

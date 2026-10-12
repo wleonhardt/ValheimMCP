@@ -152,13 +152,13 @@ namespace HubnerExt
         {
             var pl = Player.m_localPlayer; if (pl == null) return ToolOutput.Err("no local player");
             var sb = new StringBuilder("{\"health\":" + U.N(Math.Round(pl.GetHealth(), 1)) + ",\"maxHealth\":" + U.N(Math.Round(pl.GetMaxHealth(), 1)) + ",\"stamina\":" + U.N(Math.Round(pl.GetStamina(), 1)) + ",\"pos\":" + U.V(pl.transform.position));
-            try { sb.Append(",\"biome\":" + U.S(WorldGenerator.instance.GetBiome(pl.transform.position).ToString())); } catch { }
-            try { var w = pl.GetCurrentWeapon(); sb.Append(",\"weapon\":" + U.S(w != null ? w.m_shared.m_name : "")); } catch { }
+            try { sb.Append(",\"biome\":" + U.S(WorldGenerator.instance.GetBiome(pl.transform.position).ToString())); } catch (Exception ex1) { U.Once("Insight.cs:155.1", ex1); }
+            try { var w = pl.GetCurrentWeapon(); sb.Append(",\"weapon\":" + U.S(w != null ? w.m_shared.m_name : "")); } catch (Exception ex1) { U.Once("Insight.cs:156.1", ex1); }
             var eff = new List<string>();
-            try { foreach (var se in pl.GetSEMan().GetStatusEffects()) { float rem = 0; try { rem = se.GetRemaningTime(); } catch { } eff.Add("{\"name\":" + U.S(se.name) + ",\"remaining\":" + U.N(Math.Round(rem, 1)) + "}"); } } catch { }
+            try { foreach (var se in pl.GetSEMan().GetStatusEffects()) { float rem = 0; try { rem = se.GetRemaningTime(); } catch (Exception ex1) { U.Once("Insight.cs:158.1", ex1); } eff.Add("{\"name\":" + U.S(se.name) + ",\"remaining\":" + U.N(Math.Round(rem, 1)) + "}"); } } catch (Exception ex2) { U.Once("Insight.cs:158.2", ex2); }
             sb.Append(",\"statusEffects\":[" + string.Join(",", eff.ToArray()) + "]");
             var foods = new List<string>();
-            try { foreach (var f in pl.GetFoods()) { var fi = f.GetType(); var item = fi.GetField("m_item")?.GetValue(f); var nm = item != null ? ((ItemDrop.ItemData)item).m_shared.m_name : "?"; var tm = fi.GetField("m_time")?.GetValue(f); foods.Add("{\"food\":" + U.S(nm) + ",\"timeLeft\":" + U.N(Math.Round(tm is float ft ? ft : 0f, 0)) + "}"); } } catch { }
+            try { foreach (var f in pl.GetFoods()) { var fi = f.GetType(); var item = fi.GetField("m_item")?.GetValue(f); var nm = item != null ? ((ItemDrop.ItemData)item).m_shared.m_name : "?"; var tm = fi.GetField("m_time")?.GetValue(f); foods.Add("{\"food\":" + U.S(nm) + ",\"timeLeft\":" + U.N(Math.Round(tm is float ft ? ft : 0f, 0)) + "}"); } } catch (Exception ex1) { U.Once("Insight.cs:161.1", ex1); }
             sb.Append(",\"foods\":[" + string.Join(",", foods.ToArray()) + "]}"); return U.Json(sb.ToString());
         }
 

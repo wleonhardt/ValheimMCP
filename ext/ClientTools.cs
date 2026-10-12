@@ -95,7 +95,7 @@ namespace HubnerExt
                     sb.Append(",\"solid\":" + U.N(sh) + ",\"normal\":" + U.V(n));
                     if (go != null) { var nv = go.GetComponentInParent<ZNetView>(); sb.Append(",\"solidObject\":" + U.S(nv != null ? U.PrefabName(nv) : go.name)); }
                 }
-                try { sb.Append(",\"biome\":" + U.S(WorldGenerator.instance.GetBiome(x, z).ToString())); } catch { }
+                try { sb.Append(",\"biome\":" + U.S(WorldGenerator.instance.GetBiome(x, z).ToString())); } catch (Exception ex1) { U.Once("ClientTools.cs:98.1", ex1); }
                 sb.Append(",\"waterLevel\":" + U.N(zs.m_waterLevel));
             }
             sb.Append('}');
@@ -211,7 +211,7 @@ namespace HubnerExt
                 foreach (Transform t in go.GetComponentsInChildren<Transform>())
                 {
                     var isSnap = false;
-                    try { isSnap = t.CompareTag("snappoint"); } catch { }
+                    try { isSnap = t.CompareTag("snappoint"); } catch (Exception ex1) { U.Once("ClientTools.cs:214.1", ex1); }
                     if (!isSnap && t.name.IndexOf("snap", StringComparison.OrdinalIgnoreCase) < 0) continue;
                     if (k >= 40) break;
                     if (k++ > 0) sp.Append(',');

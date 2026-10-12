@@ -110,7 +110,7 @@ namespace HubnerExt
         static ToolOutput List(Dictionary<string, object> a)
         {
             var rows = Peers.Select(p => "{\"name\":" + U.S(p.Name) + ",\"pos\":" + U.V(p.Pos) + ",\"minutesLeft\":" + U.N(Math.Round((p.Expires - DateTime.UtcNow).TotalMinutes, 1)) + "}").ToArray();
-            int inst = 0; try { inst = ZNetScene.instance != null ? ZNetScene.instance.NrOfInstances() : 0; } catch { }
+            int inst = 0; try { inst = ZNetScene.instance != null ? ZNetScene.instance.NrOfInstances() : 0; } catch (Exception ex1) { U.Once("VirtualPeers.cs:113.1", ex1); }
             return U.Json("{\"peers\":[" + string.Join(",", rows) + "],\"instances\":" + inst + ",\"frames\":" + _frames + ",\"installed\":" + (_h != null ? "true" : "false") + ",\"error\":" + U.S(_err) + ",\"lastError\":" + U.S(_lastError) + "}");
         }
 

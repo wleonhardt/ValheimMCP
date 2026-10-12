@@ -23,10 +23,10 @@ namespace HubnerExt
             catch (Exception) { return "unknown"; /* allow: a stamp that cannot be read is shown as unknown, never an error */ }
         }
         public static bool CoreHasSettings { get { return MInt != null; } }
-        public static int Int(string key, int dflt) { try { return MInt != null ? (int)MInt.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
-        public static string Str(string key, string dflt) { try { return MStr != null ? (string)MStr.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }
+        public static int Int(string key, int dflt) { try { return MInt != null ? (int)MInt.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }          // allow: a read of an optional value falls back to its default
+        public static string Str(string key, string dflt) { try { return MStr != null ? (string)MStr.Invoke(null, new object[] { key, dflt }) : dflt; } catch { return dflt; } }          // allow: a read of an optional value falls back to its default
         public static bool Bool(string key, bool dflt) { var v = Str(key, null); if (v == null) return dflt; v = v.Trim().ToLowerInvariant(); return v == "true" || v == "yes" || v == "on" ? true : (v == "false" || v == "no" || v == "off" ? false : dflt); }
-        public static List<string> List(string key) { try { return MList != null ? (List<string>)MList.Invoke(null, new object[] { key }) : null; } catch { return null; } }
+        public static List<string> List(string key) { try { return MList != null ? (List<string>)MList.Invoke(null, new object[] { key }) : null; } catch { return null; } }          // allow: a read of an optional value falls back to its default
     }
 
     // ------------------------------------------------------------------ helpers
@@ -246,13 +246,14 @@ namespace HubnerExt
     /// Begin()/End() batch the appends of one tool call into a single file write (a plan of 3,000 pieces used to be 3,000 writes on the main thread).</summary>
     internal static class Journal
     {
-        public static readonly List<JEntry> Entries = new List<JEntry>();
+        private static readonly List<JEntry> _entries = new List<JEntry>();
+        public static List<JEntry> Entries { get { EnsureLoaded(); return _entries; } }
         /// <summary>Counts every change to the journal: lets callers (the pre-save list sanitiser) skip work when nothing was written.</summary>
         public static long Version;
         /// <summary>Id of the current world load (ZDOMan session). Entries from another load cannot be found by id.</summary>
         /// <summary>The world being played (name#uid); empty before one is loaded.</summary>
         public static string CurrentWorld() { try { var w = ZNet.World; return w != null ? WorldKey.Of(w.m_name, w.m_uid) : ""; } catch (Exception ex) { U.Once("Journal.CurrentWorld", ex); return ""; } }
-        public static string CurrentBoot() { try { return ZDOMan.instance != null ? ZDOMan.GetSessionID().ToString(CultureInfo.InvariantCulture) : ""; } catch { return ""; } }
+        public static string CurrentBoot() { try { return ZDOMan.instance != null ? ZDOMan.GetSessionID().ToString(CultureInfo.InvariantCulture) : ""; } catch { return ""; } }          // allow: a read of an optional value falls back to its default
         /// <summary>Last file error (empty = fine). A journal that cannot be written means writes can no longer be undone after a restart: status and selftest show it.</summary>
         public static string LastError = "";
         public static int SkippedLines;
@@ -262,17 +263,22 @@ namespace HubnerExt
         private static string Dir { get { return Path.Combine(BepInEx.Paths.BepInExRootPath, "hubner-ext"); } }
         private static string File_ { get { return Path.Combine(Dir, "journal.jsonl"); } }
 
-        private static void EnsureLoaded()
+        private sealed class Parsed { public List<JEntry> List = new List<JEntry>(); public int Undone, Skipped; public long MaxSeq; public string Error = ""; }
+        private static System.Threading.Tasks.Task<Parsed> _parse;
+        private static readonly object LoadLock = new object();
+
+        /// <summary>Reads the journal file into entries. Pure file work, so it can run on a worker thread: a journal of a few hundred thousand lines took seconds on the main thread at every reload.</summary>
+        private static Parsed Parse()
         {
-            if (_loaded) return; _loaded = true;
+            var res = new Parsed();
             try
             {
-                if (!File.Exists(File_)) return;
-                var byseq = new Dictionary<long, JEntry>(); var order = new List<long>(); int undone = 0;
+                if (!File.Exists(File_)) return res;
+                var byseq = new Dictionary<long, JEntry>(); var order = new List<long>();
                 foreach (var line in File.ReadAllLines(File_))
                 {
-                    var d = FlatJson.Parse(line); if (d == null) { if (line.Trim().Length > 0) SkippedLines++; continue; }
-                    if (d.ContainsKey("undone")) { byseq.Remove((long)FlatJson.N(d, "undone")); undone++; continue; }
+                    var d = FlatJson.Parse(line); if (d == null) { if (line.Trim().Length > 0) res.Skipped++; continue; }
+                    if (d.ContainsKey("undone")) { byseq.Remove((long)FlatJson.N(d, "undone")); res.Undone++; continue; }
                     if (d.ContainsKey("remap")) { var from = FlatJson.S(d, "remap"); var to = FlatJson.S(d, "to"); var rb = FlatJson.S(d, "boot"); foreach (var pe in byseq.Values) if (pe.Id == from && (string.IsNullOrEmpty(rb) || pe.Boot == rb)) pe.Id = to; continue; }
                     var e = new JEntry
                     {
@@ -287,13 +293,29 @@ namespace HubnerExt
                     var ints = FlatJson.O(d, "ints"); if (ints != null) { e.Ints = new Dictionary<string, int>(); foreach (var kv in ints) if (kv.Value is double dv) e.Ints[kv.Key] = (int)dv; }
                     var fl = FlatJson.O(d, "floats"); if (fl != null) { e.Floats = new Dictionary<string, float>(); foreach (var kv in fl) if (kv.Value is double dv) e.Floats[kv.Key] = (float)dv; }
                     var st = FlatJson.O(d, "strings"); if (st != null) { e.Strings = new Dictionary<string, string>(); foreach (var kv in st) if (kv.Value is string sv) e.Strings[kv.Key] = sv; }
-                    byseq[e.Seq] = e; order.Add(e.Seq); _seq = Math.Max(_seq, e.Seq);
+                    byseq[e.Seq] = e; order.Add(e.Seq); res.MaxSeq = Math.Max(res.MaxSeq, e.Seq);
                 }
-                foreach (var s in order) if (byseq.TryGetValue(s, out var en)) { Entries.Add(en); byseq.Remove(s); }
-                if (SkippedLines > 0) Plugin.Log?.LogWarning("[hubner-ext] journal: " + SkippedLines + " unreadable line(s) skipped (a torn write after a crash?)");
-                if (undone > 1000 && undone > Entries.Count) Compact();
+                foreach (var sq in order) if (byseq.TryGetValue(sq, out var en)) { res.List.Add(en); byseq.Remove(sq); }
             }
-            catch (Exception ex) { LastError = "load: " + ex.Message; U.Once("Journal.load", ex); }
+            catch (Exception ex) { res.Error = "load: " + ex.Message; }
+            return res;
+        }
+
+        /// <summary>The first access takes the parsed journal (waiting for the worker if it is still reading) and applies it.</summary>
+        private static void EnsureLoaded()
+        {
+            if (_loaded) return;
+            lock (LoadLock)
+            {
+                if (_loaded) return;
+                Parsed p;
+                try { p = _parse != null ? _parse.Result : Parse(); } catch (Exception ex) { p = new Parsed { Error = "load: " + ex.Message }; }
+                _entries.AddRange(p.List); _seq = Math.Max(_seq, p.MaxSeq); SkippedLines = p.Skipped;
+                if (p.Error.Length > 0) { LastError = p.Error; U.Once("Journal.load", new Exception(p.Error)); }
+                _loaded = true; _parse = null;
+                if (p.Skipped > 0) Plugin.Log?.LogWarning("[hubner-ext] journal: " + p.Skipped + " unreadable line(s) skipped (a torn write after a crash?)");
+                if (p.Undone > 1000 && p.Undone > _entries.Count) Compact();
+            }
         }
 
         /// <summary>Rewrite the file with only the live entries (drops the undone markers and the entries they cancel).</summary>
@@ -310,9 +332,10 @@ namespace HubnerExt
             catch (Exception ex) { LastError = "compact: " + ex.Message; U.Once("Journal.compact", ex); }
         }
 
-        public static void Load() { EnsureLoaded(); }
+        /// <summary>Starts reading the journal on a worker thread; the first use of the entries waits for it if it is not done.</summary>
+        public static void Load() { lock (LoadLock) { if (!_loaded && _parse == null) _parse = System.Threading.Tasks.Task.Run(() => Parse()); } }
 
-        public static long FileBytes() { try { return File.Exists(File_) ? new FileInfo(File_).Length : 0; } catch { return 0; } }
+        public static long FileBytes() { try { return File.Exists(File_) ? new FileInfo(File_).Length : 0; } catch { return 0; } }          // allow: a read of an optional value falls back to its default
 
         /// <summary>Drop entries older than keepDays (their undo is given up) and rewrite the file. Returns how many were dropped.</summary>
         public static int Prune(double keepDays, bool dry)

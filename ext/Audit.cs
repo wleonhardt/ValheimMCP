@@ -145,7 +145,7 @@ namespace HubnerExt
                 var p = t.GetProperty("Name"); if (p != null) return p.GetValue(ui, null) as string ?? "";
                 var m = t.GetMethod("GetName"); if (m != null) return m.Invoke(ui, null) as string ?? "";
             }
-            catch { }
+            catch (Exception ex1) { U.Once("Audit.cs:148.1", ex1); }
             return "";
         }
         static readonly int SayHash = "Say".GetStableHashCode(), ChatHash = "ChatMessage".GetStableHashCode();
@@ -403,7 +403,7 @@ namespace HubnerExt
                     }
                 }
             }
-            foreach (var z in toDestroy) { try { z.SetOwner(ZDOMan.GetSessionID()); ZDOMan.instance.DestroyZDO(z); destroyed++; } catch { } }
+            foreach (var z in toDestroy) { try { z.SetOwner(ZDOMan.GetSessionID()); ZDOMan.instance.DestroyZDO(z); destroyed++; } catch (Exception ex1) { U.Once("Audit.cs:406.1", ex1); } }
             var identical = groups.Values.Where(g => g.Count > 1).ToList();
             var exId = identical.Take(maxEx).Select(g => U.S(Zdos.NameOf(g[0].GetPrefab()) + " x" + g.Count + " at " + U.V(g[0].GetPosition()))).ToArray();
             return U.Json("{\"scanned\":" + total + ",\"invalidPrefab\":" + invalid + ",\"staleEntries\":" + stale + ",\"duplicateEntries\":" + dupRef + ",\"identicalGroups\":" + identical.Count + ",\"fixed\":{\"entriesRemoved\":" + removed + ",\"destroyed\":" + destroyed + "},\"examples\":{\"invalid\":[" + string.Join(",", exInvalid.Select(U.S).ToArray())
@@ -459,7 +459,7 @@ namespace HubnerExt
             foreach (var p in ZNet.instance.GetPeers())
             {
                 string rawName = p.m_playerName ?? ""; bool sb = names.Contains(rawName); if (sb) sandbox++; string name = ChatRules.ForReading(rawName, 40);          // a name is text the player chose: cleaned like chat text
-                string host = ""; if (showHosts) { try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch { } }
+                string host = ""; if (showHosts) { try { host = p.m_socket != null ? p.m_socket.GetHostName() : ""; } catch (Exception ex1) { U.Once("Audit.cs:462.1", ex1); } }
                 // the character's own ZDO says more than the peer record: in bed, dead, and where it really is (the peer's reference position can lag a zone behind)
                 ZDO cz = null; try { cz = p.m_characterID != ZDOID.None && ZDOMan.instance != null ? ZDOMan.instance.GetZDO(p.m_characterID) : null; } catch (Exception ex) { U.Once("players.zdo", ex); }
                 rows.Add("{\"name\":" + U.S(name) + ",\"host\":" + U.S(host) + ",\"uid\":" + p.m_uid + ",\"pos\":" + U.V(cz != null ? cz.GetPosition() : p.m_refPos) + ",\"posSource\":" + U.S(cz != null ? "character zdo" : "peer reference") + ",\"inBed\":" + (cz != null && cz.GetBool("inBed", false) ? "true" : "false") + ",\"dead\":" + (cz != null && cz.GetBool("dead", false) ? "true" : "false") + ",\"sandbox\":" + (sb ? "true" : "false") + "}");
@@ -480,7 +480,7 @@ namespace HubnerExt
             if (ZNet.instance != null)
             {
                 var peers = ZNet.instance.GetPeers(); sb.Append(",\"peers\":" + (peers == null ? 0 : peers.Count));
-                try { sb.Append(",\"saveStart\":" + U.N(ZNet.instance.SaveStartTime) + ",\"saveDone\":" + U.N(ZNet.instance.SaveDoneTime)); } catch { }
+                try { sb.Append(",\"saveStart\":" + U.N(ZNet.instance.SaveStartTime) + ",\"saveDone\":" + U.N(ZNet.instance.SaveDoneTime)); } catch (Exception ex1) { U.Once("Audit.cs:483.1", ex1); }
             }
             sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"journalError\":" + U.S(Journal.LastError) + ",\"resumeNote\":" + U.S(ResumeNote) + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"routedHashes\":{" + SeenHashesJson() + "},\"sayHash\":" + SayHash + ",\"chatHash\":" + ChatHash + ",\"routedRpcSeen\":" + RoutedSeen + ",\"chatRpcSeen\":" + ChatSeen + ",\"health\":" + U.S(HealthSummary()));
             return U.Json(sb.Append('}').ToString());

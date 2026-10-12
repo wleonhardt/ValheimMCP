@@ -376,6 +376,20 @@ namespace HubnerExt
                 var near = solids.Where(sd => Math.Abs(sd.Box.C.X - pp.Pos.X) < 40 && Math.Abs(sd.Box.C.Z - pp.Pos.Z) < 40).ToList();
                 var roofed = CoverModel.IsUnderRoof(new V3(pp.Pos.X, pp.Pos.Y + 0.1, pp.Pos.Z), near.Where(sd => sd.Box.C.Y > pp.Pos.Y - 1).ToList(), null);
                 var biome = WorldGenerator.instance.GetBiome((float)pp.Pos.X, (float)pp.Pos.Z); var why = new List<string>();
+                if (biome == Heightmap.Biome.AshLands)
+                {
+                    // Heightmap.GetLava (the lava paint) with the piece's height over the ground: only where the terrain is loaded
+                    try
+                    {
+                        var wp = new Vector3((float)pp.Pos.X, (float)pp.Pos.Y, (float)pp.Pos.Z); var hm = Heightmap.FindHeightmap(wp); float gh;
+                        if (hm != null && ZoneSystem.instance.GetGroundHeight(wp, out gh))
+                        {
+                            var lava = hm.GetLava(wp); var pct = WearRules.LavaPercentPerTick(lava, wp.y - gh, ShieldRules.Inside(shieldsHere, pp.Pos.X, pp.Pos.Y, pp.Pos.Z), w.m_ashDamageImmune, w.m_ashDamageResist);
+                            if (pct > 0) why.Add("lava paint " + U.N(Math.Round(lava, 2)) + ": " + N(pct) + "% of its health every 2 s");
+                        }
+                    }
+                    catch (Exception ex) { U.Once("wear_risk.lava", ex); }
+                }
                 if (w.m_noRoofWear && !roofed) { rain++; if (frac > WearRules.RainFloorHealth) why.Add("rain takes it down to half health in " + N(WearRules.SecondsOfRainToHalf(frac, w.m_health) / 60) + " min of wet weather"); }
                 if (!roofed) roofless++;
                 if (WearRules.AshApplies(biome == Heightmap.Biome.AshLands, ashDamage, ShieldRules.Inside(shieldsHere, pp.Pos.X, pp.Pos.Y, pp.Pos.Z), w.m_ashDamageImmune, roofed, w.m_ashDamageResist, frac)) { ash++; why.Add("ash damage " + N(ashDamage) + "% every 5 s with no roof"); }
@@ -383,7 +397,7 @@ namespace HubnerExt
                 if (frac < 0.999) damaged++;
                 if ((why.Count > 0 || frac < 0.5) && rows.Count < lim) rows.Add("{\"id\":" + U.S(pp.Id) + ",\"prefab\":" + U.S(pp.Geo.Prefab) + ",\"pos\":" + U.V(zdos[pp].GetPosition()) + ",\"healthFraction\":" + U.N(Math.Round(frac, 2)) + ",\"roofed\":" + B(roofed) + ",\"biome\":" + U.S(biome.ToString()) + ",\"risks\":[" + string.Join(",", why.Select(U.S).ToArray()) + "]}");
             }
-            return U.Json("{\"piecesInBox\":" + all.Count + ",\"pieces\":" + allPieces.Count + ",\"damaged\":" + damaged + ",\"rainExposed\":" + rain + ",\"withoutARoof\":" + roofless + ",\"ashExposed\":" + ash + ",\"outsideRequiredBiome\":" + outside + ",\"ashDamageSetting\":" + N(ashDamage) + ",\"returned\":" + rows.Count + ",\"rows\":[" + string.Join(",", rows.ToArray()) + "],\"note\":\"rain never takes a piece below half health; the roof is a model of the game's roof cast on the pieces in the box (trees and rocks are not in it); lava paint and deep-north snow are not read; a shield generator cancels all of it\"}");
+            return U.Json("{\"piecesInBox\":" + all.Count + ",\"pieces\":" + allPieces.Count + ",\"damaged\":" + damaged + ",\"rainExposed\":" + rain + ",\"withoutARoof\":" + roofless + ",\"ashExposed\":" + ash + ",\"outsideRequiredBiome\":" + outside + ",\"ashDamageSetting\":" + N(ashDamage) + ",\"returned\":" + rows.Count + ",\"rows\":[" + string.Join(",", rows.ToArray()) + "],\"note\":\"rain never takes a piece below half health; the roof is a model of the game's roof cast on the pieces in the box (trees and rocks are not in it); lava paint is read in the Ashlands where the terrain is loaded, deep-north snow is not; a shield generator cancels all of it\"}");
         }
 
         // ------------------------------------------------------------------ absence_forecast

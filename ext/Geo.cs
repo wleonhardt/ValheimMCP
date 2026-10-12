@@ -257,7 +257,7 @@ namespace HubnerExt
                     rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Zdos.NameOf(z.GetPrefab())) + ",\"pos\":" + U.V(p) + ",\"items\":{" + string.Join(",", sum.Select(kv => U.S(kv.Key) + ":" + kv.Value).ToArray()) + "}}");
                     if (rows.Count >= limit) break;
                 }
-                catch { }
+                catch (Exception ex1) { U.Once("Geo.cs:260.1", ex1); }
             }
             return U.Json("{\"count\":" + rows.Count + ",\"containers\":[" + string.Join(",", rows.ToArray()) + "]}");
         }
