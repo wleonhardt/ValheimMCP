@@ -203,17 +203,18 @@ namespace HubnerExt
             var applied = 0;
             foreach (var p in points) { UnityEngine.Object.Instantiate(prefab, p, Quaternion.identity); applied++; }
             if (legacy) return U.Json("{\"dry\":false," + head + ",\"applied\":" + applied + ",\"persistentObjects\":" + applied + (readBack != null ? readBack() : "") + ",\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (destroys the " + applied + " " + prefab.name + " objects)\"}");
-            int hc = 0, pc = 0; double mx = 0; var pending = 0; var rows = new List<string>();
+            int hc = 0, pc = 0, elsewhere = 0; double mx = 0; var pending = 0; var rows = new List<string>();
             foreach (var zn in zones)
             {
                 var z = FindCompiler(zn[0], zn[1]); var b = z != null ? z.GetByteArray("TCData") : null;
                 var after = b != null ? TryDecode(b) : null; var was = before[Key(zn[0], zn[1])];
-                rows.Add("{\"zone\":[" + zn[0] + "," + zn[1] + "],\"compiler\":" + (z != null ? "true" : "false") + ",\"opsBefore\":" + (was != null ? was.Operations : -1) + ",\"opsAfter\":" + (after != null ? after.Operations : -1) + "}");
+                rows.Add("{\"zone\":[" + zn[0] + "," + zn[1] + "],\"compiler\":" + (z != null ? "true" : "false") + ",\"opsBefore\":" + (was != null ? was.Operations : -1) + ",\"opsAfter\":" + (after != null ? after.Operations : -1) + ",\"ownedHere\":" + (z != null && z.IsOwner() ? "true" : "false") + "}");
+                if (z != null && !z.IsOwner()) elsewhere++;
                 if (after == null || was == null) continue;
                 int h, pa; double d; after.Diff(was, out h, out pa, out d); hc += h; pc += pa; mx = Math.Max(mx, d);
                 if (after.Operations == was.Operations) pending++;
             }
-            return U.Json("{\"dry\":false," + head + ",\"applied\":" + applied + ",\"heightChanged\":" + hc + ",\"paintChanged\":" + pc + ",\"maxHeightChange\":" + U.N(Math.Round(mx, 3)) + ",\"zonesUnchanged\":" + pending + ",\"zoneData\":[" + string.Join(",", rows.ToArray()) + "]" + (readBack != null ? readBack() : "") + ",\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (or undo)\"}");
+            return U.Json("{\"dry\":false," + head + ",\"applied\":" + applied + ",\"heightChanged\":" + hc + ",\"paintChanged\":" + pc + ",\"maxHeightChange\":" + U.N(Math.Round(mx, 3)) + ",\"zonesUnchanged\":" + pending + ",\"zoneData\":[" + string.Join(",", rows.ToArray()) + "]" + (elsewhere > 0 ? ",\"note\":\"" + elsewhere + " of the zones are owned by another peer: it applies the strokes on its own frames, so the counts above may still be zero; read terraform_map after a second\"" : "") + (readBack != null ? readBack() : "") + ",\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (or undo)\"}");
         }
 
         // ------------------------------------------------------------------ terrain_level
