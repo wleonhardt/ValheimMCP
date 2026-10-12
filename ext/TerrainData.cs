@@ -48,6 +48,19 @@ namespace HubnerExt
             }
         }
 
+        /// <summary>Height-modified nodes inside the box (inclusive) for a zone compiler centred on (cx, cz): the node grid is (pitch x pitch) with the zone's metres as spacing.</summary>
+        public int ModifiedHeightNodesIn(double cx, double cz, double x0, double z0, double x1, double z1)
+        {
+            var pitch = (int)Math.Round(Math.Sqrt(ModHeight.Length)); if (pitch < 2) return 0; var half = (pitch - 1) * 0.5; var n = 0;
+            for (var i = 0; i < ModHeight.Length; i++)
+            {
+                if (!ModHeight[i]) continue;
+                var wx = cx - half + i % pitch; var wz = cz - half + i / pitch;
+                if (wx >= x0 && wx <= x1 && wz >= z0 && wz <= z1) n++;
+            }
+            return n;
+        }
+
         public int HeightNodes { get { var n = 0; foreach (var b in ModHeight) if (b) n++; return n; } }
         public int PaintNodes { get { var n = 0; foreach (var b in ModPaint) if (b) n++; return n; } }
 

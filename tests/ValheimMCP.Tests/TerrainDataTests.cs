@@ -104,3 +104,19 @@ public class WecLineTests
         finally { System.Threading.Thread.CurrentThread.CurrentCulture = old; }
     }
 }
+
+public class TerrainEditedNodesTests
+{
+    [Fact] public void CountsOnlyModifiedNodesInsideTheBox()
+    {
+        var d = TcData.Empty(4);                                            // 5 x 5 nodes, a zone 4 m wide centred on (100, 200): nodes at x 98..102, z 198..202
+        d.ModHeight[0] = true;                                              // (98, 198)
+        d.ModHeight[12] = true;                                             // i=2, j=2: (100, 200)
+        d.ModHeight[24] = true;                                             // (102, 202)
+        Assert.Equal(3, d.ModifiedHeightNodesIn(100, 200, 90, 190, 110, 210));
+        Assert.Equal(1, d.ModifiedHeightNodesIn(100, 200, 99.5, 199.5, 100.5, 200.5));
+        Assert.Equal(2, d.ModifiedHeightNodesIn(100, 200, 98, 198, 100, 200));      // edges are inclusive
+        Assert.Equal(0, d.ModifiedHeightNodesIn(100, 200, 0, 0, 10, 10));
+        Assert.Equal(0, TcData.Empty(4).ModifiedHeightNodesIn(100, 200, 90, 190, 110, 210));
+    }
+}
