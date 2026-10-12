@@ -284,7 +284,7 @@ namespace HubnerExt
             List<double[]> _line = new List<double[]>(); int _seg; double _segT;
             Vector3 _lastProg; float _lastProgT, _lastRemain, _lastTick; Vector3 _prevPos;
             // stall ladder
-            int _stallsTotal, _spotStalls, _sideSteps, _reroutes; Vector3 _spotPos; string _lastStall = "";
+            int _stallsTotal, _spotStalls, _sideSteps, _reroutes, _rerouteVia = -1; Vector3 _spotPos; string _lastStall = "";
             // doors
             int _doorPresses, _doorOpens; string _lockedDoor = "";
             readonly Dictionary<int, float> _pressedAt = new Dictionary<int, float>(); readonly Dictionary<int, float> _pending = new Dictionary<int, float>(); float _nextDoorLook;
@@ -427,10 +427,11 @@ namespace HubnerExt
                             _reroutes++;
                             // from here through every waypoint the caller gave that is still ahead (not straight to the last one), with the agent the caller chose
                             var route = new List<Vector3>(); var from = pos; string err = null;
+                            _rerouteVia = 0;
                             for (var w = Math.Min(_wpDone, _userWps.Count - 1); w < _userWps.Count && err == null; w++)
                             {
                                 var leg = NavLeg(from, _userWps[w], Agent, out err);
-                                if (leg != null) { route.AddRange(leg); from = _userWps[w]; }
+                                if (leg != null) { route.AddRange(leg); from = _userWps[w]; _rerouteVia++; }
                             }
                             if (err != null || route.Count == 0) { _blocker = "re-route failed: " + err + "; " + Blocker(p, dir); Stop("blocked"); return; }
                             _pts = route; _i = 0; BuildLine(pos); _lastProg = pos; break;
@@ -566,7 +567,7 @@ namespace HubnerExt
             {
                 var p = Player.m_localPlayer; var pos = p != null ? p.transform.position : Vector3.zero;
                 var sb = new StringBuilder("{\"running\":" + (Active ? "true" : "false") + ",\"result\":" + U.S(_result) + ",\"index\":" + _i + ",\"of\":" + _pts.Count + ",\"pos\":" + U.V(pos) + ",\"grounded\":" + (p != null && p.IsOnGround() ? "true" : "false") + ",\"elapsed\":" + U.N(Time.time - _t0));
-                sb.Append(",\"stalls\":" + _stallsTotal + ",\"lastStall\":" + U.S(_lastStall) + ",\"doorPresses\":" + _doorPresses + ",\"doorsOpened\":" + _doorOpens + ",\"yieldedToUserSeconds\":" + U.N(Math.Round(_yielded, 1)));
+                sb.Append(",\"stalls\":" + _stallsTotal + ",\"lastStall\":" + U.S(_lastStall) + ",\"reroutes\":" + _reroutes + ",\"rerouteViaWaypoints\":" + _rerouteVia + ",\"userWaypoints\":" + _userWps.Count + ",\"userWaypointsReached\":" + _wpDone + ",\"doorPresses\":" + _doorPresses + ",\"doorsOpened\":" + _doorOpens + ",\"yieldedToUserSeconds\":" + U.N(Math.Round(_yielded, 1)));
                 if (!string.IsNullOrEmpty(_lockedDoor)) sb.Append(",\"lockedDoor\":" + U.S(_lockedDoor));
                 if (!string.IsNullOrEmpty(_blocker)) sb.Append(",\"blocker\":" + U.S(_blocker));
                 if (trace) sb.Append(",\"trace\":[" + string.Join(",", _trace.ToArray()) + "]");
