@@ -13,8 +13,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 RULES = [
     (r'\bCreateNewZDO\s*\(',                 {'ext/Plans.cs'}, 'creating a ZDO'),
-    (r'\bDestroyZDO\s*\(',                  {'ext/Plans.cs', 'ext/Audit.cs'}, 'destroying a ZDO'),
-    (r'ZNetScene\.instance\.Destroy\s*\(',  {'ext/Plans.cs', 'ext/ClientTools.cs'}, 'destroying an object'),
+    (r'\bDestroyZDO\s*\(',                  {'ext/Plans.cs', 'ext/Audit.cs', 'ext/TerrainEdit.cs'}, 'destroying a ZDO'),
+    (r'ZNetScene\.instance\.Destroy\s*\(',  {'ext/Plans.cs', 'ext/ClientTools.cs', 'ext/TerrainEdit.cs'}, 'destroying an object'),
     (r'\.SetPosition\s*\(',                 {'ext/Plans.cs', 'ext/ClientTools.cs'}, 'moving a ZDO'),
     (r'\bObject\.Instantiate\s*\(|\bInstantiate\s*\(', {'ext/ClientTools.cs', 'ext/Place.cs', 'ext/PlanCheck.cs', 'ext/TerrainEdit.cs'}, 'instantiating a prefab'),
     (r'\bSetGodMode\s*\(',                  {'ext/ClientTools.cs', 'ext/Control.cs'}, 'god mode'),

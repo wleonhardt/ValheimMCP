@@ -25,7 +25,7 @@ namespace HubnerExt
 
         static string B(bool v) { return v ? "true" : "false"; }
 
-        internal sealed class Op { public string Prefab = ""; public bool Level, Raise, Smooth, Square, Paints; public double LevelOffset; public double LevelRadius, RaiseRadius, RaiseDelta, RaisePower, SmoothRadius, SmoothPower; }
+        internal sealed class Op { public string Prefab = ""; public bool Level, Raise, Smooth, Square, Paints, IsOp; public double LevelOffset; public double LevelRadius, RaiseRadius, RaiseDelta, RaisePower, SmoothRadius, SmoothPower; }
         static List<Op> _ops;
 
         internal static List<Op> Ops()
@@ -45,7 +45,7 @@ namespace HubnerExt
                 { seen.Add(go.name); list.Add(new Op { Prefab = go.name, Level = tm.m_level, Raise = false, Smooth = tm.m_smooth, Square = tm.m_square, Paints = tm.m_paintCleared, LevelOffset = tm.m_levelOffset, LevelRadius = tm.m_levelRadius, SmoothRadius = tm.m_smoothRadius, SmoothPower = tm.m_smoothPower }); continue; }
                 if (!seen.Add(go.name)) continue; var top = go.GetComponent<TerrainOp>(); if (top == null || top.m_settings == null) continue; var s = top.m_settings;
                 if (!s.m_level && !s.m_raise && !s.m_smooth) continue;
-                list.Add(new Op { Prefab = go.name, Level = s.m_level, Raise = s.m_raise, Smooth = s.m_smooth, Square = s.m_square, Paints = s.m_paintCleared, LevelOffset = s.m_levelOffset, LevelRadius = s.m_levelRadius, RaiseRadius = s.m_raiseRadius, RaiseDelta = s.m_raiseDelta, RaisePower = s.m_raisePower, SmoothRadius = s.m_smoothRadius, SmoothPower = s.m_smoothPower });
+                list.Add(new Op { Prefab = go.name, IsOp = true, Level = s.m_level, Raise = s.m_raise, Smooth = s.m_smooth, Square = s.m_square, Paints = s.m_paintCleared, LevelOffset = s.m_levelOffset, LevelRadius = s.m_levelRadius, RaiseRadius = s.m_raiseRadius, RaiseDelta = s.m_raiseDelta, RaisePower = s.m_raisePower, SmoothRadius = s.m_smoothRadius, SmoothPower = s.m_smoothPower });
             }
             _ops = list.OrderBy(o => o.Prefab, StringComparer.Ordinal).ToList(); return _ops;
         }
@@ -75,7 +75,7 @@ namespace HubnerExt
             {
                 var rep = PadPlanner.Level(baseH, current, x0, z0, x1, z1, target, op.LevelRadius, op.Square);
                 if (first == null) first = rep;
-                rows.Add("{\"tool\":" + U.S(op.Prefab) + ",\"radius\":" + U.N(op.LevelRadius) + ",\"square\":" + B(op.Square) + ",\"alsoRaises\":" + B(op.Raise) + ",\"alsoSmooths\":" + B(op.Smooth) + ",\"strokes\":" + rep.Strokes + "}");
+                rows.Add("{\"tool\":" + U.S(op.Prefab) + ",\"terrainOp\":" + B(op.IsOp) + ",\"paints\":" + B(op.Paints) + ",\"levelOffset\":" + U.N(op.LevelOffset) + ",\"radius\":" + U.N(op.LevelRadius) + ",\"square\":" + B(op.Square) + ",\"alsoRaises\":" + B(op.Raise) + ",\"alsoSmooths\":" + B(op.Smooth) + ",\"strokes\":" + rep.Strokes + "}");
             }
             if (first == null) first = PadPlanner.Level(baseH, current, x0, z0, x1, z1, target, 3, true);
             double edge = 0;                                                                              // the biggest step between the pad and the ground one metre outside it

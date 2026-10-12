@@ -24,7 +24,7 @@ namespace HubnerExt
             r.Add("terrain_paint", "Paint the ground with the game's own hoe ops: type cultivated | paved | dirt, over a disc (x, z, radius up to 40 m) or a box (x0,z0,x1,z1). The ops are registered terrain-op prefabs (cultivate_v2, paved_road_v2, mud_road_v2), so, as with the hoe, they also smooth the terrain a little (heightChanged tells how much). At most 300 strokes per call. Refused inside an enabled guard stone's area (force:true + forceConfirm:'player-built'), inside a known no-build location, and where no heightmap is loaded (a client near it, or a virtual peer on the server). The terrain data of every zone the edit can reach is saved first: undo / undo_group restore it byte for byte. dry=true reports strokes, zones and refusals only. Journaled.",
                 "{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"type\"]}",
                 a => Plans.GuardPublic(a, Paint, true), Plans.WriteFlag);
-            r.Add("terrain_level", "Level a rectangular pad (x0,z0,x1,z1 or x,z,half; up to 40 x 40 m) to targetY with the game's own level op (the hoe/digging strokes), on the lattice level_check plans. A stroke never moves a vertex more than 8 m from its generated height, so an unreachable pad is refused (use level_check first). Refused when a built piece stands on the pad or within the stroke radius of it (allowPieces:true overrides), inside an enabled guard stone's area, inside a no-build location, and where no heightmap is loaded. tool picks the op prefab (default: the level op that needs fewest strokes and does not paint). The terrain data of every zone it can reach is saved first: undo / undo_group restore it byte for byte. Reports the heights read back after the strokes. dry=true plans only. Journaled.",
+            r.Add("terrain_level", "Level a rectangular pad (x0,z0,x1,z1 or x,z,half; up to 40 x 40 m) to targetY with the game's own level op (the hoe/digging strokes), on the lattice level_check plans. A stroke never moves a vertex more than 8 m from its generated height, so an unreachable pad is refused (use level_check first). Refused when a built piece stands on the pad or within the stroke radius of it (allowPieces:true overrides), inside an enabled guard stone's area, inside a no-build location, and where no heightmap is loaded. tool picks the op prefab (default: the level op that needs fewest strokes, one that does not paint if the game has any; alsoPaints says). This game has no terrain op that levels, so the strokes are the older level prefabs (digg, digg_v2): each leaves a persistent object in the world, journaled, and undo destroys exactly those. Reports the heights read back after the strokes. dry=true plans only. Journaled.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"half\":{\"type\":\"number\"},\"targetY\":{\"type\":\"number\"},\"tool\":{\"type\":\"string\"},\"allowPieces\":{\"type\":\"boolean\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"targetY\"]}",
                 a => Plans.GuardPublic(a, Level, true), Plans.WriteFlag);
         }
@@ -61,9 +61,10 @@ namespace HubnerExt
         internal static string Undo(JEntry e)
         {
             if (e.Strings == null || e.Strings.Count == 0) return "terrain: the entry names no zone";
-            var errs = new List<string>();
+            var errs = new List<string>(); int gone = 0;
             foreach (var kv in e.Strings)
             {
+                if (kv.Key.StartsWith("p:", StringComparison.Ordinal)) { if (!DestroyModifier(kv.Key.Substring(2))) gone++; continue; }
                 if (!kv.Key.StartsWith("z:", StringComparison.Ordinal)) continue;
                 var parts = kv.Key.Substring(2).Split(','); int zx, zz;
                 if (parts.Length != 2 || !int.TryParse(parts[0], out zx) || !int.TryParse(parts[1], out zz)) { errs.Add(kv.Key + ": bad zone"); continue; }
@@ -80,7 +81,29 @@ namespace HubnerExt
                 try { z.SetOwner(ZDOMan.GetSessionID()); z.Set("TCData", bytes); }
                 catch (Exception ex) { errs.Add(kv.Key + ": " + ex.Message); }   // allow: the message goes back to the caller
             }
+            if (gone > 0) errs.Add(gone + " terrain modifier objects were already gone");
             return errs.Count == 0 ? null : "terrain: " + string.Join("; ", errs.ToArray());
+        }
+
+        static string PKey(string prefab, Vector3 p) { return "p:" + prefab + "@" + p.x.ToString("R", CultureInfo.InvariantCulture) + "," + p.y.ToString("R", CultureInfo.InvariantCulture) + "," + p.z.ToString("R", CultureInfo.InvariantCulture); }
+
+        /// <summary>Destroys the persistent terrain modifier object that a stroke left at the position ("prefab@x,y,z"); false when it is not there.</summary>
+        static bool DestroyModifier(string spec)
+        {
+            var at = spec.IndexOf('@'); if (at <= 0) return false;
+            var c = spec.Substring(at + 1).Split(','); float x, y, z;
+            if (c.Length != 3 || !float.TryParse(c[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x) || !float.TryParse(c[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y) || !float.TryParse(c[2], NumberStyles.Float, CultureInfo.InvariantCulture, out z)) return false;
+            var h = spec.Substring(0, at).GetStableHashCode();
+            foreach (var zdo in Zdos.InBox(x - 0.5f, z - 0.5f, x + 0.5f, z + 0.5f))
+            {
+                if (zdo.GetPrefab() != h) continue;
+                var p = zdo.GetPosition(); if (Math.Abs(p.x - x) > 0.02 || Math.Abs(p.y - y) > 0.02 || Math.Abs(p.z - z) > 0.02) continue;
+                var nv = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(zdo) : null;
+                if (nv != null) { nv.ClaimOwnership(); ZNetScene.instance.Destroy(nv.gameObject); }
+                else { zdo.SetOwner(ZDOMan.GetSessionID()); ZDOMan.instance.DestroyZDO(zdo); }
+                return true;
+            }
+            return false;
         }
 
         // ------------------------------------------------------------------ ops
@@ -168,21 +191,26 @@ namespace HubnerExt
         static ToolOutput Apply(GameObject prefab, IList<Vector3> points, IList<int[]> zones, string group, string note, string head, Func<string> readBack = null)
         {
             var tag = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + (Journal.Entries.Count + 1);
-            var snap = Snapshot(zones, tag);
+            var legacy = prefab.GetComponent<TerrainOp>() == null;                                   // the older TerrainModifier prefabs (digg, raise ...) stay in the world as objects and change nothing in the terrain data
+            var snap = legacy ? new Dictionary<string, string>() : Snapshot(zones, tag);
+            if (legacy) foreach (var p in points) snap[PKey(prefab.name, p)] = "1";
             var before = new Dictionary<string, TcData>();
             foreach (var zn in zones) { var z = FindCompiler(zn[0], zn[1]); var b = z != null ? z.GetByteArray("TCData") : null; before[Key(zn[0], zn[1])] = b != null ? TryDecode(b) : TcData.Empty(); }
             Journal.Add(new JEntry { Kind = "terrain", Id = "", Prefab = "_TerrainCompiler", Pos = points[0], Rot = Quaternion.identity, Group = group, Note = note, Strings = snap });
             var applied = 0;
             foreach (var p in points) { UnityEngine.Object.Instantiate(prefab, p, Quaternion.identity); applied++; }
-            int hc = 0, pc = 0; double mx = 0; var pending = 0;
+            if (legacy) return U.Json("{\"dry\":false," + head + ",\"applied\":" + applied + ",\"persistentObjects\":" + applied + (readBack != null ? readBack() : "") + ",\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (destroys the " + applied + " " + prefab.name + " objects)\"}");
+            int hc = 0, pc = 0; double mx = 0; var pending = 0; var rows = new List<string>();
             foreach (var zn in zones)
             {
-                var z = FindCompiler(zn[0], zn[1]); var b = z != null ? z.GetByteArray("TCData") : null; if (b == null) { continue; }
-                var after = TryDecode(b); var was = before[Key(zn[0], zn[1])]; if (after == null || was == null) continue;
+                var z = FindCompiler(zn[0], zn[1]); var b = z != null ? z.GetByteArray("TCData") : null;
+                var after = b != null ? TryDecode(b) : null; var was = before[Key(zn[0], zn[1])];
+                rows.Add("{\"zone\":[" + zn[0] + "," + zn[1] + "],\"compiler\":" + (z != null ? "true" : "false") + ",\"opsBefore\":" + (was != null ? was.Operations : -1) + ",\"opsAfter\":" + (after != null ? after.Operations : -1) + "}");
+                if (after == null || was == null) continue;
                 int h, pa; double d; after.Diff(was, out h, out pa, out d); hc += h; pc += pa; mx = Math.Max(mx, d);
                 if (after.Operations == was.Operations) pending++;
             }
-            return U.Json("{\"dry\":false," + head + ",\"applied\":" + applied + ",\"heightChanged\":" + hc + ",\"paintChanged\":" + pc + ",\"maxHeightChange\":" + U.N(Math.Round(mx, 3)) + ",\"zonesNotYetChanged\":" + pending + (readBack != null ? readBack() : "") + ",\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (or undo)\"}");
+            return U.Json("{\"dry\":false," + head + ",\"applied\":" + applied + ",\"heightChanged\":" + hc + ",\"paintChanged\":" + pc + ",\"maxHeightChange\":" + U.N(Math.Round(mx, 3)) + ",\"zonesUnchanged\":" + pending + ",\"zoneData\":[" + string.Join(",", rows.ToArray()) + "]" + (readBack != null ? readBack() : "") + ",\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (or undo)\"}");
         }
 
         // ------------------------------------------------------------------ terrain_level
@@ -210,7 +238,9 @@ namespace HubnerExt
             Func<int, int, double> current = (x, z) => { float gh; if (zs.GetGroundHeight(new Vector3(x, 0f, z), out gh) && Heightmap.FindHeightmap(new Vector3(x, 0f, z)) != null) return gh; loadedAll = false; return baseH(x, z); };
             var wanted = (McpJson.GetStr(a, "tool") ?? "").Trim();
             TerrainTools.Op op = null; PadReport rep = null;
-            foreach (var o in TerrainTools.Ops().Where(o => o.Level && (wanted.Length == 0 ? !o.Paints : o.Prefab == wanted)))
+            var levelOps = TerrainTools.Ops().Where(o => o.Level && (wanted.Length == 0 || o.Prefab == wanted)).ToList();
+            if (wanted.Length == 0 && levelOps.Any(o => !o.Paints)) levelOps = levelOps.Where(o => !o.Paints).ToList();            // the game's dig ops paint the ground too: only used when nothing else levels
+            foreach (var o in levelOps)
             {
                 var r = PadPlanner.Level(baseH, current, x0, z0, x1, z1, target, o.LevelRadius, o.Square);
                 if (r.Strokes > 0 && (rep == null || r.Strokes < rep.Strokes)) { rep = r; op = o; }
@@ -239,24 +269,21 @@ namespace HubnerExt
                 if (!Neighbours.IsPiece(z.GetPrefab())) continue;
                 pieces++; if (example == null) example = Zdos.NameOf(z.GetPrefab()) + " at " + U.V(z.GetPosition());
             }
+            var legacyOp = TerrainTools.Prefab(op.Prefab); var isLegacy = legacyOp != null && legacyOp.GetComponent<TerrainOp>() == null;
+            if (isLegacy)                                                                                        // a new modifier removes the older ones around it, and undo cannot bring those back
+                foreach (var z in Zdos.InBox(x0 - (float)reach, z0 - (float)reach, x1 + (float)reach, z1 + (float)reach))
+                {
+                    if (z.GetPrefab() == CompilerHash) continue; var nm = Zdos.NameOf(z.GetPrefab());
+                    if (U.IsForbidden(nm) && nm.Length > 0 && nm[0] != '_') return ToolOutput.Err("an older terrain modifier object (" + nm + " at " + U.V(z.GetPosition()) + ") stands on the pad: a new stroke would remove it and undo cannot bring it back");
+                }
             var allow = McpJson.GetBool(a, "allowPieces", false);
             var zones = StrokePlan.Zones(x0, z0, x1, z1, reach + 4);
-            var head = "\"pad\":[" + x0 + "," + z0 + "," + x1 + "," + z1 + "],\"targetY\":" + U.N(target) + ",\"op\":" + U.S(op.Prefab) + ",\"radius\":" + U.N(op.LevelRadius) + ",\"alsoSmooths\":" + (op.Smooth ? "true" : "false") + ",\"strokes\":" + strokes.Count + ",\"spacing\":" + rep.Spacing + ",\"zones\":" + zones.Count + ",\"fillM3\":" + U.N(Math.Round(rep.FillM3, 1)) + ",\"cutM3\":" + U.N(Math.Round(rep.CutM3, 1)) + ",\"piecesNear\":" + pieces;
+            var head = "\"pad\":[" + x0 + "," + z0 + "," + x1 + "," + z1 + "],\"targetY\":" + U.N(target) + ",\"op\":" + U.S(op.Prefab) + ",\"radius\":" + U.N(op.LevelRadius) + ",\"alsoSmooths\":" + (op.Smooth ? "true" : "false") + ",\"alsoPaints\":" + (op.Paints ? "true" : "false") + ",\"strokes\":" + strokes.Count + ",\"spacing\":" + rep.Spacing + ",\"zones\":" + zones.Count + ",\"fillM3\":" + U.N(Math.Round(rep.FillM3, 1)) + ",\"cutM3\":" + U.N(Math.Round(rep.CutM3, 1)) + ",\"piecesNear\":" + pieces;
             if (pieces > 0 && !allow) return ToolOutput.Err(pieces + " built pieces stand on or within " + U.N(reach) + " m of the pad (" + example + "): they would float or sink. Move them or pass allowPieces:true");
             if (dry) return U.Json("{\"dry\":true," + head + "}");
 
             var prefab = TerrainTools.Prefab(op.Prefab); if (prefab == null) return ToolOutput.Err("the op prefab " + op.Prefab + " is not available");
-            return Apply(prefab, strokes, zones, group, "level " + x0 + "," + z0 + ".." + x1 + "," + z1 + " to " + U.N(target), head, () =>
-            {
-                int on = 0, off = 0; double worst = 0;
-                for (var z = z0; z <= z1; z++) for (var x = x0; x <= x1; x++)
-                {
-                    float gh; if (!zs.GetGroundHeight(new Vector3(x, 0f, z), out gh)) continue;
-                    var reachH = baseH(x, z) + Math.Max(-8.0, Math.Min(8.0, target - baseH(x, z))); var d = Math.Abs(gh - reachH);
-                    if (d < 0.05) on++; else off++; worst = Math.Max(worst, d);
-                }
-                return ",\"verticesOnTarget\":" + on + ",\"verticesOff\":" + off + ",\"worstOff\":" + U.N(Math.Round(worst, 2));
-            });
+            return Apply(prefab, strokes, zones, group, "level " + x0 + "," + z0 + ".." + x1 + "," + z1 + " to " + U.N(target), head, () => ",\"settle\":\"the heightmap rebuilds over the next second or two: read it back with terrain_grid then\"");
         }
 
         static TcData TryDecode(byte[] compressed)
