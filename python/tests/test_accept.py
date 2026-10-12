@@ -256,7 +256,7 @@ class RecipeCaseTests(unittest.TestCase):
         self.assertEqual(accept.run_case(self.case('missing-for'), self.ctx)['verdict'], accept.SKIPPED)
 
     def test_plan_materials_fails_when_the_sum_does_not_scale(self):
-        self.fake.replies['prefab_search'] = {'names': ['wood_wall']}
+        self.fake.replies['prefab_search'] = {'names': ['woodwall']}
         seq = iter([{'materials': {'Wood': 2}, 'unknownPrefabs': []}, {'materials': {'Wood': 5}, 'unknownPrefabs': []}, {'materials': {}, 'unknownPrefabs': ['no_such_piece']}])
         self.fake.replies['plan_materials'] = lambda a: next(seq)
         self.assertEqual(accept.run_case(self.case('plan-materials'), self.ctx)['verdict'], accept.FAIL)
@@ -334,7 +334,7 @@ class PlantCaseTests(unittest.TestCase):
 
     def case(self, key): return [c for c in cases.CASES if c.key == key][0]
 
-    def rows(self, *statuses): return {'plants': [{'status': s} for s in statuses], 'errors': ['item 1: wood_wall is not a plant']}
+    def rows(self, *statuses): return {'plants': [{'status': s} for s in statuses], 'errors': ['item 1: woodwall is not a plant']}
 
     def test_passes_when_close_carrots_block_and_far_ones_do_not(self):
         seq = iter([self.rows('Healthy', 'Healthy'), self.rows('NoSpace', 'NoSpace'), self.rows()])
