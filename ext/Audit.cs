@@ -150,17 +150,23 @@ namespace HubnerExt
         /// <summary>Server: every routed RPC passes through RPC_RoutedRPC(ZRpc, ZPackage). The wire layout of RoutedRPCData is
         /// msgID(long) sender(long) target(long) targetZDO(ZDOID) methodHash(int) parameters(ZPackage); we peek the hash and only
         /// decode the two chat methods, so the hook costs a few reads per RPC instead of a reflective deserialize of everything.</summary>
+        internal static readonly Dictionary<int, int> SeenHashes = new Dictionary<int, int>();
+        static string SeenHashesJson() { lock (SeenHashes) return string.Join(",", SeenHashes.OrderByDescending(kv => kv.Value).Take(8).Select(kv => "\"" + kv.Key + "\":" + kv.Value).ToArray()); }
+        internal static long RoutedSeen, ChatSeen;             // how many routed RPCs the hook has seen and how many were chat: proof the hook fires
         static void RelayedChat2(object __0, object __1)
         {
             try
             {
                 var pkg = __1 as ZPackage; if (pkg == null) return;
+                RoutedSeen++;
                 var pos = pkg.GetPos(); pkg.SetPos(0);
                 try
                 {
                     pkg.ReadLong(); pkg.ReadLong(); pkg.ReadLong(); pkg.ReadZDOID();
                     int hash = pkg.ReadInt(); bool say = hash == SayHash, msg = hash == ChatHash;
+                    lock (SeenHashes) { int n; SeenHashes.TryGetValue(hash, out n); SeenHashes[hash] = n + 1; }
                     if (!say && !msg) return;                                                       // Normal and Whisper travel as the Talker RPC "Say" on the speaker's object, Shout and Ping as the routed "ChatMessage"
+                    ChatSeen++;
                     var inner = pkg.ReadPackage();
                     if (msg) inner.ReadVector3();
                     int type = inner.ReadInt();
@@ -453,7 +459,7 @@ namespace HubnerExt
                 var peers = ZNet.instance.GetPeers(); sb.Append(",\"peers\":" + (peers == null ? 0 : peers.Count));
                 try { sb.Append(",\"saveStart\":" + U.N(ZNet.instance.SaveStartTime) + ",\"saveDone\":" + U.N(ZNet.instance.SaveDoneTime)); } catch { }
             }
-            sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"journalError\":" + U.S(Journal.LastError) + ",\"resumeNote\":" + U.S(ResumeNote) + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"health\":" + U.S(HealthSummary()));
+            sb.Append(",\"journalEntries\":" + Journal.Entries.Count + ",\"journalError\":" + U.S(Journal.LastError) + ",\"resumeNote\":" + U.S(ResumeNote) + ",\"jobsQueued\":" + _jobs.Count(j => j.State == "queued") + ",\"writeGate\":" + U.S(Plans.GateState()) + ",\"routedHashes\":{" + SeenHashesJson() + "},\"sayHash\":" + SayHash + ",\"chatHash\":" + ChatHash + ",\"routedRpcSeen\":" + RoutedSeen + ",\"chatRpcSeen\":" + ChatSeen + ",\"health\":" + U.S(HealthSummary()));
             return U.Json(sb.Append('}').ToString());
         }
 

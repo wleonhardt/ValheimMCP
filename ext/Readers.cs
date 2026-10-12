@@ -17,7 +17,7 @@ namespace HubnerExt
 
         public static void Register(ToolRegistry r)
         {
-            r.Add("net_peers", "Who is connected and how the link is doing (server): per peer the name, ping, link quality both ways, bytes per second, the send queue (the ZDO sync stops for a peer above 10240 queued bytes, so a long queue means the world is not reaching that player), the simulation distance, and the peer's zone only when it shares its position. No addresses or ids.",
+            r.Add("net_peers", "Who is connected and how the link is doing (server): per peer the name, ping, link quality both ways, bytes per second, the send queue (the ZDO sync stops for a peer above 10240 queued bytes, so a long queue means the world is not reaching that player), the simulation distance, the seconds since the peer's last ping, and the peer's zone only when it shares its position. On a dedicated server the Steam client API that gives ping and link quality is not running, so those are null there. No addresses or ids.",
                 "{\"type\":\"object\",\"properties\":{}}", NetPeers);
             r.Add("active_area", "Is a place simulated? points:[[x,z],...] (max 100) or x,z. A zone is simulated only within 1.5 zones (96 m, Chebyshev, from the zone centre; with near distance 2 also under 112 m Euclidean) of a connected peer's reference position (ZNetScene.PointInsideActiveArea). Returns per point the zone, whether any peer covers it, and how many do. Crops, animals, fires, smelters and wear all stop outside it.",
                 "{\"type\":\"object\",\"properties\":{\"points\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}}}", ActiveAreaTool);
@@ -28,7 +28,7 @@ namespace HubnerExt
             r.Add("harvest_near", "Pickables in a box (berries, mushrooms, flowers, crops that are not Plants, surtling cores): picked or ready, minutes to respawn (the owner checks every 60 s while the zone is active), whether it respawns at all. Counts per prefab and the ready ones first. Plants and crops that grow are in farm_state.",
                 BoxSchema, HarvestNear);
             r.Add("resource_nodes", "Mineable rocks (MineRock5), trees, logs and destructibles in a box: for a big rock the hit areas left of the total (the ZDO keeps one health float per area), for trees and logs the health fraction, and the tool tier needed (m_minToolTier). Use it to know what is left to mine and what a given pickaxe or axe can break.",
-                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"toolTier\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}", ResourceNodes);
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"toolTier\":{\"type\":\"number\"},\"kind\":{\"type\":\"string\",\"description\":\"rock | tree | log | destructible: only that kind in the rows (the counts stay)\"},\"limit\":{\"type\":\"number\"}}}", ResourceNodes);
             r.Add("spawners_near", "Creature spawners and spawn areas in a box: the creature, its respawn time, the trigger distance, whether the creature it made is still alive and the minutes until it may spawn again (CreatureSpawner keeps 'alive_time'), the global keys it needs or is blocked by and whether they are set. Spawn areas (SpawnArea) list the creatures, caps and trigger distance. A spawner only runs with a player within its trigger distance and its zone active.",
                 BoxSchema, SpawnersNear);
             r.Add("wear_risk", "What slowly damages the pieces in a box (WearNTear.UpdateWear): rain on unroofed pieces that wear (5% of max health per minute while wet, never below half health), the biome rules (Ashlands ash and lava, Deep North snow, pieces outside the biome they need), pieces already damaged, and the roof state from a model of the game's roof cast. No weather is read: a dedicated server has none. Needs the pieces' prefabs; judges up to `pieces` (default 600, max 1500) of the box, every piece in it can be a roof.",
@@ -38,6 +38,46 @@ namespace HubnerExt
         }
 
         const string BoxSchema = "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}";
+
+        // ------------------------------------------------------------------ live cover (only where the object stands in a loaded zone, i.e. on a client near it)
+        static MethodInfo _cover;
+
+        /// <summary>The game's own Cover.GetCoverForPoint at a point, or null when it cannot be asked (no colliders loaded here).</summary>
+        internal static string LiveCoverJson(Vector3 point)
+        {
+            try
+            {
+                if (_cover == null) _cover = typeof(Cover).GetMethod("GetCoverForPoint", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (_cover == null) return "null";
+                var args = new object[] { point, 0f, false, 0.5f }; _cover.Invoke(null, args);
+                return "{\"cover\":" + U.N(Math.Round((float)args[1], 3)) + ",\"roof\":" + ((bool)args[2] ? "true" : "false") + "}";
+            }
+            catch (Exception ex) { U.Once("LiveCover", ex); return "null"; }
+        }
+
+        /// <summary>The cover the game measures at a station's roof check point, from the live object (null on the server or away from the object).</summary>
+        internal static string LiveStationCover(ZDO z)
+        {
+            try
+            {
+                var nv = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(z) : null; if (nv == null) return "null";
+                var cs = nv.GetComponent<CraftingStation>(); if (cs == null || cs.m_roofCheckPoint == null) return "null";
+                return LiveCoverJson(cs.m_roofCheckPoint.position);
+            }
+            catch (Exception ex) { U.Once("LiveStationCover", ex); return "null"; }
+        }
+
+        internal static string LiveInstanceCover(ZDO z)
+        {
+            try
+            {
+                var nv = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(z) : null; if (nv == null) return "null";
+                var f = nv.GetComponent<Fermenter>(); if (f != null && f.m_roofCheckPoint != null) { var cj = LiveCoverJson(f.m_roofCheckPoint.position); string hover = ""; try { hover = f.GetHoverText(); } catch (Exception ex) { U.Once("LiveHover", ex); } return cj.Length > 1 && cj != "null" ? cj.Substring(0, cj.Length - 1) + ",\"hover\":" + U.S(hover.Replace('\n', ' ')) + "}" : cj; }
+                var b = nv.GetComponent<Beehive>(); if (b != null && b.m_coverPoint != null) return LiveCoverJson(b.m_coverPoint.position);
+                return "null";
+            }
+            catch (Exception ex) { U.Once("LiveInstanceCover", ex); return "null"; }
+        }
 
         // ------------------------------------------------------------------ prefab sets
         sealed class Sets { public Dictionary<int, GameObject> All = new Dictionary<int, GameObject>(); public HashSet<int> Item = new HashSet<int>(), Pick = new HashSet<int>(), Ferm = new HashSet<int>(), Hive = new HashSet<int>(), Sap = new HashSet<int>(), Root = new HashSet<int>(), Mine = new HashSet<int>(), Tree = new HashSet<int>(), Destr = new HashSet<int>(), Spawner = new HashSet<int>(), Area = new HashSet<int>(), Wear = new HashSet<int>(), Fire = new HashSet<int>(), Smelt = new HashSet<int>(), Cook = new HashSet<int>(); }
@@ -99,13 +139,23 @@ namespace HubnerExt
             var rows = new List<string>();
             foreach (var p in Peers())
             {
-                float lq = 0, rq = 0, outB = 0, inB = 0; int ping = 0, queue = 0, rate = 0;
-                try { p.m_socket.GetConnectionQuality(out lq, out rq, out ping, out outB, out inB); queue = p.m_socket.GetSendQueueSize(); rate = p.m_socket.GetCurrentSendRate(); } catch (Exception ex) { U.Once("net_peers.quality", ex); }
+                // the socket reads go through the Steam CLIENT networking API, which a dedicated server (it uses the game-server one) answers with "Steamworks is not initialized": each read is tried alone and what fails is null, with the queue summed from the socket's own list and the last-ping age from the RPC as a fallback
+                float lq = 0, rq = 0, outB = 0, inB = 0; int ping = 0, queue = -1, rate = -1; var haveQuality = false;
+                try { p.m_socket.GetConnectionQuality(out lq, out rq, out ping, out outB, out inB); haveQuality = true; } catch (Exception ex) { U.Once("net_peers.quality", ex); }
+                try { queue = p.m_socket.GetSendQueueSize(); } catch (Exception ex) { U.Once("net_peers.queue", ex); queue = QueueFromList(p.m_socket); }
+                try { rate = p.m_socket.GetCurrentSendRate(); } catch (Exception ex) { U.Once("net_peers.rate", ex); }
+                var lastPing = -1f; try { lastPing = p.m_rpc.GetTimeSinceLastPing(); } catch (Exception ex) { U.Once("net_peers.ping", ex); }
                 var zone = p.m_publicRefPos ? ",\"zone\":[" + ActiveArea.Zone(p.m_refPos.x) + "," + ActiveArea.Zone(p.m_refPos.z) + "]" : "";
-                rows.Add("{\"name\":" + U.S(ChatRules.ForReading(p.m_playerName, 40)) + ",\"inGame\":" + B(!p.m_characterID.IsNone()) + ",\"pingMs\":" + ping + ",\"qualityLocal\":" + U.N(Math.Round(lq, 2)) + ",\"qualityRemote\":" + U.N(Math.Round(rq, 2)) + ",\"outBytesPerSec\":" + U.N(Math.Round(outB)) + ",\"inBytesPerSec\":" + U.N(Math.Round(inB)) + ",\"sendQueueBytes\":" + queue + ",\"syncStalled\":" + B(queue > 10240) + ",\"sendRate\":" + rate + ",\"simulationNear\":" + p.m_simulationDistance.NearSimulationDistance + ",\"simulationFar\":" + p.m_simulationDistance.FarSimulationDistance + zone + "}");
+                rows.Add("{\"name\":" + U.S(ChatRules.ForReading(p.m_playerName, 40)) + ",\"inGame\":" + B(!p.m_characterID.IsNone()) + ",\"pingMs\":" + (haveQuality ? ping.ToString(CultureInfo.InvariantCulture) : "null") + ",\"qualityLocal\":" + (haveQuality ? U.N(Math.Round(lq, 2)) : "null") + ",\"qualityRemote\":" + (haveQuality ? U.N(Math.Round(rq, 2)) : "null") + ",\"outBytesPerSec\":" + (haveQuality ? U.N(Math.Round(outB)) : "null") + ",\"inBytesPerSec\":" + (haveQuality ? U.N(Math.Round(inB)) : "null") + ",\"sendQueueBytes\":" + (queue >= 0 ? queue.ToString(CultureInfo.InvariantCulture) : "null") + ",\"syncStalled\":" + (queue >= 0 ? B(queue > 10240) : "null") + ",\"sendRate\":" + (rate >= 0 ? rate.ToString(CultureInfo.InvariantCulture) : "null") + ",\"secondsSinceLastPing\":" + (lastPing >= 0 ? U.N(Math.Round(lastPing, 1)) : "null") + ",\"simulationNear\":" + p.m_simulationDistance.NearSimulationDistance + ",\"simulationFar\":" + p.m_simulationDistance.FarSimulationDistance + zone + "}");
             }
             var sd = ZNet.instance.GetSyncedSimulationDistance();
             return U.Json("{\"server\":" + B(ZNet.instance.IsServer()) + ",\"synced\":{\"near\":" + sd.NearSimulationDistance + ",\"far\":" + sd.FarSimulationDistance + ",\"classic\":" + B(sd.IsClassic) + "},\"count\":" + rows.Count + ",\"peers\":[" + string.Join(",", rows.ToArray()) + "],\"note\":\"a joined client sees only its server here; the queue limit of 10240 bytes is ZDOMan.SendZDOToPeers\"}");
+        }
+
+        static int QueueFromList(ISocket sock)
+        {
+            try { var f = sock.GetType().GetField("m_sendQueue", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); var q = f != null ? f.GetValue(sock) as IEnumerable<byte[]> : null; if (q == null) return -1; var n = 0; foreach (var b in q) n += b.Length; return n; }
+            catch (Exception ex) { U.Once("net_peers.queueList", ex); return -1; }
         }
 
         static ToolOutput ActiveAreaTool(Dictionary<string, object> a)
@@ -147,7 +197,7 @@ namespace HubnerExt
                     var since = start == 0 ? -1 : (now - start) / (double)TimeSpan.TicksPerSecond;
                     var status = ProducerRules.FermenterStatus(content != 0, since, f.m_fermentationDuration);
                     var conv = f.m_conversion.FirstOrDefault(c => c.m_from != null && c.m_from.gameObject.name.GetStableHashCode() == content);
-                    rows.Add(head + ",\"kind\":\"fermenter\",\"status\":" + U.S(status) + ",\"content\":" + U.S(content == 0 ? "" : (s.All.ContainsKey(content) ? Name(content) : "unknown")) + ",\"produces\":" + (conv != null && conv.m_to != null ? U.S(conv.m_to.gameObject.name + " x" + conv.m_producedItems) : "null") + ",\"secondsLeft\":" + (status == "fermenting" ? N(ProducerRules.FermenterSecondsLeft(since, f.m_fermentationDuration)) : "null") + ",\"durationSeconds\":" + N(f.m_fermentationDuration) + ",\"needs\":\"a roof and at least 70% cover at the roof check point, or the timer restarts\"}");
+                    rows.Add(head + ",\"kind\":\"fermenter\",\"status\":" + U.S(status) + ",\"content\":" + U.S(content == 0 ? "" : (s.All.ContainsKey(content) ? Name(content) : "unknown")) + ",\"produces\":" + (conv != null && conv.m_to != null ? U.S(conv.m_to.gameObject.name + " x" + conv.m_producedItems) : "null") + ",\"secondsLeft\":" + (status == "fermenting" ? N(ProducerRules.FermenterSecondsLeft(since, f.m_fermentationDuration)) : "null") + ",\"durationSeconds\":" + N(f.m_fermentationDuration) + ",\"liveCover\":" + LiveInstanceCover(z) + ",\"needs\":\"a roof and at least 70% cover at the roof check point, or the timer restarts\"}");
                 }
                 else if (s.Hive.Contains(h))
                 {
@@ -155,7 +205,7 @@ namespace HubnerExt
                     var b = go.GetComponent<Beehive>(); var level = z.GetInt("level", 0); var prod = z.GetFloat("product", 0f);
                     var biome = WorldGenerator.instance != null ? WorldGenerator.instance.GetBiome(p.x, p.z) : Heightmap.Biome.None;
                     var okBiome = WorldGenerator.instance != null && (biome & b.m_biome) != 0;
-                    rows.Add(head + ",\"kind\":\"beehive\",\"level\":" + level + ",\"max\":" + b.m_maxHoney + ",\"item\":" + U.S(b.m_honeyItem != null ? b.m_honeyItem.gameObject.name : "") + ",\"secondsPerUnit\":" + N(b.m_secPerUnit) + ",\"secondsToFull\":" + (okBiome ? N(ProducerRules.SecondsToLevel(level, b.m_maxHoney, prod, b.m_secPerUnit)) : "null") + ",\"biome\":" + U.S(biome.ToString()) + ",\"biomeAllowed\":" + B(okBiome) + ",\"needs\":\"under " + U.N(Math.Round(b.m_maxCover * 100)) + "% cover at the cover point\"}");
+                    rows.Add(head + ",\"kind\":\"beehive\",\"level\":" + level + ",\"max\":" + b.m_maxHoney + ",\"item\":" + U.S(b.m_honeyItem != null ? b.m_honeyItem.gameObject.name : "") + ",\"secondsPerUnit\":" + N(b.m_secPerUnit) + ",\"secondsToFull\":" + (okBiome ? N(ProducerRules.SecondsToLevel(level, b.m_maxHoney, prod, b.m_secPerUnit)) : "null") + ",\"biome\":" + U.S(biome.ToString()) + ",\"biomeAllowed\":" + B(okBiome) + ",\"liveCover\":" + LiveInstanceCover(z) + ",\"needs\":\"under " + U.N(Math.Round(b.m_maxCover * 100)) + "% cover at the cover point\"}");
                 }
                 else if (s.Sap.Contains(h))
                 {
@@ -224,7 +274,7 @@ namespace HubnerExt
         static ToolOutput ResourceNodes(Dictionary<string, object> a)
         {
             float x0, z0, x1, z1; Sets s; ToolOutput err; if (!Setup(a, out x0, out z0, out x1, out z1, out s, out err)) return err;
-            var lim = Limit(a); var tier = U.Has(a, "toolTier") ? (int)U.D(a, "toolTier", 0) : -1; var rows = new List<string>(); var total = 0; var rocks = 0; var areasLeft = 0;
+            var kindWant = McpJson.GetStr(a, "kind") ?? ""; var lim = Limit(a); var tier = U.Has(a, "toolTier") ? (int)U.D(a, "toolTier", 0) : -1; var rows = new List<string>(); var total = 0; var rocks = 0; var areasLeft = 0;
             foreach (var z in Zdos.InBox(x0, z0, x1, z1))
             {
                 var h = z.GetPrefab(); GameObject go; if (!s.All.TryGetValue(h, out go)) continue;
@@ -235,7 +285,7 @@ namespace HubnerExt
                     var full = areas != null ? areas.Length : -1; var left = areas != null ? MineRules.Remaining(areas) : -1;
                     if (left == 0) continue;                       // a rock with nothing left is about to go
                     total++; rocks++; if (left > 0) areasLeft += left;
-                    if (rows.Count < lim) rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(nm) + ",\"kind\":\"rock\",\"pos\":" + U.V(p) + ",\"areasLeft\":" + (left >= 0 ? left.ToString(CultureInfo.InvariantCulture) : "null") + ",\"areas\":" + (full >= 0 ? full.ToString(CultureInfo.InvariantCulture) : "null") + ",\"hpPerArea\":" + N(m.m_health) + ",\"minToolTier\":" + m.m_minToolTier + (tier >= 0 ? ",\"yourToolWorks\":" + B(MineRules.ToolWorks(tier, m.m_minToolTier)) : "") + "}");
+                    if (rows.Count < lim && (kindWant.Length == 0 || kindWant == "rock")) rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(nm) + ",\"kind\":\"rock\",\"pos\":" + U.V(p) + ",\"areasLeft\":" + (left >= 0 ? left.ToString(CultureInfo.InvariantCulture) : "null") + ",\"areas\":" + (full >= 0 ? full.ToString(CultureInfo.InvariantCulture) : "null") + ",\"hpPerArea\":" + N(m.m_health) + ",\"minToolTier\":" + m.m_minToolTier + (tier >= 0 ? ",\"yourToolWorks\":" + B(MineRules.ToolWorks(tier, m.m_minToolTier)) : "") + "}");
                 }
                 else if (s.Tree.Contains(h) || s.Destr.Contains(h))
                 {
@@ -244,7 +294,8 @@ namespace HubnerExt
                     if (max <= 0) continue;
                     total++;
                     var hp = z.GetFloat("health", (float)max);
-                    if (rows.Count < lim) rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(nm) + ",\"kind\":" + U.S(tb != null ? "tree" : tl != null ? "log" : "destructible") + ",\"pos\":" + U.V(p) + ",\"healthFraction\":" + U.N(Math.Round(hp / max, 2)) + ",\"minToolTier\":" + minTier + (tier >= 0 ? ",\"yourToolWorks\":" + B(MineRules.ToolWorks(tier, minTier)) : "") + "}");
+                    var kd = tb != null ? "tree" : tl != null ? "log" : "destructible";
+                    if (rows.Count < lim && (kindWant.Length == 0 || kindWant == kd)) rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(nm) + ",\"kind\":" + U.S(kd) + ",\"pos\":" + U.V(p) + ",\"healthFraction\":" + U.N(Math.Round(hp / max, 2)) + ",\"minToolTier\":" + minTier + (tier >= 0 ? ",\"yourToolWorks\":" + B(MineRules.ToolWorks(tier, minTier)) : "") + "}");
                 }
             }
             return U.Json(Reply("", total, rows, ",\"bigRocks\":" + rocks + ",\"rockAreasLeft\":" + areasLeft + ",\"note\":\"the stored health of a rock lists one float per hit area; the tool tier of a tool is its m_toolTier (HitData.CheckToolTier)\""));

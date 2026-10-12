@@ -13,7 +13,7 @@ namespace HubnerExt
 
     internal sealed class CoverResult
     {
-        public double Percent; public bool UnderRoof; public int Hits, Rays;
+        public double Percent; public bool UnderRoof; public int Hits, Rays, Mask;         // Mask: bit i set when ray i hit something
     }
 
     /// <summary>A point on a prefab where the game tests cover (a bed's spawn point, a station's roof check point), in the prefab's own frame.</summary>
@@ -40,13 +40,14 @@ namespace HubnerExt
         public static CoverResult At(V3 point, IList<CoverSolid> solids, Func<double, double, double> ground, double minDistance = MinDistance)
         {
             var res = new CoverResult { Rays = Rays.Length };
+            var ri = -1;
             foreach (var v in Rays)
             {
-                var origin = point + v * minDistance; var dir = v.Norm(); var len = RayLength - minDistance;
+                ri++; var origin = point + v * minDistance; var dir = v.Norm(); var len = RayLength - minDistance;
                 var hit = false;
                 foreach (var s in solids) if (s.Box.RayHits(origin, dir, len)) { hit = true; break; }
                 if (!hit && ground != null && HitsTerrain(origin, dir, len, ground)) hit = true;
-                if (hit) res.Hits++;
+                if (hit) { res.Hits++; res.Mask |= 1 << ri; }
             }
             res.Percent = res.Hits / (double)res.Rays;
             res.UnderRoof = IsUnderRoof(point, solids, ground);
@@ -104,7 +105,7 @@ namespace HubnerExt
                             foreach (var b in o.BoxesOf(new[] { c })) solids.Add(new CoverSolid { Box = b, Leaky = c.Leaky });
                     }
                     var cover = CoverModel.At(point, solids, ground);
-                    if (measured != null) measured.Add(p.Id + "|" + cp.Kind + "|" + Math.Round(cover.Percent, 3).ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + (cover.UnderRoof ? "1" : "0"));
+                    if (measured != null) measured.Add(p.Id + "|" + cp.Kind + "|" + Math.Round(cover.Percent, 3).ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + (cover.UnderRoof ? "1" : "0") + "|" + cover.Mask + "|" + Math.Round(point.X, 2).ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + Math.Round(point.Y, 2).ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + Math.Round(point.Z, 2).ToString(System.Globalization.CultureInfo.InvariantCulture));
                     var bad = CoverModel.Verdict(cp.Kind, cover, cp.MinCover, cp.MaxCover);
                     if (bad == null) continue;
                     var near = cp.Kind == "beehive" ? cover.Percent < cp.MaxCover + 0.1 : cp.MinCover > 0 && cover.UnderRoof && cover.Percent >= cp.MinCover - 0.1;

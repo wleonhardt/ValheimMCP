@@ -33,7 +33,11 @@ namespace HubnerExt
             if (ObjectDB.instance != null) foreach (var t in ObjectDB.instance.m_terrainOps) if (t != null) sources.Add(t.gameObject);
             foreach (var go in sources)
             {
-                if (go == null || !seen.Add(go.name)) continue; var top = go.GetComponent<TerrainOp>(); if (top == null || top.m_settings == null) continue; var s = top.m_settings;
+                if (go == null) continue;
+                var tm = go.GetComponent<TerrainModifier>();                                                // the older terrain tools: a TerrainModifier on the prefab (path, raise, mud_road, paved_road, cultivate, digg ...)
+                if (tm != null && !seen.Contains(go.name) && (tm.m_level || tm.m_smooth))
+                { seen.Add(go.name); list.Add(new Op { Prefab = go.name, Level = tm.m_level, Raise = false, Smooth = tm.m_smooth, Square = tm.m_square, LevelRadius = tm.m_levelRadius, SmoothRadius = tm.m_smoothRadius, SmoothPower = tm.m_smoothPower }); continue; }
+                if (!seen.Add(go.name)) continue; var top = go.GetComponent<TerrainOp>(); if (top == null || top.m_settings == null) continue; var s = top.m_settings;
                 if (!s.m_level && !s.m_raise && !s.m_smooth) continue;
                 list.Add(new Op { Prefab = go.name, Level = s.m_level, Raise = s.m_raise, Smooth = s.m_smooth, Square = s.m_square, LevelRadius = s.m_levelRadius, RaiseRadius = s.m_raiseRadius, RaiseDelta = s.m_raiseDelta, RaisePower = s.m_raisePower, SmoothRadius = s.m_smoothRadius, SmoothPower = s.m_smoothPower });
             }

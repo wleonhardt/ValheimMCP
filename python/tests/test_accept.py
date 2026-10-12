@@ -337,7 +337,7 @@ class PlantCaseTests(unittest.TestCase):
     def rows(self, *statuses): return {'plants': [{'status': s} for s in statuses], 'errors': ['item 1: woodwall is not a plant']}
 
     def test_passes_when_close_carrots_block_and_far_ones_do_not(self):
-        seq = iter([self.rows('Healthy', 'Healthy'), self.rows('NoSpace', 'NoSpace'), self.rows()])
+        seq = iter([self.rows('Healthy', 'Healthy'), self.rows('Healthy', 'NoSpace'), self.rows()])
         self.fake.replies['plant_check'] = lambda a: next(seq)
         self.assertEqual(accept.run_case(self.case('plant-check'), self.ctx)['verdict'], accept.PASS)
 

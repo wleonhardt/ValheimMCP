@@ -308,7 +308,7 @@ def plant_case(ctx):
     if first == 'NoSun': raise Skip('the test spot has a roof above it (' + str(far['plants'][0].get('why')) + '): shade comes before space, so two plants cannot be told apart here')
     near = c.tool('plant_check', items=[{'prefab': 'sapling_carrot', 'x': x, 'z': z, 'key': 'a'}, {'prefab': 'sapling_carrot', 'x': x + 0.2, 'z': z, 'key': 'b'}])
     if first != 'NoSpace': ctx.check('two carrots 3 m apart do not block each other', 'NoSpace' not in {p['status'] for p in far['plants']}, far['plants'])
-    ctx.check('two carrots 0.2 m apart block each other', {p['status'] for p in near['plants']} == {'NoSpace'}, near['plants'])
+    ctx.check('of two carrots 0.2 m apart the first grows and the second has no room (a plant blocks only while it is Healthy: Plant.HaveGrowSpace)', [p['status'] for p in near['plants']] == ['Healthy', 'NoSpace'], near['plants'])
     ctx.check('a prefab that is not a plant is an error row, not a guess', 'is not a plant' in json.dumps(c.tool('plant_check', items=[{'prefab': 'woodwall', 'x': x, 'z': z}, {'prefab': 'sapling_carrot', 'x': x, 'z': z}])['errors']))
 
 
