@@ -29,6 +29,26 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"}},\"required\":[\"x\",\"z\"]}", BaseValueTool);
         }
 
+        /// <summary>The effect areas of a type (PlayerBase, Heat ...) standing in the ZDO table within a box, with the radius of their trigger from the prefab.</summary>
+        internal static List<BaseArea> AreasOf(EffectArea.Type type, double x0, double z0, double x1, double z1)
+        {
+            var res = new List<BaseArea>(); if (!Zdos.Ready || ZNetScene.instance == null) return res; var cache = new Dictionary<int, float>();
+            foreach (var zd in Zdos.InBox((float)x0, (float)z0, (float)x1, (float)z1))
+            {
+                var h = zd.GetPrefab(); float r;
+                if (!cache.TryGetValue(h, out r))
+                {
+                    r = -1f; var go = ZNetScene.instance.GetPrefab(h);
+                    if (go != null) foreach (var ea in go.GetComponentsInChildren<EffectArea>(true))
+                        if ((ea.m_type & type) != 0) { var sc = ea.GetComponent<SphereCollider>(); if (sc != null) r = Mathf.Max(r, sc.radius * Mathf.Max(ea.transform.lossyScale.x, Mathf.Max(ea.transform.lossyScale.y, ea.transform.lossyScale.z))); }
+                    cache[h] = r;
+                }
+                if (r < 0f) continue;
+                var p = zd.GetPosition(); res.Add(new BaseArea { Prefab = Zdos.NameOf(h), X = p.x, Y = p.y, Z = p.z, Radius = r });
+            }
+            return res;
+        }
+
         static ToolOutput BaseValueTool(Dictionary<string, object> a)
         {
             if (!Zdos.Ready || ZNetScene.instance == null) return ToolOutput.Err("world not ready");
@@ -72,8 +92,12 @@ namespace HubnerExt
 
         static readonly Dictionary<string, int> BiomeNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { { "Meadows", 1 }, { "Swamp", 2 }, { "Mountain", 4 }, { "BlackForest", 8 }, { "Plains", 16 }, { "AshLands", 32 }, { "DeepNorth", 64 }, { "Ocean", 256 }, { "Mistlands", 512 } };
 
+        /// <summary>The world level option (global key "worldlevel N", the New Game Plus step): 0 when unset.</summary>
+        static int WorldLevelNow() { int n = 0; try { string v; if (ZoneSystem.instance != null && ZoneSystem.instance.GetGlobalKey(GlobalKeys.WorldLevel, out v)) int.TryParse(v, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out n); } catch (Exception ex) { U.Once("WorldLevelNow", ex); } return Math.Max(0, Math.Min(10, n)); }
+
         static ToolOutput BiomeThreats(Dictionary<string, object> a)
         {
+            var wl = WorldLevelNow();
             if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
             var armor = U.D(a, "armor", 0); var hp = U.D(a, "playerHp", 100); int biome = 0; double px = 0, py = 0, pz = 0, tilt = 0; var point = U.Has(a, "x") && U.Has(a, "z");
             var bn = McpJson.GetStr(a, "biome");
@@ -91,14 +115,15 @@ namespace HubnerExt
             var zs = ZoneSystem.instance; Func<string, bool> keySet = k => zs != null && zs.GetGlobalKey(k);
             var em = EnvMan.instance; var isDay = true;
             if (point && em != null && ZNet.instance != null) isDay = DayClock.IsDay(DayClock.Fraction(ZNet.instance.GetTimeSeconds(), em.m_dayLengthSec));
+            var areaNow = 0; try { if (point && wg != null) areaNow = (int)wg.GetBiomeArea(new Vector3((float)px, 0f, (float)pz)); } catch (Exception ex) { U.Once("biome_threats.area", ex); }
             var rows = new List<string>();
             foreach (var sp in Spawners())
             {
                 if (sp.m_prefab == null || !sp.m_enabled || sp.m_devDisabled || (((int)sp.m_biome) & biome) == 0) continue;
                 var ch = sp.m_prefab.GetComponent<Character>(); double top = 0, best = 0;
-                if (ch != null) { top = CombatRules.MaxHealth(ch.m_health, sp.m_maxLevel); foreach (var at in Attacks(sp.m_prefab)) best = Math.Max(best, CombatRules.Hit(at.Key, null, armor, sp.m_maxLevel)); }
-                var cond = new SpawnConditions { AtDay = sp.m_spawnAtDay, AtNight = sp.m_spawnAtNight, RequiredKey = sp.m_requiredGlobalKey, MinAltitude = sp.m_minAltitude, MaxAltitude = sp.m_maxAltitude, MinDistanceFromCenter = sp.m_minDistanceFromCenter, MaxDistanceFromCenter = sp.m_maxDistanceFromCenter, MinTilt = sp.m_minTilt, MaxTilt = sp.m_maxTilt, BiomeMask = (int)sp.m_biome };
-                var failing = point ? SpawnRules.Failing(cond, biome, px, py, pz, tilt, isDay, keySet) : null;
+                if (ch != null) { top = CombatRules.MaxHealth(ch.m_health, sp.m_maxLevel, wl); foreach (var at in Attacks(sp.m_prefab)) best = Math.Max(best, CombatRules.HitInWorld(at.Key, null, armor, sp.m_maxLevel, wl, false)); }
+                var cond = new SpawnConditions { AtDay = sp.m_spawnAtDay, AtNight = sp.m_spawnAtNight, RequiredKey = sp.m_requiredGlobalKey, MinAltitude = sp.m_minAltitude, MaxAltitude = sp.m_maxAltitude, MinDistanceFromCenter = sp.m_minDistanceFromCenter, MaxDistanceFromCenter = sp.m_maxDistanceFromCenter, MinTilt = sp.m_minTilt, MaxTilt = sp.m_maxTilt, BiomeMask = (int)sp.m_biome, BiomeAreaMask = (int)sp.m_biomeArea, RequiredPersistentEvent = sp.m_requiredPersistentEvent ?? "", RequiredEnvironments = sp.m_requiredEnvironments != null ? new List<string>(sp.m_requiredEnvironments) : new List<string>() };
+                var failing = point ? SpawnRules.Failing(cond, biome, px, py, pz, tilt, isDay, keySet, areaNow) : null;
                 rows.Add("{\"name\":" + U.S(sp.m_name) + ",\"prefab\":" + U.S(sp.m_prefab.name) + ",\"maxSpawned\":" + sp.m_maxSpawned + ",\"intervalSec\":" + U.N(sp.m_spawnInterval) + ",\"chancePercent\":" + U.N(sp.m_spawnChance) + ",\"group\":[" + sp.m_groupSizeMin + "," + sp.m_groupSizeMax + "],\"levels\":[" + sp.m_minLevel + "," + sp.m_maxLevel + "],\"day\":" + B(sp.m_spawnAtDay) + ",\"night\":" + B(sp.m_spawnAtNight) + ",\"requiredKey\":" + U.S(sp.m_requiredGlobalKey) + ",\"requiredEnvironments\":[" + string.Join(",", sp.m_requiredEnvironments.Select(U.S).ToArray()) + "],\"altitude\":[" + U.N(sp.m_minAltitude) + "," + U.N(sp.m_maxAltitude) + "],\"tilt\":[" + U.N(sp.m_minTilt) + "," + U.N(sp.m_maxTilt) + "],\"fromCentre\":[" + U.N(sp.m_minDistanceFromCenter) + "," + U.N(sp.m_maxDistanceFromCenter) + "],\"inForest\":" + B(sp.m_inForest) + ",\"outsideForest\":" + B(sp.m_outsideForest) + ",\"insidePlayerBase\":" + B(sp.m_insidePlayerBase) + ",\"huntsPlayer\":" + B(sp.m_huntPlayer) + ",\"topStarHealth\":" + U.N(Math.Round(top)) + ",\"topStarHardestHit\":" + U.N(Math.Round(best, 1)) + ",\"hitsToKillPlayer\":" + (best > 0 ? CombatRules.HitsToDie(hp, best).ToString(CultureInfo.InvariantCulture) : "null") + (point ? ",\"admittedNow\":" + B(failing.Count == 0) + ",\"failing\":[" + string.Join(",", failing.Select(U.S).ToArray()) + "]" : "") + "}");
             }
             return U.Json("{\"biome\":" + biome + (point ? ",\"point\":[" + U.N(px) + "," + U.N(Math.Round(py, 1)) + "," + U.N(pz) + "],\"tiltDegrees\":" + U.N(Math.Round(tilt, 1)) + ",\"day\":" + B(isDay) : "") + ",\"spawners\":" + rows.Count + ",\"list\":[" + string.Join(",", rows.ToArray()) + "]}");
@@ -138,6 +163,7 @@ namespace HubnerExt
 
         static ToolOutput ThreatsNear(Dictionary<string, object> a)
         {
+            var wl = WorldLevelNow();
             if (!Zdos.Ready || ZNetScene.instance == null) return ToolOutput.Err("world not ready");
             double cx = U.D(a, "x", 0), cz = U.D(a, "z", 0), rad = Math.Min(120, Math.Max(1, U.D(a, "radius", 40))), armor = U.D(a, "armor", 0), hp = U.D(a, "playerHp", 100); var limit = Math.Max(1, (int)U.D(a, "limit", 40));
             if (!WorldBounds.InWorld(cx, 0, cz)) return ToolOutput.Err("x and z must be finite and inside the world");
@@ -151,9 +177,9 @@ namespace HubnerExt
                 total++;
                 var level = z.GetInt("level", 1); var tamed = z.GetBool("tamed", false); var alert = z.GetBool("alert", false); var have = z.GetBool("haveTarget", false);
                 var hostile = ch.m_faction != Character.Faction.Players && ch.m_faction != Character.Faction.AnimalsVeg && go.GetComponent<MonsterAI>() != null;
-                double best = 0, reach = 2; foreach (var at in Attacks(go)) { var hit = CombatRules.Hit(at.Key, null, armor, level); if (hit > best) { best = hit; reach = at.Value; } }
+                double best = 0, reach = 2; foreach (var at in Attacks(go)) { var hit = CombatRules.HitInWorld(at.Key, null, armor, level, wl, false); if (hit > best) { best = hit; reach = at.Value; } }
                 var rank = ThreatRules.Rank(tamed, hostile, passive, alert, have, d, reach + 0.5, ch.m_runSpeed, best);
-                var hp0 = z.GetFloat("health", (float)CombatRules.MaxHealth(ch.m_health, level));
+                var hp0 = z.GetFloat("health", (float)CombatRules.MaxHealth(ch.m_health, level, wl));
                 rows.Add(new KeyValuePair<int, KeyValuePair<double, string>>(-(int)rank, new KeyValuePair<double, string>(d, "{\"prefab\":" + U.S(go.name) + ",\"level\":" + level + ",\"threat\":" + U.S(rank.ToString().ToLowerInvariant()) + ",\"distance\":" + U.N(Math.Round(d, 1)) + ",\"pos\":" + U.V(p) + ",\"health\":" + U.N(Math.Round(hp0)) + ",\"alert\":" + B(alert) + ",\"haveTarget\":" + B(have) + ",\"tamed\":" + B(tamed) + ",\"hardestHit\":" + U.N(Math.Round(best, 1)) + ",\"reach\":" + U.N(reach) + ",\"hitsToKillPlayer\":" + (best > 0 ? CombatRules.HitsToDie(hp, best).ToString(CultureInfo.InvariantCulture) : "null") + ",\"secondsToContact\":" + (double.IsInfinity(CombatRules.SecondsToContact(d, reach + 0.5, ch.m_runSpeed)) ? "null" : U.N(Math.Round(CombatRules.SecondsToContact(d, reach + 0.5, ch.m_runSpeed), 1))) + "}")));
             }
             var ordered = rows.OrderBy(r => r.Key).ThenBy(r => r.Value.Key).Take(limit).Select(r => r.Value.Value).ToArray();
@@ -179,6 +205,7 @@ namespace HubnerExt
 
         static ToolOutput CreatureInfo(Dictionary<string, object> a)
         {
+            var wl = WorldLevelNow();
             if (ZNetScene.instance == null) return ToolOutput.Err("no world loaded");
             var name = McpJson.GetStr(a, "name"); var go = name != null ? ZNetScene.instance.GetPrefab(name) : null; var ch = go != null ? go.GetComponent<Character>() : null;
             if (ch == null) return ToolOutput.Err("no creature prefab named " + name);
@@ -193,7 +220,7 @@ namespace HubnerExt
                 if (dm.Count == 0) continue;
                 attacks.Add("{\"item\":" + U.S(w.name) + ",\"damage\":" + Obj(dm) + ",\"total\":" + U.N(Math.Round(dm.Values.Sum(), 1)) + ",\"aiAttackRange\":" + U.N(sh.m_aiAttackRange) + ",\"aiAttackRangeMin\":" + U.N(sh.m_aiAttackRangeMin) + ",\"interval\":" + U.N(sh.m_aiAttackInterval) + ",\"blockable\":" + B(sh.m_blockable) + ",\"dodgeable\":" + B(sh.m_dodgeable) + "}");
                 if (U.Has(a, "armor") || U.Has(a, "playerHp"))
-                    hitsByLevel.Add("{\"item\":" + U.S(w.name) + ",\"levels\":[" + string.Join(",", Enumerable.Range(1, 3).Select(l => { var h = CombatRules.Hit(dm, null, armor, l); return "{\"level\":" + l + ",\"hit\":" + U.N(Math.Round(h, 1)) + ",\"hitsToKill\":" + CombatRules.HitsToDie(playerHp, h) + "}"; }).ToArray()) + "]}");
+                    hitsByLevel.Add("{\"item\":" + U.S(w.name) + ",\"levels\":[" + string.Join(",", Enumerable.Range(1, 3).Select(l => { var h = CombatRules.HitInWorld(dm, null, armor, l, wl, false); return "{\"level\":" + l + ",\"hit\":" + U.N(Math.Round(h, 1)) + ",\"hitsToKill\":" + CombatRules.HitsToDie(playerHp, h) + "}"; }).ToArray()) + "]}");
             }
 
             var drops = new List<string>();

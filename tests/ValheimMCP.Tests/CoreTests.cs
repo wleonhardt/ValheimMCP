@@ -925,3 +925,61 @@ public class EncumberedWalkerTests
         Assert.False(RunRules.WantRun(false, 50, 0.9, 0, false, true, true, true));
     }
 }
+
+public class WorldLevelCombatTests
+{
+    static Dictionary<string, double> D(double slash) => new Dictionary<string, double> { { "slash", slash } };
+
+    [Fact] public void NonPlayerDamageIsArmouredLikeTheRest()
+    {
+        Assert.Equal(30, CombatRules.Hit(new Dictionary<string, double> { { "nonPlayer", 40 } }, null, 10), 6);
+    }
+
+    [Fact] public void WorldLevelZeroChangesNothing()
+    {
+        Assert.Equal(CombatRules.Hit(D(100), null, 20), CombatRules.HitInWorld(D(100), null, 20, 1, 0, true), 6);
+        Assert.Equal(CombatRules.Hit(D(100), null, 20), CombatRules.HitInWorld(D(100), null, 20, 1, 0, false), 6);
+    }
+
+    [Fact] public void APlayerMeetsBaseArmourOnACreatureInANewGamePlus()
+    {
+        // world level 1: 100 armour; 150 damage: armour 100 is over half the damage (75), so damage x (150 / (100 x 4)) = 56.25
+        Assert.Equal(56.25, CombatRules.HitInWorld(D(150), null, 0, 1, 1, true), 6);
+        Assert.Equal(CombatRules.Armor(300, 200), CombatRules.HitInWorld(D(300), null, 0, 1, 2, true), 6);
+    }
+
+    [Fact] public void ACreatureAddsFlatDamageAfterTheArmour()
+    {
+        Assert.Equal(CombatRules.Armor(100, 20) + 85, CombatRules.HitInWorld(D(100), null, 20, 1, 1, false), 6);
+        Assert.Equal(CombatRules.Armor(100, 20) + 170, CombatRules.HitInWorld(D(100), null, 20, 1, 2, false), 6);
+    }
+}
+
+public class SpawnConditionExtraTests
+{
+    [Fact] public void TheBiomeAreaCanExcludeTheEdgeOrTheMiddle()
+    {
+        var c = new SpawnConditions { BiomeMask = 1, BiomeAreaMask = 2 };                      // the middle of the biome only
+        Assert.Contains(SpawnRules.Failing(c, 1, 0, 40, 0, 0, true, k => true, 1), s => s.Contains("edge"));
+        Assert.DoesNotContain(SpawnRules.Failing(c, 1, 0, 40, 0, 0, true, k => true, 2), s => s.Contains("biome allowed") || s.Contains("middle"));
+        Assert.DoesNotContain(SpawnRules.Failing(c, 1, 0, 40, 0, 0, true, k => true, 0), s => s.Contains("edge") || s.Contains("middle"));     // area unknown: not judged
+    }
+
+    [Fact] public void APersistentEventOrAWeatherIsNamedAsANeed()
+    {
+        var c = new SpawnConditions { BiomeMask = 1, RequiredPersistentEvent = "Haldor_Raid", RequiredEnvironments = new List<string> { "Rain", "ThunderStorm" } };
+        var f = SpawnRules.Failing(c, 1, 0, 40, 0, 0, true, k => true);
+        Assert.Contains(f, s => s.Contains("Haldor_Raid")); Assert.Contains(f, s => s.Contains("Rain, ThunderStorm"));
+    }
+}
+
+public class HopStaminaTests
+{
+    [Fact] public void ALowMaximumNeedsMoreThanFifteenPercentToJump()
+    {
+        // maximum stamina 50: a jump costs 10 = 20 percent, so at 18 percent the hop is not chosen
+        Assert.NotEqual(StallAction.Hop, StallLadder.Pick(1, 1, 0.9f, 0, false, false, false, 0.18f, false, 0, 0, true, false, 1.6f, 0.21f));
+        Assert.Equal(StallAction.Hop, StallLadder.Pick(1, 1, 0.9f, 0, false, false, false, 0.25f, false, 0, 0, true, false, 1.6f, 0.21f));
+        Assert.Equal(StallAction.Hop, StallLadder.Pick(1, 1, 0.9f, 0, false, false, false, 0.18f, false, 0, 0, true, false));          // the old default of 15 percent
+    }
+}

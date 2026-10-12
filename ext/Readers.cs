@@ -39,6 +39,20 @@ namespace HubnerExt
 
         const string BoxSchema = "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"limit\":{\"type\":\"number\"}}}";
 
+        /// <summary>The shield domes standing in the ZDO table near a box (ShieldGenerator: radius from its stored fuel). A dome cancels wear and the heat and cold that stop a plant.</summary>
+        internal static List<ShieldFact> ShieldsNear(double x0, double z0, double x1, double z1)
+        {
+            var res = new List<ShieldFact>(); var s = S(); if (s == null || s.Shield.Count == 0 || !Zdos.Ready) return res;
+            foreach (var z in Zdos.InBox((float)(x0 - 32), (float)(z0 - 32), (float)(x1 + 32), (float)(z1 + 32)))
+            {
+                var h = z.GetPrefab(); if (!s.Shield.Contains(h)) continue;
+                var sg = s.All[h].GetComponent<ShieldGenerator>(); if (sg == null) continue;
+                var p = z.GetPosition();
+                res.Add(new ShieldFact { X = p.x, Y = p.y, Z = p.z, Radius = ShieldRules.Radius(z.GetFloat("fuel", sg.m_defaultFuel), sg.m_maxFuel, sg.m_minShieldRadius, sg.m_maxShieldRadius, sg.m_offWhenNoFuel) });
+            }
+            return res;
+        }
+
         // ------------------------------------------------------------------ live cover (only where the object stands in a loaded zone, i.e. on a client near it)
         static MethodInfo _cover;
 
@@ -80,7 +94,7 @@ namespace HubnerExt
         }
 
         // ------------------------------------------------------------------ prefab sets
-        sealed class Sets { public Dictionary<int, GameObject> All = new Dictionary<int, GameObject>(); public HashSet<int> Item = new HashSet<int>(), Pick = new HashSet<int>(), Ferm = new HashSet<int>(), Hive = new HashSet<int>(), Sap = new HashSet<int>(), Root = new HashSet<int>(), Mine = new HashSet<int>(), Tree = new HashSet<int>(), Destr = new HashSet<int>(), Spawner = new HashSet<int>(), Area = new HashSet<int>(), Wear = new HashSet<int>(), Fire = new HashSet<int>(), Smelt = new HashSet<int>(), Cook = new HashSet<int>(); }
+        sealed class Sets { public Dictionary<int, GameObject> All = new Dictionary<int, GameObject>(); public HashSet<int> Item = new HashSet<int>(), Pick = new HashSet<int>(), Ferm = new HashSet<int>(), Hive = new HashSet<int>(), Sap = new HashSet<int>(), Root = new HashSet<int>(), Mine = new HashSet<int>(), Tree = new HashSet<int>(), Destr = new HashSet<int>(), Spawner = new HashSet<int>(), Area = new HashSet<int>(), Wear = new HashSet<int>(), Shield = new HashSet<int>(), Fire = new HashSet<int>(), Smelt = new HashSet<int>(), Cook = new HashSet<int>(); }
         static Sets _sets;
 
         static Sets S()
@@ -105,6 +119,7 @@ namespace HubnerExt
                 if (go.GetComponent<CreatureSpawner>() != null) s.Spawner.Add(kv.Key);
                 if (go.GetComponentInChildren<SpawnArea>() != null) s.Area.Add(kv.Key);
                 if (go.GetComponent<WearNTear>() != null) s.Wear.Add(kv.Key);
+                if (go.GetComponent<ShieldGenerator>() != null) s.Shield.Add(kv.Key);
                 if (go.GetComponent<Fireplace>() != null) s.Fire.Add(kv.Key);
                 if (go.GetComponent<Smelter>() != null) s.Smelt.Add(kv.Key);
                 if (go.GetComponent<CookingStation>() != null) s.Cook.Add(kv.Key);
@@ -233,6 +248,7 @@ namespace HubnerExt
         {
             float x0, z0, x1, z1; Sets s; ToolOutput err; if (!Setup(a, out x0, out z0, out x1, out z1, out s, out err)) return err;
             var now = NowTicks(); var lim = Limit(a); var rows = new List<string>(); var total = 0; var players = PlayerPositions(); var going = 0;
+            var bases = CreatureTools.AreasOf(EffectArea.Type.PlayerBase, x0 - 70, z0 - 70, x1 + 70, z1 + 70);        // ItemDrop.IsInsideBase: a PlayerBase area (fire, workbench, ward ...) at the item
             foreach (var z in Zdos.InBox(x0, z0, x1, z1))
             {
                 var h = z.GetPrefab(); if (!s.Item.Contains(h)) continue;
@@ -240,15 +256,16 @@ namespace HubnerExt
                 total++;
                 var spawn = z.GetLong("spawntime", 0L); var age = spawn == 0 ? double.NaN : (now - spawn) / (double)TimeSpan.TicksPerSecond;
                 var p = z.GetPosition(); var near = players.Any(pp => Vector3.Distance(pp, p) <= DropRules.PlayerRange);
-                var kept = double.IsNaN(age) ? "no spawn time" : DropRules.KeptBy(drop.m_autoDestroy, age, false, p.y, near, false, z.GetBool("piece", false));
-                var maybeBase = p.y > DropRules.BaseMinY;
+                var inBase = bases.Any(b => Math.Sqrt((b.X - p.x) * (b.X - p.x) + (b.Y - p.y) * (b.Y - p.y) + (b.Z - p.z) * (b.Z - p.z)) < b.Radius);
+                var kept = double.IsNaN(age) ? "no spawn time" : DropRules.KeptBy(drop.m_autoDestroy, age, inBase, p.y, near, false, z.GetBool("piece", false));
+                var maybeBase = inBase && p.y > DropRules.BaseMinY;
                 if (!double.IsNaN(age) && age >= DropRules.DespawnSeconds && kept == null) going++;
                 if (rows.Count >= lim) continue;
                 int stack = 1, quality = 1; float dur = 0; string iname = drop.m_itemData != null ? drop.m_itemData.m_shared.m_name : Name(h);
                 try { var d = drop.m_itemData.Clone(); ItemDrop.LoadFromZDO(d, z); stack = d.m_stack; quality = d.m_quality; dur = d.m_durability; } catch (Exception ex) { U.Once("loot_near.itemData", ex); }
-                rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Name(h)) + ",\"name\":" + U.S(iname) + ",\"stack\":" + stack + ",\"quality\":" + quality + ",\"durability\":" + N(dur) + ",\"pos\":" + U.V(p) + ",\"ageSeconds\":" + N(age) + ",\"secondsLeft\":" + (kept == null && !double.IsNaN(age) ? N(DropRules.SecondsLeft(age)) : "null") + ",\"keptBy\":" + (kept == null ? "null" : U.S(kept)) + ",\"mayBeInsideABase\":" + B(maybeBase && kept == null) + "}");
+                rows.Add("{\"id\":" + U.S(U.Id(z)) + ",\"prefab\":" + U.S(Name(h)) + ",\"name\":" + U.S(iname) + ",\"stack\":" + stack + ",\"quality\":" + quality + ",\"durability\":" + N(dur) + ",\"pos\":" + U.V(p) + ",\"ageSeconds\":" + N(age) + ",\"secondsLeft\":" + (kept == null && !double.IsNaN(age) ? N(DropRules.SecondsLeft(age)) : "null") + ",\"keptBy\":" + (kept == null ? "null" : U.S(kept)) + ",\"insideABase\":" + B(inBase) + ",\"mayBeInsideABase\":" + B(maybeBase && kept == null) + "}");
             }
-            return U.Json(Reply("", total, rows, ",\"pastAnHourAndUnprotected\":" + going + ",\"note\":\"a base keeps an item only above y 28 and only inside a PlayerBase area (not read here); tar is not read\""));
+            return U.Json(Reply("", total, rows, ",\"pastAnHourAndUnprotected\":" + going + ",\"note\":\"a base keeps an item only above y 28 and only inside a PlayerBase area (read from the prefabs' area radii); tar is not read\""));
         }
 
         static ToolOutput HarvestNear(Dictionary<string, object> a)
@@ -350,6 +367,7 @@ namespace HubnerExt
             var solids = new List<CoverSolid>();
             var allPieces = pieces;
             foreach (var pp in all) foreach (var c in pp.Geo.Colliders.Where(c => Layers.InCover(c.Layer))) foreach (var b in pp.BoxesOf(new[] { c })) solids.Add(new CoverSolid { Box = b, Leaky = c.Leaky });
+            var shieldsHere = ShieldsNear(x0, z0, x1, z1);
             double ashDamage = 0; try { if (Game.instance != null) ashDamage = Game.instance.m_ashDamage; } catch (Exception ex) { U.Once("wear_risk.ash", ex); }
             var rain = 0; var ash = 0; var outside = 0; var damaged = 0; var rows = new List<string>(); var roofless = 0;
             foreach (var pp in allPieces)
@@ -360,7 +378,7 @@ namespace HubnerExt
                 var biome = WorldGenerator.instance.GetBiome((float)pp.Pos.X, (float)pp.Pos.Z); var why = new List<string>();
                 if (w.m_noRoofWear && !roofed) { rain++; if (frac > WearRules.RainFloorHealth) why.Add("rain takes it down to half health in " + N(WearRules.SecondsOfRainToHalf(frac, w.m_health) / 60) + " min of wet weather"); }
                 if (!roofed) roofless++;
-                if (WearRules.AshApplies(biome == Heightmap.Biome.AshLands, ashDamage, false, w.m_ashDamageImmune, roofed, w.m_ashDamageResist, frac)) { ash++; why.Add("ash damage " + N(ashDamage) + "% every 5 s with no roof"); }
+                if (WearRules.AshApplies(biome == Heightmap.Biome.AshLands, ashDamage, ShieldRules.Inside(shieldsHere, pp.Pos.X, pp.Pos.Y, pp.Pos.Z), w.m_ashDamageImmune, roofed, w.m_ashDamageResist, frac)) { ash++; why.Add("ash damage " + N(ashDamage) + "% every 5 s with no roof"); }
                 if (WearRules.OutsideRequiredBiome((int)w.m_requiredBiome, (int)biome)) { outside++; why.Add("outside the biome it needs: " + w.m_outsideRequiredBiomeDamage + "% per update"); }
                 if (frac < 0.999) damaged++;
                 if ((why.Count > 0 || frac < 0.5) && rows.Count < lim) rows.Add("{\"id\":" + U.S(pp.Id) + ",\"prefab\":" + U.S(pp.Geo.Prefab) + ",\"pos\":" + U.V(zdos[pp].GetPosition()) + ",\"healthFraction\":" + U.N(Math.Round(frac, 2)) + ",\"roofed\":" + B(roofed) + ",\"biome\":" + U.S(biome.ToString()) + ",\"risks\":[" + string.Join(",", why.Select(U.S).ToArray()) + "]}");

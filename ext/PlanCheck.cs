@@ -59,23 +59,24 @@ namespace HubnerExt
                         var ls = box.transform.lossyScale;
                         g.Colliders.Add(new ColliderBox { Centre = V(box.transform.TransformPoint(box.center) - root), Half = new V3(Math.Abs(box.size.x * ls.x) / 2, Math.Abs(box.size.y * ls.y) / 2, Math.Abs(box.size.z * ls.z) / 2), Rot = Q(box.transform.rotation), Layer = layer, Leaky = IsLeaky(col) });
                     }
-                    else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity, Layer = layer, Leaky = IsLeaky(col) });       // a bounds box for anything else (the game uses the real shape)
+                    else g.Colliders.Add(new ColliderBox { Centre = V(col.bounds.center - root), Half = V(col.bounds.extents), Rot = Quat.Identity, Layer = layer, Leaky = IsLeaky(col), NonBox = true });       // a bounds box for anything else (the game uses the real shape)
                 }
                 var wnt = go.GetComponent<WearNTear>();
                 if (wnt != null) { g.Material = wnt.m_materialType.ToString(); g.Supports = wnt.m_supports; g.ComOffset = V(wnt.m_comOffset); g.WearsWithoutSupport = wnt.m_noSupportWear; g.ForceCorrectCom = wnt.m_forceCorrectCOMCalculation; }
                 var piece = go.GetComponent<Piece>();
-                if (piece != null) { g.NoClipping = piece.m_noClipping; g.NotOnTilting = piece.m_notOnTiltingSurface; g.NotOnWood = piece.m_notOnWood; g.NotOnFloor = piece.m_notOnFloor; g.NoInWater = piece.m_noInWater; g.GroundOnly = piece.m_groundOnly; }
+                if (piece != null) { g.PieceName = piece.m_name; g.OnlyInBiome = (int)piece.m_onlyInBiome; g.BlockRadius = piece.m_blockRadius; foreach (var bp in piece.m_blockingPieces) if (bp != null) g.BlockingNames.Add(bp.m_name); if (piece.m_mustConnectTo != null) { g.MustConnectTo = piece.m_mustConnectTo.name; g.ConnectRadius = piece.m_connectRadius; g.MustBeAboveConnected = piece.m_mustBeAboveConnected; } g.CultivatedGroundOnly = piece.m_cultivatedGroundOnly; g.NoClipping = piece.m_noClipping; g.NotOnTilting = piece.m_notOnTiltingSurface; g.NotOnWood = piece.m_notOnWood; g.NotOnFloor = piece.m_notOnFloor; g.NoInWater = piece.m_noInWater; g.GroundOnly = piece.m_groundOnly; }
                 var bed = go.GetComponent<Bed>(); if (bed != null && bed.m_spawnPoint != null) g.CoverPoints.Add(new CoverPoint { Kind = "bed", Local = V(bed.m_spawnPoint.position - root), MinCover = 0.8 });
                 var stn = go.GetComponent<CraftingStation>(); if (stn != null && stn.m_craftRequireRoof && stn.m_roofCheckPoint != null) g.CoverPoints.Add(new CoverPoint { Kind = "station", Local = V(stn.m_roofCheckPoint.position - root), MinCover = 0.7 });
                 var sm = go.GetComponent<Smelter>(); if (sm != null && sm.m_requiresRoof && sm.m_roofCheckPoint != null) g.CoverPoints.Add(new CoverPoint { Kind = "smelter", Local = V(sm.m_roofCheckPoint.position - root), MinCover = 0 });
                 var fer = go.GetComponent<Fermenter>(); if (fer != null && fer.m_roofCheckPoint != null) g.CoverPoints.Add(new CoverPoint { Kind = "fermenter", Local = V(fer.m_roofCheckPoint.position - root), MinCover = 0.7 });
                 var hive = go.GetComponent<Beehive>(); if (hive != null && hive.m_coverPoint != null && hive.m_maxCover > 0) g.CoverPoints.Add(new CoverPoint { Kind = "beehive", Local = V(hive.m_coverPoint.position - root), MaxCover = hive.m_maxCover });
+                foreach (var ea in go.GetComponentsInChildren<EffectArea>(true)) if ((ea.m_type & EffectArea.Type.Heat) != 0) { var hsc = ea.GetComponent<SphereCollider>(); if (hsc != null) g.HeatAreas.Add(new KeyValuePair<V3, double>(V(ea.transform.TransformPoint(hsc.center) - root), hsc.radius * Math.Max(ea.transform.lossyScale.x, Math.Max(ea.transform.lossyScale.y, ea.transform.lossyScale.z)))); }
                 foreach (Transform child in go.transform) { try { if (child.CompareTag("snappoint")) g.SnapPoints.Add(V(child.position - root)); } catch (Exception ex) { U.Once("Geo.snap", ex); } }
                 var n = name.ToLowerInvariant();
                 var cs = go.GetComponent<CraftingStation>(); var fp = go.GetComponent<Fireplace>(); var ext = go.GetComponent<StationExtension>();
                 g.IsStation = cs != null;
                 g.IsFireplace = fp != null;
-                if (fp != null) { g.DisableCoverCheck = fp.m_disableCoverCheck; g.CoverCheckOffset = fp.m_coverCheckOffset; g.CheckTerrainOffset = fp.m_checkTerrainOffset; }
+                if (fp != null) { g.InfiniteFuel = fp.m_infiniteFuel; g.DisableCoverCheck = fp.m_disableCoverCheck; g.CoverCheckOffset = fp.m_coverCheckOffset; g.CheckTerrainOffset = fp.m_checkTerrainOffset; }
                 if (cs != null) { g.ProvidesStation = cs.m_name; g.StationRangeBuild = cs.m_rangeBuild; g.StationExtraRange = cs.m_extraRangePerLevel; }
                 if (ext != null && ext.m_craftingStation != null) { g.ExtensionOf = ext.m_craftingStation.m_name; g.ExtensionMaxDistance = ext.m_maxStationDistance; g.ExtensionStack = ext.m_stack; if (piece != null) g.ExtensionSpace = piece.m_spaceRequirement; }
                 if (piece != null && piece.m_craftingStation != null) g.StationName = piece.m_craftingStation.m_name;
@@ -182,12 +183,19 @@ namespace HubnerExt
                     var name = Zdos.NameOf(z.GetPrefab()); if (name.StartsWith("_", StringComparison.Ordinal)) continue;
                     var geo = Geo(name); if (geo == null || geo.Colliders.Count == 0) continue;
                     var p = z.GetPosition();
-                    all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false, Scale = ScaleOf(z) }); world++;
+                    all.Add(new PlacedPiece { Id = U.Id(z), Geo = geo, Pos = new V3(p.x, p.y, p.z), Rot = Q(z.GetRotation()), Planned = false, Scale = ScaleOf(z), Lit = !geo.IsFireplace || FireRules.Burning(z.GetInt("state", 1), z.GetFloat("fuel", 0f), geo.InfiniteFuel) }); world++;
                 }
 
             var problems = new List<PlanProblem>();
             problems.AddRange(PlanChecks.Overlaps(all));
             problems.AddRange(SnapSeams.Find(all));
+            problems.AddRange(PlanChecks.BedHeat(all));
+            problems.AddRange(PlanChecks.BlockRadius(all)); problems.AddRange(PlanChecks.MustConnect(all));
+            foreach (var p in planned)
+            {
+                var bp = PlanChecks.Biome(p, PlantTools.BiomeAt(p.Pos.X, p.Pos.Z)); if (bp != null) problems.Add(bp);
+                if (p.Geo.CultivatedGroundOnly) { var cp = PlanChecks.Cultivated(p, PlantTools.CultivatedAt(new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z))); if (cp != null) problems.Add(cp); }
+            }
             var covers = new List<string>(); problems.AddRange(CoverChecks.Check(all, ground, covers));
             foreach (var p in planned)
             {

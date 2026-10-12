@@ -95,6 +95,22 @@ namespace HubnerExt
         public static bool Overlaps(Obb a, Obb b) { return Depth(a, b) > 0; }
 
         /// <summary>First hit of a ray within <paramref name="maxLen"/> (slab test in the box's own frame). A ray that starts inside the box does not hit it, like a Unity raycast.</summary>
+        /// <summary>Distance along the ray to where it enters the box, or null (a start inside the box does not hit it).</summary>
+        public double? RayT(V3 origin, V3 dir, double maxLen)
+        {
+            var d = origin - C; var tmin = 0.0; var tmax = maxLen;
+            for (var i = 0; i < 3; i++)
+            {
+                var o = d.Dot(Axes[i]); var v = dir.Dot(Axes[i]); var h = HalfOf(i);
+                if (Math.Abs(v) < 1e-12) { if (o < -h || o > h) return null; continue; }
+                var t1 = (-h - o) / v; var t2 = (h - o) / v; if (t1 > t2) { var t = t1; t1 = t2; t2 = t; }
+                tmin = Math.Max(tmin, t1); tmax = Math.Min(tmax, t2); if (tmin > tmax) return null;
+            }
+            var inside = true;
+            for (var i = 0; i < 3; i++) { var o = d.Dot(Axes[i]); if (o < -HalfOf(i) || o > HalfOf(i)) { inside = false; break; } }
+            return inside || tmin <= 0 ? (double?)null : tmin;
+        }
+
         public bool RayHits(V3 origin, V3 dir, double maxLen)
         {
             var d = origin - C; var tmin = 0.0; var tmax = maxLen;
@@ -115,6 +131,7 @@ namespace HubnerExt
     {
         public V3 Centre, Half;          // in the prefab's own frame
         public Quat Rot = Quat.Identity;
+        public bool NonBox;              // a mesh, capsule or sphere collider: WearNTear works with its world-axis bounds (collider.bounds), not its shape
         public bool Leaky;               // tagged "leaky": Cover.IsUnderRoof ignores it
         public string Layer = "Default"; // Unity layer name of the collider (the game's checks each look at their own set of layers)
     }
@@ -143,6 +160,7 @@ namespace HubnerExt
         public bool NoClipping, NotOnTilting, NotOnWood, NotOnFloor, NoInWater, GroundOnly, IsFire, IsWall, IsStation, Occupies = true;
         public bool ForceCorrectCom;                // WearNTear.m_forceCorrectCOMCalculation: the support distance may not use the nearer pivot distance
         public bool WearsWithoutSupport = true;    // WearNTear.m_noSupportWear (the name is the opposite of what it says): false = the piece never takes damage from lack of support
+        public bool InfiniteFuel;                   // Fireplace.m_infiniteFuel
         public bool IsFireplace;                    // has a Fireplace component (torches and sconces too, not only the big fires IsFire names)
         public bool DisableCoverCheck;              // Fireplace.m_disableCoverCheck
         public double CoverCheckOffset = 0.5, CheckTerrainOffset = 0.2;       // Fireplace.m_coverCheckOffset / m_checkTerrainOffset
@@ -153,6 +171,12 @@ namespace HubnerExt
         public string ProvidesStation = "";         // CraftingStation.m_name when this piece is a station
         public double StationRangeBuild = 10, StationExtraRange = 0;      // CraftingStation.m_rangeBuild / m_extraRangePerLevel
 
+        public List<KeyValuePair<V3, double>> HeatAreas = new List<KeyValuePair<V3, double>>();         // EffectArea (Heat) sphere triggers: centre in the prefab's frame and radius (a lit fire, a stove)
+        public string PieceName = "";               // Piece.m_name: what the blocking rules compare
+        public int OnlyInBiome;                      // Piece.m_onlyInBiome (Heightmap.Biome flags, 0 = anywhere)
+        public double BlockRadius; public List<string> BlockingNames = new List<string>();      // Piece.m_blockRadius / m_blockingPieces (their m_name)
+        public string MustConnectTo = ""; public double ConnectRadius; public bool MustBeAboveConnected;        // Piece.m_mustConnectTo (the object's name must contain it) / m_connectRadius / m_mustBeAboveConnected
+        public bool CultivatedGroundOnly;            // Piece.m_cultivatedGroundOnly
         public List<CoverPoint> CoverPoints = new List<CoverPoint>();   // bed spawn point, roofed station / smelter check point
         public List<V3> SnapPoints = new List<V3>();    // direct children of the prefab tagged "snappoint" (Piece.GetSnapPoints), in the piece's own space
 
@@ -166,9 +190,20 @@ namespace HubnerExt
         public V3 Pos;
         public Quat Rot = Quat.Identity;
         public bool Planned = true;                 // false = already in the world (a supporter and an obstacle, never reported on)
+        public bool Lit = true;                     // a world fire with no fuel gives no heat (Fireplace); a planned one counts as lit
         public V3 Scale = new V3(1, 1, 1);          // the ZDO's scale vector (trees, rocks and logs are placed scaled)
 
         public List<Obb> Boxes() { return Boxes(null); }
+
+        /// <summary>The boxes WearNTear looks at: a box collider stays oriented, any other collider is the world-axis bounding box of its (rotated) bounds (WearNTear.GetColliders: collider.bounds).</summary>
+        public List<Obb> SupportBoxes(Func<string, bool> layer)
+        {
+            var res = new List<Obb>();
+            foreach (var c in Geo.Colliders.Where(c => layer == null || layer(c.Layer)))
+                foreach (var b in BoxesOf(new[] { c }))
+                    res.Add(c.NonBox ? Obb.Make(b.C, new V3(b.Extent(new V3(1, 0, 0)), b.Extent(new V3(0, 1, 0)), b.Extent(new V3(0, 0, 1))), Quat.Identity) : b);
+            return res;
+        }
 
         /// <summary>The collider boxes in the world; <paramref name="layer"/> keeps only the colliders on the layers a given check looks at.</summary>
         public List<Obb> Boxes(Func<string, bool> layer)
@@ -240,8 +275,8 @@ namespace HubnerExt
             foreach (var p in pieces)
             {
                 var m = Material.Of(p.Geo.Material); mats[p] = m;
-                if (m == null) { solids.AddRange(p.Boxes(Layers.InSupport)); continue; }
-                plain[p] = p.Boxes(Layers.InSupport); grown[p] = plain[p].Select(b => b.Grown(ContactGrow)).ToList();
+                if (m == null) { solids.AddRange(p.SupportBoxes(Layers.InSupport)); continue; }
+                plain[p] = p.SupportBoxes(Layers.InSupport); grown[p] = plain[p].Select(b => b.Grown(ContactGrow)).ToList();
                 res[p] = new SupportResult { Max = m.Max, Min = m.Min, NeverFalls = !p.Geo.WearsWithoutSupport };
             }
             obstacles = solids;
@@ -391,6 +426,11 @@ namespace HubnerExt
             new PlanRule { Id = "fermenter-cover", Origin = Hard, Code = "", Source = "Fermenter.UpdateCover: no roof or under 70% cover at m_roofCheckPoint restarts the fermentation timer every 10 s" },
             new PlanRule { Id = "beehive-cover", Origin = Hard, Code = "", Source = "Beehive.HaveFreeSpace: cover at m_coverPoint must be under the prefab's m_maxCover (0.25 in the code, 0.6 on piece_beehive), else the hive makes no honey ($piece_beehive_freespace)" },
             new PlanRule { Id = "smelter-roof", Origin = Hard, Code = "", Source = "Smelter.UpdateRoof: with m_requiresRoof, Cover.IsUnderRoof at m_roofCheckPoint, else the smelter does not work" },
+            new PlanRule { Id = "bed-heat", Origin = Hard, Code = "", Source = "Bed.CheckFire: sleeping needs the bed inside a Heat effect area ($msg_bednofire); claiming the bed does not. A fire in the plan counts as lit" },
+            new PlanRule { Id = "wrong-biome", Origin = Ghost, Code = "WrongBiome", Source = "Player.UpdatePlacementGhost: Piece.m_onlyInBiome and the biome at the ghost" },
+            new PlanRule { Id = "block-radius", Origin = Ghost, Code = "MoreSpace", Source = "Player.UpdatePlacementGhost: Piece.m_blockRadius with m_blockingPieces: a piece of one of those names with a collider inside the radius refuses the placement" },
+            new PlanRule { Id = "must-connect", Origin = Ghost, Code = "Invalid", Source = "Player.UpdatePlacementGhost: Piece.m_mustConnectTo needs an object whose name contains it within m_connectRadius (and, with m_mustBeAboveConnected, directly below the piece)" },
+            new PlanRule { Id = "needs-cultivated", Origin = Ghost, Code = "NeedCultivated", Source = "Player.UpdatePlacementGhost: Piece.m_cultivatedGroundOnly needs Heightmap.IsCultivated at the piece" },
             new PlanRule { Id = "yaw-grid", Origin = Ghost, Code = "", Source = "the hammer rotates in steps of 22.5 degrees; a ZDO spawn can be anything" },
             new PlanRule { Id = "fire-clearance", Origin = Taste, Code = "", Source = "our preference: a metre of free ground round a fire (vanilla has no such placement rule; the real failures are fire-blocked and smoke)" },
             new PlanRule { Id = "fire-blocked", Origin = Hard, Code = "", Source = "Fireplace.CheckUnderTerrain: terrain above y + m_checkTerrainOffset, or a solid within 0.5 m straight up from y + m_coverCheckOffset, and the fire does not burn" },
@@ -498,6 +538,72 @@ namespace HubnerExt
         public static PlanProblem Water(PlacedPiece p, double groundY)
         {
             return PlanRuleBook.Stamp(p.Geo.NoInWater && groundY < WaterLevel ? new PlanProblem { Rule = "water", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " cannot be built in water (ground " + Math.Round(groundY, 2) + " m, sea level " + WaterLevel + ")" } : null);
+        }
+
+        /// <summary>Piece.m_onlyInBiome: refused when the biome flag at the piece is not in the mask.</summary>
+        /// <summary>Bed.CheckFire: the bed's own position inside a Heat area (a fire or stove close enough); without one the bed cannot be slept in.</summary>
+        public static List<PlanProblem> BedHeat(IList<PlacedPiece> pieces)
+        {
+            var res = new List<PlanProblem>();
+            foreach (var bed in pieces.Where(x => x.Planned && x.Geo.CoverPoints.Any(c => c.Kind == "bed")))
+            {
+                var warm = pieces.Any(o => o.Lit && o.Geo.HeatAreas.Any(h => V3.Dist(o.Pos + o.Rot.Rotate(new V3(h.Key.X * o.Scale.X, h.Key.Y * o.Scale.Y, h.Key.Z * o.Scale.Z)), bed.Pos) < h.Value));
+                if (!warm) res.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "bed-heat", Severity = "warning", Piece = bed.Id, Detail = bed.Geo.Prefab + " is in no heat area: it can be claimed but the game refuses sleeping in it ($msg_bednofire)" }));
+            }
+            return res;
+        }
+
+        public static PlanProblem Biome(PlacedPiece p, int biome)
+        {
+            return PlanRuleBook.Stamp(p.Geo.OnlyInBiome != 0 && (p.Geo.OnlyInBiome & biome) == 0 ? new PlanProblem { Rule = "wrong-biome", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " can only be built in biome mask " + p.Geo.OnlyInBiome + ", this is " + biome } : null);
+        }
+
+        public static PlanProblem Cultivated(PlacedPiece p, bool? cultivated)
+        {
+            return PlanRuleBook.Stamp(p.Geo.CultivatedGroundOnly && cultivated.HasValue && !cultivated.Value ? new PlanProblem { Rule = "needs-cultivated", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " needs cultivated ground (paint under the hoe) under it" } : null);
+        }
+
+        /// <summary>Piece.m_blockRadius: a piece whose name is in m_blockingPieces with a collider within the radius of this piece's point refuses it (the game looks at the "piece" layer).</summary>
+        public static List<PlanProblem> BlockRadius(IList<PlacedPiece> pieces)
+        {
+            var res = new List<PlanProblem>();
+            foreach (var p in pieces.Where(x => x.Planned && x.Geo.BlockRadius > 0 && x.Geo.BlockingNames.Count > 0))
+                foreach (var o in pieces)
+                {
+                    if (o == p || !p.Geo.BlockingNames.Contains(o.Geo.PieceName)) continue;
+                    if (Math.Abs(o.Pos.X - p.Pos.X) > p.Geo.BlockRadius + 6 || Math.Abs(o.Pos.Z - p.Pos.Z) > p.Geo.BlockRadius + 6) continue;
+                    var near = o.Boxes(l => l == "piece").Any(b => V3.Dist(b.ClosestPoint(p.Pos), p.Pos) <= p.Geo.BlockRadius);
+                    if (near) { res.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "block-radius", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " is within " + p.Geo.BlockRadius + " m of " + o.Geo.Prefab + " (" + o.Id + "), which it may not be near" })); break; }
+                }
+            return res;
+        }
+
+        /// <summary>Piece.m_mustConnectTo: needs an object whose prefab name contains the token with a collider within the connect radius; with m_mustBeAboveConnected the first thing straight below the piece must be that object.</summary>
+        public static List<PlanProblem> MustConnect(IList<PlacedPiece> pieces)
+        {
+            var res = new List<PlanProblem>();
+            foreach (var p in pieces.Where(x => x.Planned && x.Geo.MustConnectTo.Length > 0))
+            {
+                var found = false;
+                foreach (var o in pieces)
+                {
+                    if (o == p || o.Geo.Prefab.IndexOf(p.Geo.MustConnectTo, StringComparison.Ordinal) < 0) continue;
+                    if (!o.Boxes().Any(b => V3.Dist(b.ClosestPoint(p.Pos), p.Pos) <= p.Geo.ConnectRadius)) continue;
+                    if (p.Geo.MustBeAboveConnected)
+                    {
+                        double best = double.PositiveInfinity; PlacedPiece first = null;
+                        foreach (var q in pieces)
+                        {
+                            if (q == p) continue;
+                            foreach (var b in q.Boxes()) { var t = b.RayT(p.Pos, new V3(0, -1, 0), 400); if (t.HasValue && t.Value < best) { best = t.Value; first = q; } }
+                        }
+                        if (first != o) continue;
+                    }
+                    found = true; break;
+                }
+                if (!found) res.Add(PlanRuleBook.Stamp(new PlanProblem { Rule = "must-connect", Severity = "error", Piece = p.Id, Detail = p.Geo.Prefab + " must connect to a " + p.Geo.MustConnectTo + " within " + p.Geo.ConnectRadius + " m" + (p.Geo.MustBeAboveConnected ? " that is directly below it" : "") }));
+            }
+            return res;
         }
 
         public static PlanProblem Grid(PlacedPiece p, double yawDeg)

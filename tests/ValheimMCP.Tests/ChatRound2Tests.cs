@@ -235,7 +235,7 @@ public class DayClockTests
     }
     [Fact] public void TheNightSkipsOnlyWhenEveryCharacterIsInBed()
     {
-        Assert.True(DayClock.NightSkips(0.9, 3, 3)); Assert.False(DayClock.NightSkips(0.9, 3, 2)); Assert.False(DayClock.NightSkips(0.9, 0, 0)); Assert.False(DayClock.NightSkips(0.4, 2, 2));
+        Assert.True(DayClock.NightSkips(0.9, 3, 3)); Assert.False(DayClock.NightSkips(0.9, 3, 3, true)); Assert.False(DayClock.NightSkips(0.9, 3, 3, false, 5)); Assert.True(DayClock.NightSkips(0.9, 3, 3, false, 12)); Assert.False(DayClock.NightSkips(0.9, 3, 2)); Assert.False(DayClock.NightSkips(0.9, 0, 0)); Assert.False(DayClock.NightSkips(0.4, 2, 2));
     }
 }
 

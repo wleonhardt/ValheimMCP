@@ -164,6 +164,27 @@ namespace HubnerExt
         public static bool OutsideRequiredBiome(int requiredMask, int biome) { return requiredMask != 0 && (requiredMask & biome) == 0; }
     }
 
+    internal sealed class ShieldFact { public double X, Y, Z, Radius; }
+
+    internal static class ShieldRules
+    {
+        /// <summary>ShieldGenerator.UpdateShield: the dome radius is minRadius + fuel / maxFuel x (maxRadius - minRadius), and 0 with no fuel when the generator switches off.</summary>
+        public static double Radius(double fuel, double maxFuel, double minRadius, double maxRadius, bool offWhenNoFuel)
+        {
+            if (offWhenNoFuel && fuel <= 0) return 0;
+            var ratio = maxFuel > 0 ? Math.Max(0, Math.Min(1, fuel / maxFuel)) : 0;
+            return minRadius + ratio * (maxRadius - minRadius);
+        }
+
+        /// <summary>ShieldGenerator.IsInsideShield: the distance to the dome centre is under its radius (3D).</summary>
+        public static bool Inside(IEnumerable<ShieldFact> shields, double x, double y, double z)
+        {
+            if (shields == null) return false;
+            foreach (var s in shields) { var dx = s.X - x; var dy = s.Y - y; var dz = s.Z - z; if (s.Radius > 0 && Math.Sqrt(dx * dx + dy * dy + dz * dz) < s.Radius) return true; }
+            return false;
+        }
+    }
+
     internal static class AbsenceRules
     {
         /// <summary>What an absence of the given length changes. Fire: uncapped catch-up (the fuel lasts fuel x secPerFuel s). Smelter: at most 3600 s of work. Pickable and fermenter: absolute timestamps.</summary>

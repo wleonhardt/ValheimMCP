@@ -11,7 +11,7 @@ namespace HubnerExt
     internal static class CombatRules
     {
         /// <summary>HitData.DamageTypes.ApplyArmor is applied to these: not the generic damage, chop or pickaxe.</summary>
-        public static readonly string[] Armoured = { "blunt", "slash", "pierce", "fire", "frost", "lightning", "poison", "spirit" };
+        public static readonly string[] Armoured = { "blunt", "slash", "pierce", "fire", "frost", "lightning", "poison", "spirit", "nonPlayer" };
 
         public static double Multiplier(Mod m)
         {
@@ -56,6 +56,17 @@ namespace HubnerExt
                 if (Array.IndexOf(Armoured, kv.Key) >= 0) armouredSum += v; else other += v;
             }
             return other + Armor(armouredSum, armor);
+        }
+
+        /// <summary>
+        ///     The same hit in a world above level 0 (Character.RPC_Damage, HitData.GetTotalDamage): a player hitting a creature meets worldLevel x Game.m_worldLevelEnemyBaseAC (100) of armour, as a creature has none
+        ///     of its own; a creature hitting anyone adds worldLevel x Game.m_worldLevelEnemyBaseDamage (85) flat after the armour. <paramref name="armor" /> is the target's body armour (a player's), ignored for a creature target.
+        /// </summary>
+        public static double HitInWorld(IDictionary<string, double> damage, IDictionary<string, Mod> mods, double armor, int attackerLevel, int worldLevel, bool attackerIsPlayer)
+        {
+            var ac = attackerIsPlayer && worldLevel > 0 ? worldLevel * 100.0 : armor;
+            var hit = Hit(damage, mods, ac, attackerLevel);
+            return !attackerIsPlayer && worldLevel > 0 ? hit + worldLevel * 85.0 : hit;
         }
 
         public static int HitsToDie(double health, double hit) { return hit <= 0 ? int.MaxValue : (int)Math.Ceiling(health / hit - 1e-9); }
@@ -128,6 +139,8 @@ namespace HubnerExt
     {
         public bool AtDay = true, AtNight = true; public string RequiredKey = ""; public double MinAltitude = -1000, MaxAltitude = 1000, MinDistanceFromCenter, MaxDistanceFromCenter;
         public double MinTilt, MaxTilt = 35; public int BiomeMask;
+        public int BiomeAreaMask = 3;                      // SpawnSystem.SpawnData.m_biomeArea: 1 edge of the biome, 2 its middle, 3 both
+        public string RequiredPersistentEvent = ""; public IList<string> RequiredEnvironments = new List<string>();
     }
 
     /// <summary>
@@ -137,10 +150,13 @@ namespace HubnerExt
     /// </summary>
     internal static class SpawnRules
     {
-        public static List<string> Failing(SpawnConditions c, int biome, double x, double y, double z, double tiltDeg, bool isDay, Func<string, bool> keySet)
+        public static List<string> Failing(SpawnConditions c, int biome, double x, double y, double z, double tiltDeg, bool isDay, Func<string, bool> keySet, int biomeArea = 0)
         {
             var f = new List<string>();
             if ((c.BiomeMask & biome) == 0) f.Add("wrong biome");
+            if (biomeArea > 0 && (c.BiomeAreaMask & biomeArea) == 0) f.Add("the " + (biomeArea == 1 ? "edge" : "middle") + " of the biome is not allowed (SpawnData.m_biomeArea)");
+            if (!string.IsNullOrEmpty(c.RequiredPersistentEvent)) f.Add("needs the persistent event " + c.RequiredPersistentEvent + " to be running there (not read)");
+            if (c.RequiredEnvironments != null && c.RequiredEnvironments.Count > 0) f.Add("needs the weather to be one of " + string.Join(", ", c.RequiredEnvironments.ToArray()) + " (not read)");
             if (!string.IsNullOrEmpty(c.RequiredKey) && !keySet(c.RequiredKey)) f.Add("needs the global key " + c.RequiredKey);
             if (isDay && !c.AtDay) f.Add("not by day");
             if (!isDay && !c.AtNight) f.Add("not by night");

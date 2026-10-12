@@ -34,11 +34,12 @@ namespace HubnerExt
             }
             catch (Exception ex) { U.Once("world_clock.characters", ex); }
             var skipping = false; try { skipping = em.IsTimeSkipping(); } catch (Exception ex) { U.Once("world_clock.skip", ex); }
+            var sinceSleep = double.PositiveInfinity; try { var f0 = typeof(Game).GetField("m_lastSleepTime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public); if (f0 != null && Game.instance != null) sinceSleep = ZNet.instance.GetTimeSeconds() - (double)f0.GetValue(Game.instance); } catch (Exception ex) { U.Once("world_clock.lastSleep", ex); }
             return U.Json("{\"time\":" + U.N(Math.Round(total, 1)) + ",\"day\":" + (int)(total / len) + ",\"dayLengthSec\":" + U.N(len) + ",\"dayFraction\":" + U.N(Math.Round(f, 3)) + ",\"rawFraction\":" + U.N(Math.Round(DayClock.Raw(total, len), 3)) +
                 ",\"phase\":" + U.S(DayClock.Phase(f)) + ",\"isDay\":" + B(DayClock.IsDay(f)) + ",\"isAfternoon\":" + B(DayClock.IsAfternoon(f)) + ",\"isNight\":" + B(DayClock.IsNight(f)) +
                 ",\"secondsToDusk\":" + U.N(Math.Round(DayClock.SecondsUntil(total, len, 0.75))) + ",\"secondsToDawn\":" + U.N(Math.Round(DayClock.SecondsUntil(total, len, 0.25))) +
                 ",\"sleepWindow\":" + B(DayClock.IsAfternoon(f) || DayClock.IsNight(f)) + ",\"characters\":" + chars + ",\"inBed\":" + inBed + ",\"notInBed\":[" + string.Join(",", notInBed.Select(U.S).ToArray()) + "]," +
-                "\"nightSkips\":" + B(DayClock.NightSkips(f, chars, inBed)) + ",\"timeSkipping\":" + B(skipping) + "}");
+                "\"nightSkips\":" + B(DayClock.NightSkips(f, chars, inBed, skipping, sinceSleep)) + ",\"timeSkipping\":" + B(skipping) + ",\"secondsSinceLastSleep\":" + (double.IsInfinity(sinceSleep) ? "null" : U.N(Math.Round(sinceSleep))) + "}");
         }
 
         static string B(bool v) { return v ? "true" : "false"; }

@@ -152,3 +152,22 @@ public class WearAndAbsenceRulesTests
         Assert.False(AbsenceRules.FireOutWithin(10, 3600, 8 * 3600));
     }
 }
+
+public class ShieldRulesTests
+{
+    [Fact] public void TheDomeGrowsWithTheFuel()
+    {
+        Assert.Equal(10, ShieldRules.Radius(0, 100, 10, 30, false), 6);                 // empty but not switched off: the minimum
+        Assert.Equal(0, ShieldRules.Radius(0, 100, 10, 30, true), 6);                   // switched off with no fuel
+        Assert.Equal(20, ShieldRules.Radius(50, 100, 10, 30, true), 6);
+        Assert.Equal(30, ShieldRules.Radius(500, 100, 10, 30, true), 6);                // over full counts as full
+        Assert.Equal(10, ShieldRules.Radius(5, 0, 10, 30, true), 6);
+    }
+
+    [Fact] public void InsideIsTheDistanceUnderTheRadius()
+    {
+        var s = new[] { new ShieldFact { X = 0, Y = 0, Z = 0, Radius = 20 } };
+        Assert.True(ShieldRules.Inside(s, 19, 0, 0)); Assert.False(ShieldRules.Inside(s, 20, 0, 0)); Assert.False(ShieldRules.Inside(s, 15, 15, 0));
+        Assert.False(ShieldRules.Inside(new[] { new ShieldFact { Radius = 0 } }, 0, 0, 0)); Assert.False(ShieldRules.Inside(null, 0, 0, 0));
+    }
+}

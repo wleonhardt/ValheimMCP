@@ -27,13 +27,13 @@ namespace HubnerExt
             return new PlantFacts { Prefab = go.name, GrowRadius = pl.m_growRadius, GrowTime = pl.m_growTime, GrowTimeMax = pl.m_growTimeMax, BiomeMask = (int)pl.m_biome, NeedCultivated = pl.m_needCultivatedGround, TolerateHeat = pl.m_tolerateHeat, TolerateCold = pl.m_tolerateCold };
         }
 
-        static int BiomeAt(double x, double z)
+        internal static int BiomeAt(double x, double z)
         {
             try { var wg = WorldGenerator.instance; if (wg != null) return (int)wg.GetBiome((float)x, (float)z); } catch (Exception ex) { U.Once("PlantTools.biome", ex); }
             return 0;
         }
 
-        static bool? CultivatedAt(Vector3 p)
+        internal static bool? CultivatedAt(Vector3 p)
         {
             try { var hm = Heightmap.FindHeightmap(p); if (hm != null) return hm.IsCultivated(p); } catch (Exception ex) { U.Once("PlantTools.cultivated", ex); }
             return null;
@@ -76,12 +76,13 @@ namespace HubnerExt
             var world = World(x0 - 4, z0 - 4, x1 + 4, z1 + 4, null);
             var planned = plants.Select(p => p.Key).ToList(); var plannedSet = new HashSet<PlacedPiece>(planned); var all = new List<PlacedPiece>(world); all.AddRange(planned);
             var rows = new List<string>(); var byStatus = new Dictionary<string, int>(); var unknown = 0;
+            var shields = ReaderTools.ShieldsNear(x0, z0, x1, z1);
             var judged = new Dictionary<PlacedPiece, string>();                       // Plant.HaveGrowSpace: another plant blocks only while it is Healthy, and the game updates plants one after the other: the first of a crowd is healthy, those after it have no room
             foreach (var kv in plants)
             {
                 var p = kv.Key; var f = kv.Value; var pos = new Vector3((float)p.Pos.X, (float)p.Pos.Y, (float)p.Pos.Z);
                 var others = all.Where(q => q != p && Math.Abs(q.Pos.X - p.Pos.X) < 40 && Math.Abs(q.Pos.Z - p.Pos.Z) < 40).ToList();
-                var v = PlantRules.Judge(f, p.Pos, BiomeAt(p.Pos.X, p.Pos.Z), CultivatedAt(pos), others, q => plannedSet.Contains(q) || q.Geo.Prefab.StartsWith("sapling", StringComparison.OrdinalIgnoreCase) || q.Geo.Prefab.EndsWith("_sapling", StringComparison.OrdinalIgnoreCase), q => { string st; return !plannedSet.Contains(q) || (judged.TryGetValue(q, out st) && st == "Healthy"); });
+                var v = PlantRules.Judge(f, p.Pos, BiomeAt(p.Pos.X, p.Pos.Z), CultivatedAt(pos), others, q => plannedSet.Contains(q) || q.Geo.Prefab.StartsWith("sapling", StringComparison.OrdinalIgnoreCase) || q.Geo.Prefab.EndsWith("_sapling", StringComparison.OrdinalIgnoreCase), q => { string st; return !plannedSet.Contains(q) || (judged.TryGetValue(q, out st) && st == "Healthy"); }, ShieldRules.Inside(shields, p.Pos.X, p.Pos.Y, p.Pos.Z));
                 judged[p] = v.Status; byStatus[v.Status] = (byStatus.ContainsKey(v.Status) ? byStatus[v.Status] : 0) + 1; if (v.Unknown) unknown++;
                 rows.Add("{\"key\":" + U.S(p.Id) + ",\"prefab\":" + U.S(f.Prefab) + ",\"pos\":" + U.V(pos) + ",\"status\":" + U.S(v.Status) + ",\"why\":" + U.S(v.Why) + ",\"unknown\":" + B(v.Unknown) + ",\"growSeconds\":[" + U.N(f.GrowTime) + "," + U.N(f.GrowTimeMax) + "]}");
             }
@@ -105,7 +106,8 @@ namespace HubnerExt
             double cx = U.D(a, "x", 0), cz = U.D(a, "z", 0), rad = Math.Min(100, Math.Max(1, U.D(a, "radius", 30))); var limit = Math.Max(1, (int)U.D(a, "limit", 100));
             if (!WorldBounds.InWorld(cx, 0, cz)) return ToolOutput.Err("x and z must be finite and inside the world");
             var world = World(cx - rad - 4, cz - rad - 4, cx + rad + 4, cz + rad + 4, null);
-            var now = ZNet.instance != null ? ZNet.instance.GetTime().Ticks : DateTime.UtcNow.Ticks; var cache = new Dictionary<int, PlantFacts>(); var rows = new List<string>(); var total = 0; var judgedIds = new Dictionary<string, string>();       // see plant_check: a plant blocks its neighbours only while it is Healthy, so the first of a crowd grows
+            var now = ZNet.instance != null ? ZNet.instance.GetTime().Ticks : DateTime.UtcNow.Ticks; var cache = new Dictionary<int, PlantFacts>(); var shields = ReaderTools.ShieldsNear(cx - rad, cz - rad, cx + rad, cz + rad);
+            var rows = new List<string>(); var total = 0; var judgedIds = new Dictionary<string, string>();       // see plant_check: a plant blocks its neighbours only while it is Healthy, so the first of a crowd grows
             foreach (var z in Zdos.InBox((float)(cx - rad), (float)(cz - rad), (float)(cx + rad), (float)(cz + rad)))
             {
                 var h = z.GetPrefab(); PlantFacts f;
@@ -116,7 +118,7 @@ namespace HubnerExt
                 var planted = z.GetLong("plantTime", now); var age = Math.Max(0, (now - planted) / (double)Husbandry.TicksPerSecond);
                 var me = U.Id(z); var pp = new V3(p.x, p.y, p.z);
                 var others = world.Where(q => q.Id != me && Math.Abs(q.Pos.X - pp.X) < 40 && Math.Abs(q.Pos.Z - pp.Z) < 40).ToList();
-                var v = PlantRules.Judge(f, pp, BiomeAt(p.x, p.z), CultivatedAt(p), others, q => q.Geo.Prefab.StartsWith("sapling", StringComparison.OrdinalIgnoreCase) || q.Geo.Prefab.EndsWith("_sapling", StringComparison.OrdinalIgnoreCase), q => { string st; return judgedIds.TryGetValue(q.Id, out st) && st == "Healthy"; });
+                var v = PlantRules.Judge(f, pp, BiomeAt(p.x, p.z), CultivatedAt(p), others, q => q.Geo.Prefab.StartsWith("sapling", StringComparison.OrdinalIgnoreCase) || q.Geo.Prefab.EndsWith("_sapling", StringComparison.OrdinalIgnoreCase), q => { string st; return judgedIds.TryGetValue(q.Id, out st) && st == "Healthy"; }, ShieldRules.Inside(shields, pp.X, pp.Y, pp.Z));
                 judgedIds[me] = v.Status;
                 rows.Add("{\"id\":" + U.S(me) + ",\"live\":" + LiveHover(z) + ",\"prefab\":" + U.S(f.Prefab) + ",\"pos\":" + U.V(p) + ",\"ageSeconds\":" + U.N(Math.Round(age)) + ",\"growSeconds\":[" + U.N(f.GrowTime) + "," + U.N(f.GrowTimeMax) + "],\"readyFromSeconds\":" + U.N(Math.Round(Math.Max(0, f.GrowTime - age))) + ",\"readyBySeconds\":" + U.N(Math.Round(Math.Max(0, f.GrowTimeMax - age))) + ",\"hadTimeToGrow\":" + B(age >= f.GrowTimeMax) + ",\"status\":" + U.S(v.Status) + ",\"why\":" + U.S(v.Why) + "}");
             }

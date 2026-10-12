@@ -406,7 +406,7 @@ namespace HubnerExt
                 if ((pos - _spotPos).magnitude > WalkFacts.SameSpotRadius) { _spotPos = pos; _spotStalls = 0; }
                 _spotStalls++; _stallsTotal++;
                 var rise = NoJump ? float.NaN : RiseAhead(p, dir, Mathf.Max(1.5f, HopMax + 0.2f));
-                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes, !p.IsEncumbered() && !(p.IsSwimming() && !p.IsOnGround()), p.IsEncumbered(), HopMax);           // Player.UpdateStamina: no regeneration while encumbered or swimming off the ground
+                var act = StallLadder.Pick(_spotStalls, _stallsTotal, rise, slope, goesUp, p.IsSwimming(), HazardAhead(pos, dir), stam, Run, _sideSteps, _reroutes, !p.IsEncumbered() && !(p.IsSwimming() && !p.IsOnGround()), p.IsEncumbered(), HopMax, Mathf.Max(0.15f, p.m_jumpStaminaUsage * 1.05f / Mathf.Max(1f, p.GetMaxStamina())));           // Player.UpdateStamina: no regeneration while encumbered or swimming off the ground
                 _lastStall = act + " (rise " + (float.IsNaN(rise) ? "none" : U.N(Math.Round(rise, 2))) + ", slope " + U.N(Math.Round(slope)) + ")";
                 _lastProgT = now;
                 switch (act)

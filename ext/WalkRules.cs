@@ -45,10 +45,10 @@ namespace HubnerExt
         }
 
         /// <param name="encumbered">Character.Jump and CheckRun do nothing while encumbered: a hop or a run-up would only burn stalls</param>
-        public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates, bool encumbered, float hopMax = WalkFacts.HopMax)
+        public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates, bool encumbered, float hopMax = WalkFacts.HopMax, float hopMinStamina = 0.15f)
         {
             if (stallsAtSpot >= WalkFacts.GiveUpStallsAtOneSpot || stallsTotal >= WalkFacts.GiveUpStallsTotal) return StallAction.GiveUp;
-            if (!encumbered && !inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= hopMax && staminaFrac > 0.15f) return StallAction.Hop;
+            if (!encumbered && !inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= hopMax && staminaFrac > hopMinStamina) return StallAction.Hop;       // Character.Jump: HaveStamina(m_jumpStaminaUsage), an absolute amount: the caller turns it into a fraction of the maximum
             if (!encumbered && routeGoesUp && slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && staminaFrac > WalkFacts.RunMinStamina && !running) return StallAction.RunUp;
             if (staminaFrac < 0.3f) return regenerates ? StallAction.Rest : StallAction.GiveUp;
             if (sideSteps < 2) return StallAction.SideStep;

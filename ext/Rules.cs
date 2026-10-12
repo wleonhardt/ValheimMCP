@@ -193,7 +193,7 @@ namespace HubnerExt
         public static bool CanSleepNow(double f, double secondsSinceWake) { return (IsAfternoon(f) || IsNight(f)) && secondsSinceWake > SleepCooldownSeconds; }
 
         /// <summary>Game.UpdateSleeping on the server: the night is skipped when the clock allows it and EVERY character ZDO is in bed (and there is at least one).</summary>
-        public static bool NightSkips(double f, int characters, int inBed) { return (IsAfternoon(f) || IsNight(f)) && characters > 0 && inBed == characters; }
+        public static bool NightSkips(double f, int characters, int inBed, bool timeSkipping = false, double secondsSinceLastSleep = double.PositiveInfinity) { return !timeSkipping && (IsAfternoon(f) || IsNight(f)) && characters > 0 && inBed == characters && !(secondsSinceLastSleep < 10.0); }       // also not while a skip runs, and not within 10 s of the last one (Game.UpdateSleeping)
     }
 
     /// <summary>The rows of the ownership summary.</summary>

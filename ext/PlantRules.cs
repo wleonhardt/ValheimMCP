@@ -30,7 +30,7 @@ namespace HubnerExt
         /// <param name="cultivated">null = unknown (zone not loaded)</param>
         /// <param name="others">everything else standing round it (pieces, rocks, trees) and the other plants as <see cref="PlantFacts" />-less pieces</param>
         /// <param name="isPlant">tells whether a placed piece is itself a plant (plants only block while healthy; the caller says which are)</param>
-        public static PlantVerdict Judge(PlantFacts f, V3 pos, int biome, bool? cultivated, IList<PlacedPiece> others, Func<PlacedPiece, bool> isPlant, Func<PlacedPiece, bool> plantHealthy)
+        public static PlantVerdict Judge(PlantFacts f, V3 pos, int biome, bool? cultivated, IList<PlacedPiece> others, Func<PlacedPiece, bool> isPlant, Func<PlacedPiece, bool> plantHealthy, bool shielded = false)
         {
             var v = new PlantVerdict();
             if ((biome & f.BiomeMask) == 0) { v.Status = "WrongBiome"; v.Why = "biome " + biome + " is not in the plant's biomes (" + f.BiomeMask + ")"; return v; }
@@ -39,8 +39,8 @@ namespace HubnerExt
                 if (!cultivated.HasValue) { v.Unknown = true; v.Why = "cultivated ground could not be read (zone not loaded)"; }
                 else if (!cultivated.Value) { v.Status = "NotCultivated"; v.Why = "the ground is not cultivated (paint green under 0.5)"; return v; }
             }
-            if (!f.TolerateHeat && biome == AshLands) { v.Status = "TooHot"; v.Why = "Ashlands, no heat tolerance"; return v; }
-            if (!f.TolerateCold && (biome == DeepNorth || biome == Mountain)) { v.Status = "TooCold"; v.Why = "cold biome, no cold tolerance"; return v; }
+            if (!f.TolerateHeat && biome == AshLands && !shielded) { v.Status = "TooHot"; v.Why = "Ashlands, no heat tolerance"; return v; }
+            if (!f.TolerateCold && (biome == DeepNorth || biome == Mountain) && !shielded) { v.Status = "TooCold"; v.Why = "cold biome, no cold tolerance"; return v; }
 
             var up = new V3(0, 1, 0);
             foreach (var o in others)

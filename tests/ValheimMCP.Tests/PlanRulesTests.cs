@@ -439,3 +439,105 @@ public class SnapSeamTests
         Assert.Empty(SnapSeams.Find(new[] { a, b }));
     }
 }
+
+public class PlacementFlagTests
+{
+    static PieceGeo Geo(string prefab, string name = null) => new PieceGeo { Prefab = prefab, PieceName = name ?? prefab, Colliders = { new ColliderBox { Centre = new V3(0, 0.5, 0), Half = new V3(0.5, 0.5, 0.5), Layer = "piece" } } };
+
+    [Fact] public void OnlyInBiomeRefusesAnotherBiome()
+    {
+        var g = Geo("flag"); g.OnlyInBiome = 8;                                              // Black Forest only
+        var p = new PlacedPiece { Id = "a", Geo = g, Pos = new V3(0, 0, 0) };
+        Assert.Null(PlanChecks.Biome(p, 8)); Assert.Null(PlanChecks.Biome(p, 8 | 1));
+        var bad = PlanChecks.Biome(p, 1);
+        Assert.Equal("wrong-biome", bad.Rule); Assert.Equal("error", bad.Severity); Assert.Equal("WrongBiome", bad.Code);
+        Assert.Null(PlanChecks.Biome(new PlacedPiece { Id = "b", Geo = Geo("any"), Pos = new V3(0, 0, 0) }, 1));      // no restriction
+    }
+
+    [Fact] public void CultivatedGroundOnlyNeedsPaintButUnknownIsNoError()
+    {
+        var g = Geo("crop"); g.CultivatedGroundOnly = true; var p = new PlacedPiece { Id = "a", Geo = g, Pos = new V3(0, 0, 0) };
+        Assert.Equal("needs-cultivated", PlanChecks.Cultivated(p, false).Rule);
+        Assert.Null(PlanChecks.Cultivated(p, true)); Assert.Null(PlanChecks.Cultivated(p, null));
+    }
+
+    [Fact] public void ABlockedRadiusRefusesAPieceOfAListedName()
+    {
+        var g = Geo("beehive"); g.BlockRadius = 4; g.BlockingNames.Add("beehive");
+        var a = new PlacedPiece { Id = "new", Geo = g, Pos = new V3(0, 0, 0) };
+        var near = new PlacedPiece { Id = "old", Geo = g, Pos = new V3(3, 0, 0), Planned = false };
+        var far = new PlacedPiece { Id = "far", Geo = g, Pos = new V3(10, 0, 0), Planned = false };
+        Assert.Single(PlanChecks.BlockRadius(new[] { a, near }));
+        Assert.Empty(PlanChecks.BlockRadius(new[] { a, far }));
+        Assert.Empty(PlanChecks.BlockRadius(new[] { a, new PlacedPiece { Id = "other", Geo = Geo("wall"), Pos = new V3(1, 0, 0), Planned = false } }));      // a different name does not block
+    }
+
+    [Fact] public void MustConnectNeedsTheNamedObjectNear()
+    {
+        var g = Geo("collector"); g.MustConnectTo = "Root"; g.ConnectRadius = 1;
+        var c = new PlacedPiece { Id = "c", Geo = g, Pos = new V3(0, 0, 0) };
+        var root = new PlacedPiece { Id = "r", Geo = Geo("YggdrasilRoot"), Pos = new V3(0.2, 0, 0), Planned = false };
+        Assert.Empty(PlanChecks.MustConnect(new[] { c, root }));
+        Assert.Single(PlanChecks.MustConnect(new[] { c }));
+        Assert.Single(PlanChecks.MustConnect(new[] { c, new PlacedPiece { Id = "r2", Geo = Geo("YggdrasilRoot"), Pos = new V3(5, 0, 0), Planned = false } }));
+    }
+
+    [Fact] public void MustBeAboveConnectedNeedsItDirectlyBelow()
+    {
+        var g = Geo("collector"); g.MustConnectTo = "Root"; g.ConnectRadius = 3; g.MustBeAboveConnected = true;
+        var c = new PlacedPiece { Id = "c", Geo = g, Pos = new V3(0, 2, 0) };
+        var rootBelow = new PlacedPiece { Id = "r", Geo = Geo("YggdrasilRoot"), Pos = new V3(0, 0.5, 0), Planned = false };
+        Assert.Empty(PlanChecks.MustConnect(new[] { c, rootBelow }));
+        var rootAside = new PlacedPiece { Id = "r", Geo = Geo("YggdrasilRoot"), Pos = new V3(1.8, 1.5, 0), Planned = false };
+        Assert.Single(PlanChecks.MustConnect(new[] { c, rootAside }));                     // within reach but nothing under the piece
+    }
+
+    [Fact] public void RayTGivesTheEntryDistanceAndNothingFromInside()
+    {
+        var b = Obb.Make(new V3(0, 0, 0), new V3(1, 1, 1), Quat.Identity);
+        Assert.Equal(4, b.RayT(new V3(5, 0, 0), new V3(-1, 0, 0), 100).Value, 6);
+        Assert.Null(b.RayT(new V3(0, 0, 0), new V3(1, 0, 0), 100)); Assert.Null(b.RayT(new V3(5, 5, 0), new V3(-1, 0, 0), 100));
+    }
+}
+
+public class SupportBoxTests
+{
+    [Fact] public void ANonBoxColliderIsItsWorldAxisBounds()
+    {
+        var g = new PieceGeo { Prefab = "log", Colliders = { new ColliderBox { Centre = new V3(0, 0, 0), Half = new V3(0.1, 0.1, 3), Layer = "piece", NonBox = true } } };
+        var p = new PlacedPiece { Id = "l", Geo = g, Pos = new V3(0, 0, 0), Rot = Quat.Yaw(45) };
+        var plain = p.Boxes().Single(); var aabb = p.SupportBoxes(null).Single();
+        Assert.Equal(plain.Extent(new V3(1, 0, 0)), aabb.Half.X, 6);                    // the axis-aligned box that holds the turned log
+        Assert.True(aabb.Half.X > 2 && aabb.Half.Z > 2);
+        Assert.Equal(1, Math.Abs(aabb.Axes[0].X), 6);                                   // world axes
+    }
+
+    [Fact] public void ABoxColliderStaysOriented()
+    {
+        var g = new PieceGeo { Prefab = "beam", Colliders = { new ColliderBox { Centre = new V3(0, 0, 0), Half = new V3(0.1, 0.1, 3), Layer = "piece" } } };
+        var p = new PlacedPiece { Id = "b", Geo = g, Pos = new V3(0, 0, 0), Rot = Quat.Yaw(45) };
+        Assert.Equal(0.1, p.SupportBoxes(null).Single().Half.X, 6);
+    }
+}
+
+public class BedHeatTests
+{
+    static PieceGeo Bed() => new PieceGeo { Prefab = "bed", CoverPoints = { new CoverPoint { Kind = "bed", Local = new V3(0, 0.5, 0), MinCover = 0.8 } } };
+    static PieceGeo Fire() => new PieceGeo { Prefab = "fire_pit", HeatAreas = { new KeyValuePair<V3, double>(new V3(0, 0.5, 0), 3) } };
+
+    [Fact] public void ABedNeedsAHeatAreaOverIt()
+    {
+        var bed = new PlacedPiece { Id = "bed", Geo = Bed(), Pos = new V3(0, 0, 0) };
+        Assert.Equal("bed-heat", Assert.Single(PlanChecks.BedHeat(new[] { bed })).Rule);
+        Assert.Empty(PlanChecks.BedHeat(new[] { bed, new PlacedPiece { Id = "f", Geo = Fire(), Pos = new V3(2, 0, 0) } }));
+        Assert.Single(PlanChecks.BedHeat(new[] { bed, new PlacedPiece { Id = "f", Geo = Fire(), Pos = new V3(6, 0, 0) } }));                // too far
+    }
+
+    [Fact] public void AnUnlitWorldFireGivesNoHeat()
+    {
+        var bed = new PlacedPiece { Id = "bed", Geo = Bed(), Pos = new V3(0, 0, 0) };
+        Assert.Single(PlanChecks.BedHeat(new[] { bed, new PlacedPiece { Id = "f", Geo = Fire(), Pos = new V3(2, 0, 0), Planned = false, Lit = false } }));
+    }
+
+    [Fact] public void OnlyPlannedBedsAreJudged() { Assert.Empty(PlanChecks.BedHeat(new[] { new PlacedPiece { Id = "bed", Geo = Bed(), Pos = new V3(0, 0, 0), Planned = false } })); }
+}
