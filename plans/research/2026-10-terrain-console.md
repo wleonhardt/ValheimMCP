@@ -1,24 +1,36 @@
 # Terrain editing through World Edit Commands (option C), analysis
 
-Status: draft, written before any live check. Everything here comes from reading code and from decision 0006.
+Status: analysed from the installed mod's decompiled code (WorldEditCommands.dll read from the sandbox client). The wrapper is designed but not built. Nothing here has run.
 
 ## Question
 
-World Edit Commands (a separate client mod) adds a `terrain` console command that sets height and paint over a radius. Can ValheimMCP offer it safely, so an agent does not need the hoe-op route of `terrain_paint` and `terrain_level`?
+World Edit Commands (WEC) adds a `terrain` console command. Can ValheimMCP offer it safely, so a level can be exact and leave no objects behind?
 
-## What is known
+## What the command does (decompiled `TerrainCommand`, `Terrain`, `TerrainParameters`)
 
-- The command is a console command, so it would go through `run_command`, which has an allow list in `config/valheimmcp.client.yml`. The list is a security setting. Do not widen it without the user saying so.
-- Our own tools already apply the game's registered terrain ops and save the terrain data of each zone first (`ext/TerrainEdit.cs`). A console wrapper would need the same snapshot before and the same undo after, or it is an unguarded write.
-- A console command knows nothing of `Plans.Protected`, guard stones or no-build locations, and it is not journaled.
+- It is WEC's, not vanilla: the vanilla console has no `terrain` command (only `optterrain`). It is registered through ServerDevcommands' `Helper.Command`.
+- It edits the `TerrainComp` arrays of every compiler in range directly (`m_modifiedHeight`, `m_levelDelta`, `m_smoothDelta`, `m_modifiedPaint`, `m_paintMask`), then `m_operations++`, `compiler.Save(false)` and `m_hmap.Poke`. So every change lands in the zone's TCData, exactly where `terrain_paint` snapshots. Undo by restoring the TCData bytes is therefore complete for everything except `reset` (below). The heights change at once, so a before and after TCData diff works in the same call (unlike the legacy `digg` strokes).
+- Syntax is `terrain from=x,z circle=r | rect=w,d [angle=0] level=y | raise=m | lower=m  [paint=name] [smooth=s]`. `level=y` is an absolute height. Also `reset`, `void`, `slope`, `min`, `max`, `chance`, `blockcheck`, `offset`, `within`, `id`, `ignore`.
+- `reset` also destroys every older terrain modifier object within radius + 1 (`ZNetScene.Destroy`). Undo cannot recreate those, so a wrapper must not offer it. `void` makes holes; not offered either.
+- It checks nothing about guard stones, no-build locations or built pieces, and it keeps its own undo history in memory only.
 
-## Plan
+## Safe wrapper (designed)
 
-1. Check with `list_commands` on the live client whether the command exists in the installed build and what its arguments are. Not done yet.
-2. If it exists, wrap it as a tool that (a) computes the zones its radius can reach, (b) snapshots their terrain data with `TerrainEdit`, (c) applies the same ward and no-build refusals, (d) runs the command through the existing command path with an exact, generated command line (no free text from the caller), (e) journals a kind `terrain` entry so `undo` works, (f) compares the terrain data before and after.
-3. The allow list change is a single exact entry. Ask the user first.
+A tool `terrain_wec` that builds the command line itself from validated numbers and a fixed paint list, never from caller text:
+1. Refuses unless the console's `terrain` handler belongs to the assembly `WorldEditCommands` (the command table is a plain dictionary any mod can write to).
+2. Offers only circle or axis-aligned rect, `level` or `raise`, `paint` from the list, and `smooth` 0 to 20. Limits: 40 m radius, 80 x 80 m rect, level 30.4 to 2000 m.
+3. Same refusals as `terrain_paint`: enabled guard stone area, no-build location, no loaded heightmap, built pieces on the area for height changes unless `allowPieces`.
+4. Snapshots the TCData of every zone the area plus smooth can reach, journals a kind `terrain` entry (the existing `TerrainEdit.Undo` restores it), runs the line, diffs TCData and reports it.
+5. Runs the line through the core plugin's own `ConsoleBridge.Run`, so `commands.allow` / `deny` still apply and `terrain` stays an explicit entry the user controls. It does not widen any list.
+
+Why it is worth building: `terrain_level` (decision 0006) has to use the older `digg` prefabs in this game, which leave persistent objects and cannot level a vertex past what a stroke reaches, and its edge is a cliff. WEC levels exactly with a smoothed edge and no objects.
+
+## Why it is not built yet
+
+The session's automatic permission check refused the edit that adds the call into the core plugin's `ConsoleBridge` by reflection, as weakening a security setting (the command allow list). The wrapper does not change the allow list, but the call path reaches the console, so it needs the owner's explicit go-ahead. See `plans/next-up.md`.
 
 ## Open
 
-- Whether the command is present in the installed mod set at all.
-- Whether it edits through the terrain compiler (undo by data snapshot works) or by another route (then a wrapper cannot undo it and should not be built).
+- Whether `terrain` needs cheats (`devcommands`) enabled at the moment of the call.
+- Whether WEC is installed on the dedicated server; the wrapper is client-only until that is known.
+- The live config's `commands.allow` already lists `terrain` (example client config). Confirm on the sandbox before relying on it.
