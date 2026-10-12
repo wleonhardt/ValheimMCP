@@ -130,7 +130,7 @@ namespace HubnerExt
             var pos = p.transform.position;
             bool tele = Teleporting(p), fly = Flying(p);
             bool god = false; try { god = p.InGodMode(); } catch (Exception ex) { U.Once("InGodMode", ex); }
-            return U.Json("{\"pos\":" + U.V(pos) + ",\"grounded\":" + (p.IsOnGround() ? "true" : "false") + ",\"god\":" + (god ? "true" : "false") + ",\"flying\":" + (fly ? "true" : "false") + ",\"inWater\":" + (p.IsSwimming() ? "true" : "false")
+            return U.Json("{\"pos\":" + U.V(pos) + ",\"grounded\":" + (p.IsOnGround() ? "true" : "false") + ",\"god\":" + (god ? "true" : "false") + ",\"flying\":" + (fly ? "true" : "false") + ",\"inWater\":" + (p.IsSwimming() ? "true" : "false") + ",\"encumbered\":" + (p.IsEncumbered() ? "true" : "false") + ",\"carryWeight\":" + U.N(Math.Round(p.GetInventory().GetTotalWeight(), 1)) + ",\"maxCarryWeight\":" + U.N(Math.Round(p.GetMaxCarryWeight(), 1))
                 + ",\"health\":" + U.N(p.GetHealth()) + ",\"teleporting\":" + (tele ? "true" : "false") + ",\"walking\":" + (_walker != null && _walker.Active ? "true" : "false") + ",\"dead\":" + (p.IsDead() ? "true" : "false") + "}");
         }
 
