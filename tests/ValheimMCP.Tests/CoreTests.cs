@@ -408,7 +408,7 @@ public class StallLadderTests
         => StallLadder.Pick(spot, total, rise, slope, up, water, hazard, stam, running, side, rer);
 
     [Fact] public void ProbeMeasuredAHoppableTopSoHop() => Assert.Equal(StallAction.Hop, Pick(rise: 0.8f));
-    [Fact] public void TooLowOrTooHighATopIsNotHopped() { Assert.NotEqual(StallAction.Hop, Pick(rise: 0.2f)); Assert.NotEqual(StallAction.Hop, Pick(rise: 1.7f)); Assert.Equal(StallAction.Hop, Pick(rise: 1.6f)); }
+    [Fact] public void TooLowOrTooHighATopIsNotHopped() { Assert.NotEqual(StallAction.Hop, Pick(rise: 0.2f)); Assert.NotEqual(StallAction.Hop, Pick(rise: 1.5f)); Assert.Equal(StallAction.Hop, Pick(rise: 1.4f)); }
     [Fact] public void NoProbeNoBlindJump() => Assert.NotEqual(StallAction.Hop, Pick());
     [Fact] public void NeverHopInWaterOrTowardAHazard() { Assert.NotEqual(StallAction.Hop, Pick(rise: 0.8f, water: true)); Assert.NotEqual(StallAction.Hop, Pick(rise: 0.8f, hazard: true)); }
     [Fact] public void ASteepBankThatTheRouteClimbsIsRunUp() => Assert.Equal(StallAction.RunUp, Pick(slope: 50, up: true));
@@ -541,7 +541,7 @@ public class WalkGuardTests
         Assert.False(RunRules.WantRun(true, 30, 0.4, 0, false, true));           // ... unless the stamina is under half
     }
 
-    [Fact] public void CapsuleNumbersAreThePlayersNotAGuess() { Assert.Equal(0.49f, WalkFacts.CapsuleRadius); Assert.Equal(1.85f, WalkFacts.CapsuleHeight); Assert.Equal(0.37f, WalkFacts.StepUp); Assert.Equal(0.5f, WalkFacts.RunStepUp); Assert.Equal(65f, WalkFacts.RunClimbMaxDeg); Assert.Equal(1.6f, WalkFacts.HopMax); Assert.Equal(38f, WalkFacts.SlideDeg); }
+    [Fact] public void CapsuleNumbersAreThePlayersNotAGuess() { Assert.Equal(0.49f, WalkFacts.CapsuleRadius); Assert.Equal(1.85f, WalkFacts.CapsuleHeight); Assert.Equal(0.37f, WalkFacts.StepUp); Assert.Equal(0.5f, WalkFacts.RunStepUp); Assert.Equal(65f, WalkFacts.RunClimbMaxDeg); Assert.Equal(1.4f, WalkFacts.HopMax); Assert.Equal(38f, WalkFacts.SlideDeg); }
 }
 
 public class OwnershipTests

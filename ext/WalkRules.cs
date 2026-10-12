@@ -12,7 +12,7 @@ namespace HubnerExt
         public const float RunStepUp = 0.5f;                                  // a running character climbs a lip of 0.5 m, not 0.6 (same probe)
         public const float SlideDeg = 38f;                                    // a walker slips on terrain steeper than this unless running and moving
         public const float RunClimbMaxDeg = 65f;                              // measured with the probe: a running character climbs a 65 degree slope, not 70; a walking one 37, not 38
-        public const float HopMin = 0.38f, HopMax = 1.6f;                     // a hop clears a ledge of 1.7 m from a 5 m run on the flat and fails at 1.8 (probe); 1.6 keeps a margin, and a slope takes some of it
+        public const float HopMin = 0.38f, HopMax = 1.4f;                     // a hop clears 1.3 to 1.4 m every time; 1.5 to 1.7 passed in one probe run and failed in the next (the jump grows with the jump skill and needs stamina), 1.8 never: 1.4 is what can be counted on
         public const float StandReach = 2.0f;                                 // the goal counts as reached only within this height of it: a stand a storey away is not the goal
         public const float StallSeconds = 2.0f;                               // no progress this long = a stall
         public const float ProgressMetres = 0.2f;                             // progress = the route ahead shrank this much and the feet moved this much

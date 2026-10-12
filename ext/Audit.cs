@@ -37,6 +37,8 @@ namespace HubnerExt
                 "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"}},\"required\":[\"id\"]}", JobCancel, Plans.WriteFlag);
             r.Add("job_status", "Status/result of a queued job (queued | running | done | error, with progress frames for sliced jobs) or the list of recent jobs when no id is given.",
                 "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"}}}", JobStatus);
+            r.Add("chat_inject", "TEST TOOL for the chat pipeline: feeds one line through the same decoder the server uses for a relayed chat message (wire layout of a Talker \"Say\" routed RPC), as if a client had sent it, so chat_tail, the trust and hint rules and the id check can be tested without a second player. name, text, id (the platform id the line claims, e.g. Steam_123), type (Normal|Shout|Whisper|Ping, default Normal), viaPeer (the name of a connected player: the line then arrives on that peer's connection, so a claimed id that is not that connection's shows id_mismatch). Writes nothing to the world.",
+                "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"},\"viaPeer\":{\"type\":\"string\"}},\"required\":[\"name\",\"text\"]}", ChatInject, Plans.WriteFlag);
             JobTools["zdo_audit"] = x => McpJson.GetBool(x, "fix", false) ? Plans.GuardPublic(x, AuditTool) : AuditTool(x);
             Install();
             ResumeFromLedger();
@@ -182,6 +184,27 @@ namespace HubnerExt
             }
             catch (Exception ex) { U.Once("RelayedChat2", ex); }
         }
+        static ToolOutput ChatInject(Dictionary<string, object> a)
+        {
+            var name = McpJson.GetStr(a, "name"); var text = McpJson.GetStr(a, "text"); var id = McpJson.GetStr(a, "id") ?? "Steam_0";
+            if (string.IsNullOrEmpty(name) || text == null) return ToolOutput.Err("name and text are required");
+            Talker.Type ty; if (!Enum.TryParse(McpJson.GetStr(a, "type") ?? "Normal", true, out ty) || !Enum.IsDefined(typeof(Talker.Type), ty)) return ToolOutput.Err("type must be Normal, Shout, Whisper or Ping");
+            ZRpc rpc = null; var via = McpJson.GetStr(a, "viaPeer");
+            if (!string.IsNullOrEmpty(via))
+            {
+                if (ZNet.instance == null) return ToolOutput.Err("no world loaded");
+                foreach (var peer in ZNet.instance.GetPeers()) if (peer.m_rpc != null && string.Equals(peer.m_playerName, via, StringComparison.OrdinalIgnoreCase)) { rpc = peer.m_rpc; break; }
+                if (rpc == null) return ToolOutput.Err("no connected peer named " + via);
+            }
+            var inner = new ZPackage(); var shout = ty == Talker.Type.Shout || ty == Talker.Type.Ping;
+            if (shout) inner.Write(Vector3.zero);                                          // the routed "ChatMessage" starts with a position; a Talker "Say" does not
+            inner.Write((int)ty); inner.Write(name); inner.Write(id); inner.Write(text);
+            var pkg = new ZPackage(); pkg.Write(0L); pkg.Write(0L); pkg.Write(0L); pkg.Write(ZDOID.None); pkg.Write(shout ? ChatHash : SayHash); pkg.Write(inner);
+            var before = _chatSeq;
+            RelayedChat2(rpc, pkg);
+            return U.Json("{\"injected\":true,\"type\":" + U.S(ty.ToString()) + ",\"viaConnection\":" + (rpc != null ? "true" : "false") + ",\"rowsAdded\":" + (_chatSeq - before) + "}");
+        }
+
         static int CountNamed(string name)
         {
             var n = 0;

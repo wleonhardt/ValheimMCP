@@ -171,3 +171,16 @@ public class ShieldRulesTests
         Assert.False(ShieldRules.Inside(new[] { new ShieldFact { Radius = 0 } }, 0, 0, 0)); Assert.False(ShieldRules.Inside(null, 0, 0, 0));
     }
 }
+
+public class SituationBandTests
+{
+    [Fact] public void BandsNameANumber()
+    {
+        Assert.Equal("healthy", SituationBands.Health(1)); Assert.Equal("hurt", SituationBands.Health(0.5)); Assert.Equal("low", SituationBands.Health(0.2));
+        Assert.Equal("fresh", SituationBands.Stamina(0.9)); Assert.Equal("tired", SituationBands.Stamina(0.3)); Assert.Equal("spent", SituationBands.Stamina(0.1));
+        Assert.Equal("light", SituationBands.Pack(100, 300, false)); Assert.Equal("loaded", SituationBands.Pack(200, 300, false)); Assert.Equal("heavy", SituationBands.Pack(270, 300, false)); Assert.Equal("encumbered", SituationBands.Pack(400, 300, true));
+        Assert.Equal("hungry", SituationBands.Food(0, 0)); Assert.Equal("fading", SituationBands.Food(2, 60)); Assert.Equal("fed", SituationBands.Food(2, 900));
+        Assert.Equal("here", SituationBands.Distance(5)); Assert.Equal("near", SituationBands.Distance(40)); Assert.Equal("away", SituationBands.Distance(200)); Assert.Equal("far", SituationBands.Distance(900)); Assert.Equal("unknown", SituationBands.Distance(double.NaN));
+        Assert.Equal("calm", SituationBands.Danger(0, 0)); Assert.Equal("watch", SituationBands.Danger(2, 0)); Assert.Equal("danger", SituationBands.Danger(2, 1));
+    }
+}

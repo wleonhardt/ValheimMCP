@@ -48,6 +48,7 @@ namespace HubnerExt
             ClientTools.Register(r);                                    // on the server only the whitelisted physics/read tools register (see Reg.cs)
 #if !SERVER
             Env.Register(r);
+            SituationTools.Register(r);
 #endif
             Reg.Categorize(r);
         }

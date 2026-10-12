@@ -6,7 +6,7 @@ The walker's step, hop and slope numbers were assumptions taken from another pro
 |---|---|---|---|
 | Lip, walking | 0.37 m | 0.38 m | `StepUp` 0.37 (was 0.45) |
 | Lip, running | 0.5 m | 0.6 m | `RunStepUp` 0.5 (new) |
-| Hop up a ledge (5 m run-up on the flat) | 1.7 m | 1.8 m | `HopMax` 1.6 (was 1.2), `HopMin` 0.38 (was 0.40) |
+| Hop up a ledge (5 m run-up on the flat) | 1.3 to 1.4 m every time; 1.5 to 1.7 in one run and not in the next | 1.8 m | `HopMax` 1.4 (was 1.2), `HopMin` 0.38 (was 0.40) |
 | Slope, walking | 37 degrees | 38 | `SlideDeg` 38 (confirmed) |
 | Slope, running | 65 degrees | 70 | `RunClimbMaxDeg` 65 (was 60) |
 

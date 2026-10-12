@@ -82,6 +82,9 @@ namespace HubnerExt
             return _h != null && methods >= 4 && _walker != null;
         }
 
+        /// <summary>One word for what the walker is doing now, for the situation digest.</summary>
+        internal static string WalkStatusWord() { return _walker != null && _walker.Active ? "walking" : "idle"; }
+
         public static void Uninstall()
         {
             try { if (_h != null) _h.UnpatchSelf(); } catch { }

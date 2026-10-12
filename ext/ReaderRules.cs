@@ -191,4 +191,15 @@ namespace HubnerExt
         public static double FireBurnsFor(double fuel, double secPerFuel) { return Math.Max(0, fuel) * Math.Max(0, secPerFuel); }
         public static bool FireOutWithin(double fuel, double secPerFuel, double awaySeconds) { return FireBurnsFor(fuel, secPerFuel) <= awaySeconds; }
     }
+
+    /// <summary>The bands the digest uses (game-free): what a number means in a word.</summary>
+    internal static class SituationBands
+    {
+        public static string Health(double frac) { return frac >= 0.75 ? "healthy" : frac >= 0.4 ? "hurt" : "low"; }
+        public static string Stamina(double frac) { return frac >= 0.6 ? "fresh" : frac >= 0.25 ? "tired" : "spent"; }
+        public static string Pack(double weight, double max, bool encumbered) { return encumbered ? "encumbered" : max <= 0 ? "unknown" : weight / max >= 0.85 ? "heavy" : weight / max >= 0.5 ? "loaded" : "light"; }
+        public static string Food(int fed, double minSecondsLeft) { return fed == 0 ? "hungry" : minSecondsLeft < 120 ? "fading" : "fed"; }
+        public static string Distance(double metres) { return double.IsNaN(metres) ? "unknown" : metres < 15 ? "here" : metres < 80 ? "near" : metres < 300 ? "away" : "far"; }
+        public static string Danger(int hostilesNear, int hostilesAlert) { return hostilesAlert > 0 ? "danger" : hostilesNear > 0 ? "watch" : "calm"; }
+    }
 }
