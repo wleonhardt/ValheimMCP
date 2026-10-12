@@ -356,7 +356,7 @@ class Client:
     _TOKEN = re.compile(r'^[A-Za-z0-9_.,:=*-]+$')
 
     def terrain_paint(self, x, z, paint='dirt', circle=None, rect=None, blockcheck=None, ids=None, ignore=None, chance=None, verify_box=None):
-        """PAINT-ONLY terrain edit through World Edit Commands. The command is built from fixed keys (paint, from, circle, rect, blockcheck, id, ignore, chance);
+        """PAINT-ONLY terrain edit through World Edit Commands, from the client side (run_command). The extension has its own tools since 0.15.0 (`tool("terrain_paint")`, `terrain_level`, `terrain_wec`: guarded, journaled, with undo); this one is the console route. The command is built from fixed keys (paint, from, circle, rect, blockcheck, id, ignore, chance);
         every value must be one plain token (no spaces), so no height keyword can be smuggled in as an extra argument. Afterwards terraform_map over verify_box
         = (x0,z0,x1,z1), default a box around the target, must show the same number of edited height nodes. Handles the devcommands toggle (authenticates when
         the console says Unauthorized). Returns the console text."""

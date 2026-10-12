@@ -196,18 +196,23 @@ This fork keeps upstream's console bridge and camera and adds a pluggable **tool
 `ToolRegistry.cs` and `ExtensionHost.cs` are new (tools are looked up in the registry, per-tool write gating and deny lists, extension loading, hot reload). The security-relevant rules live in small pure files that the unit tests link without the game: `RequestPolicy` (Origin/Host/token/size), `CommandPolicy` (allow/deny), `JsonRpc` (envelopes and protocol negotiation), `SafeRegex` (match timeouts), `ToolProfiles`, `MiniJson`, `MiniYaml`. `McpServer`, `HttpServer`, `ModConfig`, `LogWatch` and `Plugin` differ from upstream in the hardening described above.
 
 ## The extension (`ext/`)
-About 93 tools (the core's six plus the extension's), in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no camera, and no physics until a virtual peer exists (see below).
+About 140 tools (the core's six plus the extension's), in two builds: `HubnerExt.csproj` (game client) and `HubnerExtServer.csproj` (dedicated server twin). The server twin has no camera, and no physics until a virtual peer exists (see below).
 
 | Area | Tools (examples) |
 |---|---|
 | Reading the world | `terrain_info`, `terrain_profile`, `surface_probe`, `raycast`, `objects`, `creatures`, `zone_state`, `prefab_info` (colliders, snap points, piece rules), `prefab_search` |
 | Idempotent building | `plan_apply` (exact, journaled, `ctag`/`ints`/`label`), `plan_remove` (by tag, prefab or plan), `plan_stats`, `verify_plan`, `validate_placement`, `clear_overlaps`, `zdo_*` |
 | Verification | `walk_check`, `walk_to` (real capsule movement, optional no-jump), `nav_path`, `headroom`, `stability_scan`, `bed_check`, `sign_check`, `doors` / `doors_set`, `room_view`, `render_ex` (cutaways, ortho, hide trees) |
+| Base keeping | `producers`, `loot_near`, `harvest_near`, `resource_nodes`, `spawners_near`, `wear_risk`, `absence_forecast`, `plant_check`, `farm_state`, `active_area` (what the game simulates), `situation`, `explored_at`, `plan_check` (rules with their source) |
+| Crafting and economy | `recipe_info`, `item_info`, `missing_for`, `plan_materials`, `stations`, `smelters`, `cookers`, `fuel_forecast` |
+| Creatures and raids | `creature_info`, `base_value`, `raid_state`, `threats_near`, `biome_threats` |
+| Terrain editing | `level_check` (read-only plan), `terrain_paint`, `terrain_level`, `terrain_wec` (write, with undo; see below) |
 | Environment | `time_set`, `weather_set`, `env_state` |
 | Session control | `teleport` (with arrival check), `menu_join` / `menu_password` / auto-join (the password only from `HUBNER_AUTOJOIN_PASSWORD`), `player_state`, `players` |
+| Rules and testing | `world_rules` (world modifiers), `death_state`, `god_set` (sandbox character only), `net_peers`, `chat_inject` (test), `vpeer_*` (server twin) |
 | Operations | `world_save`, `snapshot` / `snapshot_diff`, `journal`, `job_start` / `job_status` / `job_cancel`, `log_tail`, `chat_tail` (in-game chat, client and server) |
 
-Terrain is edited only by `terrain_paint` and `terrain_level`, which apply the game's own hoe ops (never hand-written height or paint) after saving the terrain data of the zones they can reach (`terrain_level` uses the older level prefabs, which leave journaled objects), so `undo` / `undo_group` restore the ground exactly. They refuse inside an enabled guard stone's area and in no-build locations, and `terrain_level` refuses when built pieces stand on the pad. See `plans/decisions/0006-terrain-editing.md`.
+Terrain is edited only by three write tools, each with `dry`, the write gate, a journal entry and exact `undo` / `undo_group`: `terrain_paint` (cultivated, paved or dirt, with the game's own hoe ops), `terrain_level` (a pad to a height with the game's older level prefabs, which leave journaled objects that undo destroys) and `terrain_wec` (level, raise or paint through the World Edit Commands `terrain` console command, from a command line the tool builds itself; it levels exactly, leaves no objects and needs `terrain` in `commands.allow`). The terrain data of the zones an edit can reach is saved first. All three refuse inside an enabled guard stone's area, in no-build locations and where no heightmap is loaded; the height tools also refuse when built pieces stand on the area. See `plans/decisions/0006-terrain-editing.md` and `plans/research/2026-10-terrain-console.md`.
 
 ## Python client (`python/`)
 `hubner_mcp.py` is a tiny MCP-over-HTTP client (not named `mcp.py`: that would shadow the official `mcp` package); `hubner.py` has a `Client` class with the tools as methods plus three ready instances: `default` (follows `HUBNER_URL`), `sandbox` (the game client, 8731) and `twin` (the dedicated server, `HUBNER_SERVER_URL`, default 8741, adds `confirm:'server-write'` to writes). `from hubner import *` still gives the module-level functions bound to `default`.
@@ -228,7 +233,7 @@ Environment: `HUBNER_URL`, `HUBNER_SERVER_URL`, `HUBNER_SERVER_SSH` (user@host),
 - Fireplace prefabs spawn with full fuel (`floats.fuel` to override).
 
 ## Tool profiles (`tools.profile`, `tools.terse`)
-`tools/list` advertises about 93 tools with long descriptions; every MCP session pays for that. `tools.profile` in `valheimmcp.yml` trims the list: `observe` (reads and ops), `build` (plus plans, zdo, undo, jobs, journal), `control` (plus teleport, walk, menu, environment, chat), `all` (default). Every tool stays callable by name whatever the profile (the Python client does not read the list); the profile is a convenience, not a permission: use `tools.write` and `tools.deny` for that. `tools.terse: true` keeps only the first sentence of each description. Both are read at start.
+`tools/list` advertises about 140 tools with long descriptions; every MCP session pays for that. `tools.profile` in `valheimmcp.yml` trims the list: `observe` (reads and ops), `build` (plus plans, zdo, undo, jobs, journal), `control` (plus teleport, walk, menu, environment, chat), `all` (default). Every tool stays callable by name whatever the profile (the Python client does not read the list); the profile is a convenience, not a permission: use `tools.write` and `tools.deny` for that. `tools.terse: true` keeps only the first sentence of each description. Both are read at start.
 
 ## Journal upkeep
 `journal_compact {keepDays}` drops entries older than `keepDays` (default 30; their undo is given up) and rewrites `hubner-ext/journal.jsonl` without undone markers. The journal is loaded into memory at start: a server that has done months of syncs should run it now and then (`dry:true` first).

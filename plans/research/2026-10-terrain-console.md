@@ -1,6 +1,6 @@
 # Terrain editing through World Edit Commands (option C), analysis
 
-Status: analysed from the installed mod's decompiled code (WorldEditCommands.dll read from the sandbox client). The wrapper is designed but not built. Nothing here has run.
+Status: built as `terrain_wec` and verified on the sandbox client (2026-10-12). The mod's code was read from the installed WorldEditCommands.dll.
 
 ## Question
 
@@ -14,9 +14,9 @@ World Edit Commands (WEC) adds a `terrain` console command. Can ValheimMCP offer
 - `reset` also destroys every older terrain modifier object within radius + 1 (`ZNetScene.Destroy`). Undo cannot recreate those, so a wrapper must not offer it. `void` makes holes; not offered either.
 - It checks nothing about guard stones, no-build locations or built pieces, and it keeps its own undo history in memory only.
 
-## Safe wrapper (designed)
+## Safe wrapper (built: `terrain_wec`)
 
-A tool `terrain_wec` that builds the command line itself from validated numbers and a fixed paint list, never from caller text:
+The tool builds the command line itself from validated numbers and a fixed paint list, never from caller text:
 1. Refuses unless the console's `terrain` handler belongs to the assembly `WorldEditCommands` (the command table is a plain dictionary any mod can write to).
 2. Offers only circle or axis-aligned rect, `level` or `raise`, `paint` from the list, and `smooth` 0 to 20. Limits: 40 m radius, 80 x 80 m rect, level 30.4 to 2000 m.
 3. Same refusals as `terrain_paint`: enabled guard stone area, no-build location, no loaded heightmap, built pieces on the area for height changes unless `allowPieces`.
@@ -25,12 +25,16 @@ A tool `terrain_wec` that builds the command line itself from validated numbers 
 
 Why it is worth building: `terrain_level` (decision 0006) has to use the older `digg` prefabs in this game, which leave persistent objects and cannot level a vertex past what a stroke reaches, and its edge is a cliff. WEC levels exactly with a smoothed edge and no objects.
 
-## Why it is not built yet
+## Findings from building it
 
-The session's automatic permission check refused the edit that adds the call into the core plugin's `ConsoleBridge` by reflection, as weakening a security setting (the command allow list). The wrapper does not change the allow list, but the call path reaches the console, so it needs the owner's explicit go-ahead. See `plans/next-up.md`.
+- `Helper.Command` (ServerDevcommands) registers the command, so the handler in the console table is a lambda from ServerDevcommands whose closure holds the WEC delegate. The source check walks the closure up to three levels for a delegate from the `WorldEditCommands` assembly.
+- A rectangle takes half extents: `rect=4,4` is an 8 x 8 m area. The tool takes full width and depth and sends the halves.
+- `smooth` is a fraction of the shape (0 to 1), not metres: nodes closer to the edge than that fraction get a linear fade from no change to full change, inside the shape. The tool takes metres and divides by the smaller half extent. A value over 1 would make even the centre partial.
+- `level` is absolute and adds to the node's level delta, so, from the code, a second call to the same height changes nothing (not tested).
+- The heights change at once (no one to two second wait as with the older `digg` strokes), so the before and after TCData diff is in the tool's reply.
 
 ## Open
 
-- Whether `terrain` needs cheats (`devcommands`) enabled at the moment of the call.
-- Whether WEC is installed on the dedicated server; the wrapper is client-only until that is known.
-- The live config's `commands.allow` already lists `terrain` (example client config). Confirm on the sandbox before relying on it.
+- Whether WEC is installed on the dedicated server; until known the tool is checked on the client only.
+- Whether the command needs cheats (`devcommands`) enabled: it ran on the sandbox client with the existing session state, `consoleOutput` was empty.
+- Pieces and wards are checked by this tool, not by the command, and the paint list excludes the lava colours.

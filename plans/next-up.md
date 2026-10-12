@@ -111,7 +111,7 @@ Run `HUBNER_URL=... HUBNER_LIVE_WORLDS=<test world> HUBNER_TEST_X/Z=<quiet spot>
 - Decide whether `log_tail` (file) and `get_log` (ring buffer) should merge, and whether `Render.Ex` should share the core's camera (see open questions).
 
 61. Terrain editing: client part verified live on the scratch spot (paint + undo exact; level 9 x 9 exact + undo exact; see decision 0006). Not verified: the owner case (another peer owns the zone's compiler), a pad over two zones, `terrain_level` on the server twin with a virtual peer (writes also need the server flag and `confirm:"server-write"`), refusal paths (ward, no-build location, pieces on the pad) in the game.
-62. Option C (World Edit Commands `terrain`): analysed, wrapper `terrain_wec` designed, not built; waiting for the owner's go-ahead to route a generated command line through the core plugin's `ConsoleBridge.Run` (see `plans/research/2026-10-terrain-console.md`).
+62. Option C: `terrain_wec` built and verified on the client (8 x 8 level exact, circle level + paint, undo exact, refusals for missing op, bad paint, outside world, no heightmap). Not verified: pieces and ward refusals in the game, a pad across several zones, the server twin (is WEC installed there?), `terrain` missing from `commands.allow`, and whether the command needs cheats on.
 
 ## Done
 

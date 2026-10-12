@@ -101,4 +101,57 @@ namespace HubnerExt
             return res;
         }
     }
+
+    /// <summary>The one console line terrain_wec may run: built only from validated numbers and a fixed paint list, so nothing a caller types can reach the console (decision 0006, option C).</summary>
+    internal sealed class WecLine
+    {
+        public const double MaxRadius = 40;
+        public static readonly string[] Paints = { "cultivated", "dirt", "grass", "grass_dark", "patches", "paved", "paved_dark", "paved_dirt", "paved_moss" };
+
+        public string Error, Line; public double HalfX, HalfZ; public bool HeightOp;
+
+        static string F(double v) { return v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }
+        static bool Fin(double? v) { return v.HasValue && !double.IsNaN(v.Value) && !double.IsInfinity(v.Value); }
+
+        /// <param name="smoothMetres">the outer band of the shape that fades from no change to full change; the command takes a fraction of the shape</param>
+        public static WecLine Build(double cx, double cz, double? radius, double? width, double? depth, double? level, double? raise, string paint, double smoothMetres)
+        {
+            var r = new WecLine();
+            if (!WorldBounds.InWorld(cx, 0, cz)) { r.Error = "x and z must be finite and inside the world"; return r; }
+            var circle = radius.HasValue; var rect = width.HasValue || depth.HasValue;
+            if (circle == rect) { r.Error = "give radius (circle) or width and depth (rectangle)"; return r; }
+            if (circle)
+            {
+                if (!Fin(radius) || radius.Value <= 0 || radius.Value > MaxRadius) { r.Error = "radius must be between 0 and " + MaxRadius + " m"; return r; }
+                r.HalfX = r.HalfZ = radius.Value;
+            }
+            else
+            {
+                if (!Fin(width) || !Fin(depth) || width.Value <= 0 || depth.Value <= 0 || width.Value > 2 * MaxRadius || depth.Value > 2 * MaxRadius) { r.Error = "width and depth must be between 0 and " + 2 * MaxRadius + " m"; return r; }
+                r.HalfX = width.Value / 2; r.HalfZ = depth.Value / 2;
+            }
+            if (!WorldBounds.Finite(smoothMetres) || smoothMetres < 0 || smoothMetres > 20) { r.Error = "smooth must be between 0 and 20 m"; return r; }
+            var parts = new System.Collections.Generic.List<string>();
+            if (level.HasValue)
+            {
+                if (!Fin(level) || level.Value < 30.4 || level.Value > 2000) { r.Error = "level must be between 30.4 m (the sea washes lower ground) and 2000 m"; return r; }
+                parts.Add("level=" + F(level.Value)); r.HeightOp = true;
+            }
+            if (raise.HasValue)
+            {
+                if (!Fin(raise) || Math.Abs(raise.Value) > 50) { r.Error = "raise must be within 50 m either way"; return r; }
+                if (r.HeightOp) { r.Error = "give level or raise, not both"; return r; }
+                parts.Add("raise=" + F(raise.Value)); r.HeightOp = true;
+            }
+            if (!string.IsNullOrEmpty(paint))
+            {
+                if (Array.IndexOf(Paints, paint) < 0) { r.Error = "paint must be one of " + string.Join(", ", Paints); return r; }
+                parts.Add("paint=" + paint);
+            }
+            if (parts.Count == 0) { r.Error = "give level, raise or paint"; return r; }
+            if (smoothMetres > 0 && r.HeightOp) parts.Add("smooth=" + F(Math.Min(1.0, smoothMetres / Math.Min(r.HalfX, r.HalfZ))));
+            r.Line = "terrain from=" + F(cx) + "," + F(cz) + (circle ? " circle=" + F(r.HalfX) : " rect=" + F(r.HalfX) + "," + F(r.HalfZ) + " angle=0") + " " + string.Join(" ", parts.ToArray());
+            return r;
+        }
+    }
 }

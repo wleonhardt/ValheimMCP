@@ -1,6 +1,6 @@
 # 0006 Terrain editing (2026-10-12)
 
-Earlier decisions and the README said "no terrain-editing tools by design". That is reopened for two tools, with the safeguards below, because building plans depend on the ground and the rest of the pipeline (`level_check`, `plan_check`, `terrain_grid`) already models it.
+Earlier decisions and the README said "no terrain-editing tools by design". That is reopened for three tools, with the safeguards below (`terrain_paint`, `terrain_level`, and `terrain_wec` for option C), because building plans depend on the ground and the rest of the pipeline (`level_check`, `plan_check`, `terrain_grid`) already models it.
 
 How the game edits terrain (decompiled `TerrainOp`, `TerrainComp`, `Attack.SpawnOnHitTerrain`): a hoe stroke instantiates a terrain-op prefab (`ObjectDB.m_terrainOps`: `cultivate_v2`, `mud_road_v2`, `paved_road_v2`, `raise_v2`, `digg_v3`, and the older `TerrainModifier` prefabs `digg`, `digg_v2`, `raise`, `path` ...) at a point. Its `Awake` hands the op to the `TerrainComp` ("_TerrainCompiler" ZDO) of every zone it touches; the owner applies it (`DoOperation`) and saves the zone's whole terrain delta as the compressed byte array "TCData" in that ZDO. Other clients and the save follow the ZDO. The RPC carries only the prefab name hash, so only registered ops can be applied remotely: no custom settings.
 
@@ -19,4 +19,7 @@ Found live (2026-10-11, client, scratch spot) and changed the design:
 - The heightmap rebuilds one to two seconds after the strokes, so the tool does not read the heights back itself: use `terrain_grid` afterwards.
 - `digg` and `digg_v2` also paint the ground (cleared dirt); the result says `alsoPaints`.
 
-Not done (option C, calling the World Edit Commands `terrain` console command): see `plans/research/2026-10-terrain-console.md`.
+Option C, built and verified live (client, 2026-10-12): `terrain_wec` runs the World Edit Commands `terrain` console command from a line it builds from validated numbers (details and the decompiled behaviour in `plans/research/2026-10-terrain-console.md`).
+- The command writes TCData, so the snapshot-and-restore undo covers it. Measured: an 8 x 8 m rectangle levelled to 44.5 m gave the exact height in its core, and `undo_group` returned a 13 x 13 sample of the area to the same heights as before.
+- Safeguards: the handler must come from the `WorldEditCommands` assembly (ServerDevcommands wraps it in a lambda, so the closure is searched), the line goes through the core plugin's `ConsoleBridge.Run`, which still applies `commands.allow` / `deny` (nothing was widened), only circle or rectangle with `level` / `raise` / a fixed paint list are offered, and the same ward, no-build, heightmap and pieces refusals apply. `reset` is not offered because it destroys older modifier objects that undo cannot restore; `void`, `slope`, `min`, `max`, `chance` and the block check are not offered either.
+- `terrain_level` stays, for worlds without World Edit Commands, but `terrain_wec` is the better tool for levelling.

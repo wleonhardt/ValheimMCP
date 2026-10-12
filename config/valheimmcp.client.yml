@@ -34,7 +34,7 @@ commands:
     - ban*
     - save
 
-# write enables run_command (console commands) and the extension's spawn/modify/delete/undo/teleport/walk/...; no terrain-edit tools exist.
+# write enables run_command (console commands) and the extension's spawn/modify/delete/undo/teleport/walk/...; the terrain tools (terrain_paint, terrain_level, terrain_wec) are write tools too, and terrain_wec also needs `terrain` in commands.allow.
 tools:
   write: true
   timeoutMs: 30000

@@ -27,6 +27,9 @@ namespace HubnerExt
             r.Add("terrain_level", "Level a rectangular pad (x0,z0,x1,z1 or x,z,half; up to 40 x 40 m) to targetY with the game's own level op (the hoe/digging strokes), on the lattice level_check plans. A stroke never moves a vertex more than 8 m from its generated height, so an unreachable pad is refused (use level_check first). Refused when a built piece stands on the pad or within the stroke radius of it (allowPieces:true overrides), inside an enabled guard stone's area, inside a no-build location, and where no heightmap is loaded. tool picks the op prefab (default: the level op that needs fewest strokes, one that does not paint if the game has any; alsoPaints says). This game has no terrain op that levels, so the strokes are the older level prefabs (digg, digg_v2): each leaves a persistent object in the world, journaled, and undo destroys exactly those. Reports the heights read back after the strokes. dry=true plans only. Journaled.",
                 "{\"type\":\"object\",\"properties\":{\"x0\":{\"type\":\"number\"},\"z0\":{\"type\":\"number\"},\"x1\":{\"type\":\"number\"},\"z1\":{\"type\":\"number\"},\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"half\":{\"type\":\"number\"},\"targetY\":{\"type\":\"number\"},\"tool\":{\"type\":\"string\"},\"allowPieces\":{\"type\":\"boolean\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"targetY\"]}",
                 a => Plans.GuardPublic(a, Level, true), Plans.WriteFlag);
+            r.Add("terrain_wec", "Shape the ground with the World Edit Commands `terrain` console command, through a fixed command line this tool builds itself (no free text): a circle (x,z,radius up to 40 m) or a rectangle (x,z,width,depth up to 80 m, axis aligned) and level (absolute y) or raise (metres, negative lowers) and/or paint (grass, patches, grass_dark, dirt, cultivated, paved, paved_moss, paved_dirt, paved_dark), with smooth (0 to 20 m): the outer band of the shape, inside its edge, that fades from no change to full change (for level and raise only). It writes the terrain data directly, so unlike terrain_level it leaves no objects and levels exactly. Not offered: the command's reset (it destroys older terrain modifier objects), void, slope, min, max, chance, block check. Refused when the console's terrain command is not WorldEditCommands', when `commands.allow` does not list terrain, inside an enabled guard stone's area, in a no-build location, where a heightmap is not loaded, and (level / raise) with built pieces on the area unless allowPieces:true. The terrain data of every zone it can reach is saved first: undo / undo_group restore it byte for byte. dry=true builds and checks everything and reports the command line without running it. Journaled.",
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"z\":{\"type\":\"number\"},\"radius\":{\"type\":\"number\"},\"width\":{\"type\":\"number\"},\"depth\":{\"type\":\"number\"},\"level\":{\"type\":\"number\"},\"raise\":{\"type\":\"number\"},\"paint\":{\"type\":\"string\"},\"smooth\":{\"type\":\"number\"},\"allowPieces\":{\"type\":\"boolean\"},\"dry\":{\"type\":\"boolean\"},\"group\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"},\"forceConfirm\":{\"type\":\"string\"},\"confirm\":{\"type\":\"string\"}},\"required\":[\"x\",\"z\"]}",
+                a => Plans.GuardPublic(a, Wec, true), Plans.WriteFlag);
         }
 
         // ------------------------------------------------------------------ the compilers
@@ -284,6 +287,84 @@ namespace HubnerExt
 
             var prefab = TerrainTools.Prefab(op.Prefab); if (prefab == null) return ToolOutput.Err("the op prefab " + op.Prefab + " is not available");
             return Apply(prefab, strokes, zones, group, "level " + x0 + "," + z0 + ".." + x1 + "," + z1 + " to " + U.N(target), head, () => ",\"settle\":\"the heightmap rebuilds over the next second or two: read it back with terrain_grid then\"");
+        }
+
+        // ------------------------------------------------------------------ terrain_wec
+        /// <summary>Null when the console's `terrain` command is WorldEditCommands' own; else why not. The command table is a game dictionary any mod can add to, so the assembly of its handler is checked.</summary>
+        static string WecProblem()
+        {
+            var f = typeof(Terminal).GetField("commands", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+            var d = f != null ? f.GetValue(null) as System.Collections.IDictionary : null; var cc = d != null && d.Contains("terrain") ? d["terrain"] : null;
+            if (cc == null) return "the console has no terrain command (World Edit Commands is not installed here)";
+            var seen = new List<string>();
+            if (WecDelegate(cc, 0, seen)) return null;
+            return seen.Count == 0 ? "the console's terrain command has no handler this tool can identify" : "the console's terrain command is not WorldEditCommands' (handlers from " + string.Join(", ", seen.Distinct().ToArray()) + ")";
+        }
+
+        /// <summary>True when a delegate held (directly or inside a wrapper's closure, up to three levels) by the object was written in WorldEditCommands. ServerDevcommands' Helper.Command wraps the mod's own handler in a lambda.</summary>
+        static bool WecDelegate(object o, int depth, List<string> seen)
+        {
+            if (o == null || depth > 3) return false;
+            foreach (var fi in o.GetType().GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public))
+            {
+                var del = fi.GetValue(o) as Delegate; if (del == null) continue;
+                if (del.Method.DeclaringType != null) { var asm = del.Method.DeclaringType.Assembly.GetName().Name; seen.Add(asm); if (asm == "WorldEditCommands") return true; }
+                if (WecDelegate(del.Target, depth + 1, seen)) return true;
+            }
+            return false;
+        }
+
+        static ToolOutput Wec(Dictionary<string, object> a)
+        {
+            if (!Zdos.Ready || ZNetScene.instance == null) return ToolOutput.Err("world not ready");
+            var problem = WecProblem(); if (problem != null) return ToolOutput.Err(problem);
+            if (!U.Has(a, "x") || !U.Has(a, "z")) return ToolOutput.Err("x and z required");
+            var cx = U.D(a, "x", 0); var cz = U.D(a, "z", 0); var circle = U.Has(a, "radius");
+            Func<string, double?> num = k => U.Has(a, k) ? U.D(a, k, 0) : (double?)null;
+            var built = WecLine.Build(cx, cz, num("radius"), num("width"), num("depth"), num("level"), num("raise"), McpJson.GetStr(a, "paint"), U.Has(a, "smooth") ? U.D(a, "smooth", 0) : 0);
+            if (built.Error != null) return ToolOutput.Err(built.Error);
+            var line = built.Line; var hx = built.HalfX; var hz = built.HalfZ; var heightOp = built.HeightOp; var rad = hx;
+            var dry = McpJson.GetBool(a, "dry", false); var group = McpJson.GetStr(a, "group") ?? "terrain_wec";
+            var forced = McpJson.GetBool(a, "force", false) && McpJson.GetStr(a, "forceConfirm") == Plans.ForceConfirm;
+            if (McpJson.GetBool(a, "force", false) && !forced) return ToolOutput.Err("force needs forceConfirm:'" + Plans.ForceConfirm + "'");
+
+            var reach = 2.0; double x0 = cx - hx, z0 = cz - hz, x1 = cx + hx, z1 = cz + hz;
+            var pts = circle ? StrokePlan.Disc(cx, cz, rad, 4, MaxStrokes + 1) : StrokePlan.Box(x0, z0, x1, z1, 4, MaxStrokes + 1);
+            if (pts.Count > MaxStrokes) return ToolOutput.Err("the area is too large to check");
+            var plan = Strokes(pts, reach, forced);
+            if (plan.Unloaded > 0) return ToolOutput.Err(plan.Unloaded + " sample points have no loaded heightmap: stand near the area (client) or add a virtual peer (server) and repeat");
+            if (plan.Warded + plan.NoBuild > 0) return ToolOutput.Err("refused: " + string.Join("; ", plan.Examples.ToArray()));
+            int pieces = 0; string example = null;
+            if (heightOp)
+                foreach (var z in Zdos.InBox((float)(x0 - reach), (float)(z0 - reach), (float)(x1 + reach), (float)(z1 + reach)))
+                {
+                    if (!Neighbours.IsPiece(z.GetPrefab())) continue;
+                    pieces++; if (example == null) example = Zdos.NameOf(z.GetPrefab()) + " at " + U.V(z.GetPosition());
+                }
+            if (pieces > 0 && !McpJson.GetBool(a, "allowPieces", false)) return ToolOutput.Err(pieces + " built pieces stand on or near the area (" + example + "): they would float or sink. Move them or pass allowPieces:true");
+            var zones = StrokePlan.Zones(x0, z0, x1, z1, reach + 4);
+            var head = "\"command\":" + U.S(line) + ",\"zones\":" + zones.Count + ",\"piecesNear\":" + pieces;
+            if (dry) return U.Json("{\"dry\":true," + head + "}");
+
+            var bridge = typeof(ToolRegistry).Assembly.GetType("ValheimMCP.ConsoleBridge");
+            var run = bridge != null ? bridge.GetMethod("Run", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic) : null;
+            if (run == null) return ToolOutput.Err("the core plugin has no ConsoleBridge.Run: update the core plugin");
+            var tag = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + (Journal.Entries.Count + 1);
+            var snap = Snapshot(zones, tag); var before = new Dictionary<string, TcData>();
+            foreach (var zn in zones) { var z = FindCompiler(zn[0], zn[1]); var b = z != null ? z.GetByteArray("TCData") : null; before[Key(zn[0], zn[1])] = b != null ? TryDecode(b) : TcData.Empty(); }
+            Journal.Add(new JEntry { Kind = "terrain", Id = "", Prefab = "_TerrainCompiler", Pos = new Vector3((float)cx, 0f, (float)cz), Rot = Quaternion.identity, Group = group, Note = line, Strings = snap });
+            var res = run.Invoke(null, new object[] { line });
+            var rt = res.GetType(); var ok = (bool)rt.GetField("Ok").GetValue(res); var runError = rt.GetField("Error").GetValue(res) as string;
+            var output = new List<string>(); var lines = rt.GetField("Output").GetValue(res) as System.Collections.IEnumerable; if (lines != null) foreach (var l in lines) output.Add(Convert.ToString(l, CultureInfo.InvariantCulture));
+            int hc = 0, pc = 0; double mx = 0; var changed = 0;
+            foreach (var zn in zones)
+            {
+                var z = FindCompiler(zn[0], zn[1]); var b = z != null ? z.GetByteArray("TCData") : null; var after = b != null ? TryDecode(b) : null; var was = before[Key(zn[0], zn[1])];
+                if (after == null || was == null) continue;
+                int h, pa; double d; after.Diff(was, out h, out pa, out d); hc += h; pc += pa; mx = Math.Max(mx, d); if (after.Operations != was.Operations) changed++;
+            }
+            if (!ok) return ToolOutput.Err("the command was not run: " + runError);
+            return U.Json("{\"dry\":false," + head + ",\"heightChanged\":" + hc + ",\"paintChanged\":" + pc + ",\"maxHeightChange\":" + U.N(Math.Round(mx, 3)) + ",\"zonesChanged\":" + changed + ",\"consoleOutput\":[" + string.Join(",", output.Select(o => U.S(o)).ToArray()) + "],\"group\":" + U.S(group) + ",\"undo\":\"undo_group group=" + group + " (or undo)\"}");
         }
 
         static TcData TryDecode(byte[] compressed)

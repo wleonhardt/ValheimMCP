@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Hubner fork
 
 ### Terrain editing (0.15.0 extension, live-tested on the client)
-- New write tools `terrain_paint` (cultivated, paved or dirt over a disc or box) and `terrain_level` (a rectangular pad to a target height, on the stroke lattice `level_check` plans). Both instantiate the game's own registered terrain ops, so the game's maths, ownership and replication apply. Neither writes height or paint by hand.
+- New write tools `terrain_paint` (cultivated, paved or dirt over a disc or box), `terrain_wec` (see below) and `terrain_level` (a rectangular pad to a target height, on the stroke lattice `level_check` plans). Both instantiate the game's own registered terrain ops, so the game's maths, ownership and replication apply. Neither writes height or paint by hand.
 - Before a paint the compressed terrain data of every zone it can reach is saved to `hubner-ext/terrain/` and a journal entry of kind `terrain` is written; `undo` / `undo_group` put the bytes back (live: heights and paint restored exactly). `terrain_level` has to use the older level prefabs (`digg`, `digg_v2`), which leave persistent objects instead of terrain data: their positions are journaled and undo destroys them (live: a 9 x 9 pad came out exactly on target and undo restored the heights). Pure codec and stroke planner: `ext/TerrainData.cs`, unit-tested.
 - Refusals: an enabled guard stone's area, a no-build location, no loaded heightmap, more than 300 strokes, a radius or pad over 40 m, a level target the 8 m limit cannot reach, and (for `terrain_level`) built pieces or an older terrain modifier object on the pad (pieces unless `allowPieces`).
-- The design rule "no terrain editing" is replaced by decision 0006. `plans/research/2026-10-terrain-console.md` analyses the World Edit Commands `terrain` command (option C); nothing there is built.
+- `terrain_wec`: level, raise or paint a circle or rectangle through the World Edit Commands `terrain` console command, from a line the tool builds from validated numbers. The handler must come from the `WorldEditCommands` assembly, `commands.allow` still applies (the line runs through the core plugin's `ConsoleBridge.Run`), and `reset`, `void`, `slope`, `min`, `max` and `chance` are not offered. It writes the terrain data, so the same snapshot undo covers it. Live: an 8 x 8 m rectangle levelled exactly and undo restored the sampled heights.
+- The design rule "no terrain editing" is replaced by decision 0006; analysis of the command in `plans/research/2026-10-terrain-console.md`.
+- README: tool count corrected to about 140 and the tool table now lists the base-keeping, crafting, creature, terrain and testing tools.
 
 ### Cover model and base-keeping readers (0.14.0 extension, live-tested)
 Ported from the decompiled game and unit-tested; none of it has run in the game yet.

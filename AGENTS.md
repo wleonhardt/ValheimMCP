@@ -44,7 +44,7 @@ Read, in this order: `plans/README.md`, `plans/next-up.md`, `plans/open-question
 
 ## Project overview
 
-Fork of `myrcutio/ValheimMCP`: a BepInEx 5 plugin that exposes a loopback HTTP/MCP endpoint for Valheim. The core (`src/ValheimMCP`) runs console commands, renders views and tails the log. A hot-reloadable extension (`ext/`, loaded from `BepInEx/hubner-ext/`) adds about 90 tools for reading and building a world, in a client build and a dedicated-server build. `python/` holds a client library.
+Fork of `myrcutio/ValheimMCP`: a BepInEx 5 plugin that exposes a loopback HTTP/MCP endpoint for Valheim. The core (`src/ValheimMCP`) runs console commands, renders views and tails the log. A hot-reloadable extension (`ext/`, loaded from `BepInEx/hubner-ext/`) adds about 140 tools for reading and building a world, in a client build and a dedicated-server build. `python/` holds a client library.
 
 Stack: C# (net472, LangVersion 9, Unity Mono, Harmony), Python 3, xunit tests on net10.0.
 
