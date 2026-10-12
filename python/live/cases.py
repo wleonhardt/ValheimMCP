@@ -67,7 +67,7 @@ def _has_prefab(c, name):
 
 def _ground(c, x, z):
     t = c.tool('terrain_info', x=x, z=z)
-    return t.get('groundY', t.get('y', t.get('height'))) if isinstance(t, dict) else None
+    return t.get('ground', t.get('groundY', t.get('y', t.get('height')))) if isinstance(t, dict) else None
 
 
 def tower_pre(ctx):
@@ -309,7 +309,7 @@ def plant_case(ctx):
     near = c.tool('plant_check', items=[{'prefab': 'sapling_carrot', 'x': x, 'z': z, 'key': 'a'}, {'prefab': 'sapling_carrot', 'x': x + 0.2, 'z': z, 'key': 'b'}])
     if first != 'NoSpace': ctx.check('two carrots 3 m apart do not block each other', 'NoSpace' not in {p['status'] for p in far['plants']}, far['plants'])
     ctx.check('two carrots 0.2 m apart block each other', {p['status'] for p in near['plants']} == {'NoSpace'}, near['plants'])
-    ctx.check('a prefab that is not a plant is an error row, not a guess', 'is not a plant' in json.dumps(c.tool('plant_check', items=[{'prefab': 'wood_wall', 'x': x, 'z': z}, {'prefab': 'sapling_carrot', 'x': x, 'z': z}])['errors']))
+    ctx.check('a prefab that is not a plant is an error row, not a guess', 'is not a plant' in json.dumps(c.tool('plant_check', items=[{'prefab': 'woodwall', 'x': x, 'z': z}, {'prefab': 'sapling_carrot', 'x': x, 'z': z}])['errors']))
 
 
 def farm_case(ctx):
@@ -395,10 +395,10 @@ def biome_threats_case(ctx):
 
 def plan_materials_case(ctx):
     c = ctx.client('any')
-    if not _has_prefab(c, 'wood_wall'): raise Skip('prefab wood_wall not in this game')
-    one = c.tool('plan_materials', items=[{'prefab': 'wood_wall', 'x': 0, 'y': 0, 'z': 0}])
-    three = c.tool('plan_materials', items=[{'prefab': 'wood_wall', 'x': i * 2, 'y': 0, 'z': 0} for i in range(3)])
-    if not one['materials']: raise Skip('wood_wall is free in this world (NoBuildCost)')
+    if not _has_prefab(c, 'woodwall'): raise Skip('prefab woodwall not in this game')
+    one = c.tool('plan_materials', items=[{'prefab': 'woodwall', 'x': 0, 'y': 0, 'z': 0}])
+    three = c.tool('plan_materials', items=[{'prefab': 'woodwall', 'x': i * 2, 'y': 0, 'z': 0} for i in range(3)])
+    if not one['materials']: raise Skip('woodwall is free in this world (NoBuildCost)')
     ctx.check('three walls cost three times one', all(three['materials'][k] == 3 * v for k, v in one['materials'].items()), (one['materials'], three['materials']))
     ctx.check('an unknown prefab is listed, not guessed', c.tool('plan_materials', items=[{'prefab': 'no_such_piece', 'x': 0, 'y': 0, 'z': 0}])['unknownPrefabs'] == ['no_such_piece'])
 

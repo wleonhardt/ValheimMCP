@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Hubner fork
 
-### Cover model and base-keeping readers (0.14.0 extension)
+### Cover model and base-keeping readers (0.14.0 extension, live-tested)
 Ported from the decompiled game and unit-tested; none of it has run in the game yet.
 - `plan_check` judges cover: a bed (roof and 80% cover at its spawn point), a roofed crafting station (70%), a smelter (a roof), a fermenter barrel (roof and 70%), and a beehive (under its prefab's m_maxCover, 60% on piece_beehive). It is a model of the game's 17 cover rays and its roof cast on the pieces' boxes: near the limit it can be a little off, so a close miss is a warning. Rules `bed-cover`, `station-cover`, `smelter-roof`, `fermenter-cover`, `beehive-cover`.
+- Checked live: the cover model matches the game's `bed_check` to 0.004 in the open and 0.06 on 26 indoor beds; `plan_check` also returns `covers` (the model's cover and roof per bed, station, smelter, barrel and hive).
+- Fixes found live: the walker's portal check only reacts to the portal's teleport trigger; the client's `modify` journals where the piece will stand (an untagged piece can be undone after a restart); `level_check` reads the terrain ops from `ObjectDB`.
 - New readers, all from the ZDO table and the prefabs, so they work on the dedicated server: `net_peers` (ping, quality, send queue), `active_area` (is a place simulated), `producers` (barrels, hives, sap collectors), `loot_near` (floor items and the one-hour despawn), `harvest_near` (pickables and their respawn), `resource_nodes` (mine rocks, trees, logs: what is left and which tool tier works), `spawners_near`, `wear_risk` (rain, ash, wrong biome, roof state), `absence_forecast` (what fires, smelters, barrels, hives, pickables and floor items do while nobody is there).
 
 ### Decompile review (0.13.0 extension)

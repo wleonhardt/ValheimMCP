@@ -595,7 +595,7 @@ namespace HubnerExt
                     if (!WorldBounds.InWorld(pos.x, pos.y, pos.z)) { errs.Add(id + ": position not finite or outside the world"); continue; }
                     nv.ClaimOwnership();
                     var t = nv.transform;
-                    Journal.Add(new JEntry { Kind = "modify", Id = id, Prefab = prefabName, Pos = t.position, Rot = t.rotation, Scale = t.localScale, Text = z.GetString("text", ""), Tag = z.GetString("tag", ""), Plan = z.GetString(Plans.PlanHash, ""), Key = z.GetString(Plans.ItemHash, ""), Creator = z.GetLong("creator", 0L) });
+                    Journal.Add(new JEntry { Kind = "modify", Id = id, Prefab = prefabName, Pos = t.position, Rot = t.rotation, Scale = t.localScale, Text = z.GetString("text", ""), Tag = z.GetString("tag", ""), Plan = z.GetString(Plans.PlanHash, ""), Key = z.GetString(Plans.ItemHash, ""), Creator = z.GetLong("creator", 0L), HasAfter = true, After = pos });        // where it will stand: lets a later run find an untagged object
                     var rot = (U.Has(e, "yaw") || U.Has(e, "rot")) ? RotOf(e) : t.rotation;
                     t.position = pos; t.rotation = rot; z.SetPosition(pos); z.SetRotation(rot);
                     var scale = McpJson.Get(e, "scale", 0);

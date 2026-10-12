@@ -469,7 +469,7 @@ namespace HubnerExt
             {
                 foreach (var c in Physics.OverlapSphere(pos + dir * 1.8f + Vector3.up * 0.5f, 1.3f, ~0, QueryTriggerInteraction.Collide))
                 {
-                    if (!c.isTrigger) continue;
+                    if (!c.isTrigger || c.GetComponent<TeleportWorldTrigger>() == null) continue;           // only the trigger that teleports (TeleportWorldTrigger.OnTriggerEnter): a portal has bigger ones for its glow and sound
                     var tw = c.GetComponentInParent<TeleportWorld>(); if (tw == null) continue;
                     var to = tw.transform.position - pos; to.y = 0f;
                     if (to.sqrMagnitude > 0.01f && Vector3.Dot(dir, to.normalized) > 0.3f) return tw;

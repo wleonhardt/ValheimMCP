@@ -87,7 +87,7 @@ namespace HubnerExt
         public const double Reach = 32;     // rays are 30 m long: nothing farther away can matter
 
         /// <summary>Beds, roofed stations and smelters among the planned pieces, judged against everything within reach (planned and already built).</summary>
-        public static List<PlanProblem> Check(IList<PlacedPiece> pieces, Func<double, double, double> ground)
+        public static List<PlanProblem> Check(IList<PlacedPiece> pieces, Func<double, double, double> ground, IList<string> measured = null)
         {
             var res = new List<PlanProblem>();
             foreach (var p in pieces)
@@ -104,6 +104,7 @@ namespace HubnerExt
                             foreach (var b in o.BoxesOf(new[] { c })) solids.Add(new CoverSolid { Box = b, Leaky = c.Leaky });
                     }
                     var cover = CoverModel.At(point, solids, ground);
+                    if (measured != null) measured.Add(p.Id + "|" + cp.Kind + "|" + Math.Round(cover.Percent, 3).ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + (cover.UnderRoof ? "1" : "0"));
                     var bad = CoverModel.Verdict(cp.Kind, cover, cp.MinCover, cp.MaxCover);
                     if (bad == null) continue;
                     var near = cp.Kind == "beehive" ? cover.Percent < cp.MaxCover + 0.1 : cp.MinCover > 0 && cover.UnderRoof && cover.Percent >= cp.MinCover - 0.1;

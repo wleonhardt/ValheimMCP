@@ -27,10 +27,13 @@ namespace HubnerExt
             if (_ops != null || ZNetScene.instance == null) return _ops ?? new List<Op>();
             var f = typeof(ZNetScene).GetField("m_namedPrefabs", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
             var dict = f != null ? f.GetValue(ZNetScene.instance) as Dictionary<int, GameObject> : null; if (dict == null) return new List<Op>();
-            var list = new List<Op>();
-            foreach (var go in dict.Values)
+            var list = new List<Op>(); var seen = new HashSet<string>();
+            // the terrain tools' prefabs: current games keep them in ObjectDB.m_terrainOps (they are not in ZNetScene's table), older ones in the scene table
+            var sources = new List<GameObject>(dict.Values);
+            if (ObjectDB.instance != null) foreach (var t in ObjectDB.instance.m_terrainOps) if (t != null) sources.Add(t.gameObject);
+            foreach (var go in sources)
             {
-                if (go == null) continue; var top = go.GetComponent<TerrainOp>(); if (top == null || top.m_settings == null) continue; var s = top.m_settings;
+                if (go == null || !seen.Add(go.name)) continue; var top = go.GetComponent<TerrainOp>(); if (top == null || top.m_settings == null) continue; var s = top.m_settings;
                 if (!s.m_level && !s.m_raise && !s.m_smooth) continue;
                 list.Add(new Op { Prefab = go.name, Level = s.m_level, Raise = s.m_raise, Smooth = s.m_smooth, Square = s.m_square, LevelRadius = s.m_levelRadius, RaiseRadius = s.m_raiseRadius, RaiseDelta = s.m_raiseDelta, RaisePower = s.m_raisePower, SmoothRadius = s.m_smoothRadius, SmoothPower = s.m_smoothPower });
             }
