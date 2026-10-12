@@ -35,6 +35,6 @@ Why it is worth building: `terrain_level` (decision 0006) has to use the older `
 
 ## Open
 
-- Whether WEC is installed on the dedicated server; until known the tool is checked on the client only.
+- WEC is not installed on the dedicated server (its console has no `terrain` command), so the tool is client-only; on the server it answers that the command is missing.
 - Whether the command needs cheats (`devcommands`) enabled: it ran on the sandbox client with the existing session state, `consoleOutput` was empty.
 - Pieces and wards are checked by this tool, not by the command, and the paint list excludes the lava colours.
