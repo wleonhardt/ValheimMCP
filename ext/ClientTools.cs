@@ -409,8 +409,8 @@ namespace HubnerExt
             var pts = McpJson.GetList(a, "points");
             if (pts == null || pts.Count < 2) return ToolOutput.Err("need >= 2 points");
             var radius = (float)U.D(a, "radius", WalkFacts.CapsuleRadius); var height = (float)U.D(a, "height", WalkFacts.CapsuleHeight);
-            var stepH = (float)U.D(a, "stepHeight", WalkFacts.StepUp);
-            var maxSlope = (float)U.D(a, "maxSlopeDeg", McpJson.GetBool(a, "run", false) ? WalkFacts.RunClimbMaxDeg : WalkFacts.SlideDeg);       // a walker slips on terrain over 38 degrees; at a run banks up to 60 are climbed var wantTrace = McpJson.GetBool(a, "trace", false); var trace = new List<string>();
+            var stepH = (float)U.D(a, "stepHeight", McpJson.GetBool(a, "run", false) ? WalkFacts.RunStepUp : WalkFacts.StepUp);
+            var maxSlope = (float)U.D(a, "maxSlopeDeg", McpJson.GetBool(a, "run", false) ? WalkFacts.RunClimbMaxDeg : WalkFacts.SlideDeg);       // a walker slips on terrain over 38 degrees; at a run banks up to 65 are climbed var wantTrace = McpJson.GetBool(a, "trace", false); var trace = new List<string>();
             var wantTrace = McpJson.GetBool(a, "trace", false); var trace = new List<string>();
             var mask = Mask();
             if (mask == 0) return ToolOutput.Err("none of the expected physics layers exist (mask==0): walk_check would pass everything; refusing");

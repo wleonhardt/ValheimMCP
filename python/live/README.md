@@ -7,6 +7,7 @@ write scratch objects, so they are not part of CI. The offline tests are in `../
 |---|---|
 | `env_test.py` | sandbox client (time/weather override round trip) |
 | `plan_extras_test.py` | server twin + `HUBNER_SERVER_SSH`, `HUBNER_GATE_FLAG`; optional `HUBNER_TEST_X/Z/Y` (a quiet spot) |
+| `walk_probe.py [lip|hop|slope|all]` | sandbox client; `HUBNER_TEST_X/Z`: measures the lip, hop and slope limits of the character on floating platforms (decision 0005) |
 | `teleport_stress.py` | sandbox client; `HUBNER_TEST_SPOTS='[[x, z, y|null], ...]'` |
 | `chat_watch.py [minutes]` | any endpoint that has `chat_tail` |
 

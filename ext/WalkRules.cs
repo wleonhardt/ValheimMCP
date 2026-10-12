@@ -8,10 +8,11 @@ namespace HubnerExt
     internal static class WalkFacts
     {
         public const float CapsuleRadius = 0.49f, CapsuleHeight = 1.85f;     // the player's character controller
-        public const float StepUp = 0.45f;                                    // lips up to this are walked over (an assumption taken from another harness: nobody has measured the controller's real step limit)
+        public const float StepUp = 0.37f;                                    // lips up to this are walked over; 0.38 stops a walking character (measured live 2026-10-12 with python/live/walk_probe.py; the player is a rigidbody capsule with no step offset)
+        public const float RunStepUp = 0.5f;                                  // a running character climbs a lip of 0.5 m, not 0.6 (same probe)
         public const float SlideDeg = 38f;                                    // a walker slips on terrain steeper than this unless running and moving
-        public const float RunClimbMaxDeg = 60f;                              // measured: banks up to 57.5 degrees are run up; over this it is a wall
-        public const float HopMin = 0.40f, HopMax = 1.2f;                     // a jump clears a top this high (apex 2.21 m measured on flat ground; 1.2 m is a planning figure with margin, and it falls on a slope)
+        public const float RunClimbMaxDeg = 65f;                              // measured with the probe: a running character climbs a 65 degree slope, not 70; a walking one 37, not 38
+        public const float HopMin = 0.38f, HopMax = 1.6f;                     // a hop clears a ledge of 1.7 m from a 5 m run on the flat and fails at 1.8 (probe); 1.6 keeps a margin, and a slope takes some of it
         public const float StandReach = 2.0f;                                 // the goal counts as reached only within this height of it: a stand a storey away is not the goal
         public const float StallSeconds = 2.0f;                               // no progress this long = a stall
         public const float ProgressMetres = 0.2f;                             // progress = the route ahead shrank this much and the feet moved this much
@@ -44,10 +45,10 @@ namespace HubnerExt
         }
 
         /// <param name="encumbered">Character.Jump and CheckRun do nothing while encumbered: a hop or a run-up would only burn stalls</param>
-        public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates, bool encumbered)
+        public static StallAction Pick(int stallsAtSpot, int stallsTotal, float riseAhead, float slopeDeg, bool routeGoesUp, bool inWater, bool hazardAhead, float staminaFrac, bool running, int sideSteps, int reroutes, bool regenerates, bool encumbered, float hopMax = WalkFacts.HopMax)
         {
             if (stallsAtSpot >= WalkFacts.GiveUpStallsAtOneSpot || stallsTotal >= WalkFacts.GiveUpStallsTotal) return StallAction.GiveUp;
-            if (!encumbered && !inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= WalkFacts.HopMax && staminaFrac > 0.15f) return StallAction.Hop;
+            if (!encumbered && !inWater && !hazardAhead && !float.IsNaN(riseAhead) && riseAhead >= WalkFacts.HopMin && riseAhead <= hopMax && staminaFrac > 0.15f) return StallAction.Hop;
             if (!encumbered && routeGoesUp && slopeDeg > WalkFacts.SlideDeg && slopeDeg <= WalkFacts.RunClimbMaxDeg && staminaFrac > WalkFacts.RunMinStamina && !running) return StallAction.RunUp;
             if (staminaFrac < 0.3f) return regenerates ? StallAction.Rest : StallAction.GiveUp;
             if (sideSteps < 2) return StallAction.SideStep;
